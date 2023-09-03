@@ -91,6 +91,8 @@ def main(argv):
     Bit_rate = 0
     MS_SSIM = 0
     total_time = 0
+    encode_time = 0
+    decode_time = 0
     dictory = {}
     if args.checkpoint:  # load from previous checkpoint
         print("Loading", args.checkpoint)
@@ -111,11 +113,14 @@ def main(argv):
                     torch.cuda.synchronize()
                 s = time.time()
                 out_enc = net.compress(x_padded)
+                t = time.time()
                 out_dec = net.decompress(out_enc["strings"], out_enc["shape"])
                 if args.cuda:
                     torch.cuda.synchronize()
                 e = time.time()
                 total_time += (e - s)
+                encode_time += (t - s)
+                decode_time += (e - t)
                 out_dec["x_hat"] = crop(out_dec["x_hat"], padding)
                 num_pixels = x.size(0) * x.size(2) * x.size(3)
                 print(f'Bitrate: {(sum(len(s[0]) for s in out_enc["strings"]) * 8.0 / num_pixels):.3f}bpp')
@@ -153,10 +158,14 @@ def main(argv):
     MS_SSIM = MS_SSIM / count
     Bit_rate = Bit_rate / count
     total_time = total_time / count
+    encode_time = encode_time / count
+    decode_time = decode_time / count
     print(f'average_PSNR: {PSNR:.2f}dB')
     print(f'average_MS-SSIM: {MS_SSIM:.4f}')
     print(f'average_Bit-rate: {Bit_rate:.3f} bpp')
     print(f'average_time: {total_time:.3f} ms')
+    print(f'average_time(encode): {encode_time:.3f} ms')
+    print(f'average_time(decode): {decode_time:.3f} ms')
     
 
 if __name__ == "__main__":
