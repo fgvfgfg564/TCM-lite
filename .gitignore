@@ -73,6 +73,9 @@ instance/
 # Sphinx documentation
 docs/_build/
 
+# VSCode debugger
+launch.json
+
 # PyBuilder
 target/
 
@@ -133,3 +136,6 @@ dmypy.json
 
 # Pretrained model weights
 *.tar
+
+# Contemporary folder
+testcode
