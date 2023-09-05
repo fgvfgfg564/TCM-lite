@@ -1,4 +1,4 @@
-from compressai.entropy_models import EntropyBottleneck, GaussianConditional
+from compressai.entropy_models import EntropyBottleneck, GaussianConditional, EntropyModel
 from compressai.ans import BufferedRansEncoder, RansDecoder
 from compressai.models import CompressionModel
 from compressai.layers import (
@@ -157,7 +157,9 @@ class WMSA(nn.Module):
         trunc_normal_(self.relative_position_params, std=.02)
         self.relative_position_params = torch.nn.Parameter(self.relative_position_params.view(2*window_size-1, 2*window_size-1, self.n_heads).transpose(1,2).transpose(0,1))
 
-    def generate_mask(self, h, w, p, shift):
+        self.relative_embedding = self.get_relative_embedding()
+
+    def generate_mask(self, h: int, w: int, p: int, shift: int):
         """ generating the mask of SW-MSA
         Args:
             shift: shift parameters in CyclicShift.
@@ -173,7 +175,10 @@ class WMSA(nn.Module):
         attn_mask[-1, :, s:, :, :s, :] = True
         attn_mask[:, -1, :, :s, :, s:] = True
         attn_mask[:, -1, :, s:, :, :s] = True
-        attn_mask = rearrange(attn_mask, 'w1 w2 p1 p2 p3 p4 -> 1 1 (w1 w2) (p1 p2) (p3 p4)')
+
+        w1, w2, p1, p2, p3, p4 = attn_mask.shape
+        attn_mask = torch.reshape(attn_mask, [1, 1, w1*w2, p1*p2, p3*p4])
+        # attn_mask = rearrange(attn_mask, 'w1 w2 p1 p2 p3 p4 -> 1 1 (w1 w2) (p1 p2) (p3 p4)')
         return attn_mask
 
     def forward(self, x):
@@ -185,28 +190,59 @@ class WMSA(nn.Module):
             output: tensor shape [b h w c]
         """
         if self.type!='W': x = torch.roll(x, shifts=(-(self.window_size//2), -(self.window_size//2)), dims=(1,2))
-        x = rearrange(x, 'b (w1 p1) (w2 p2) c -> b w1 w2 p1 p2 c', p1=self.window_size, p2=self.window_size)
-        h_windows = x.size(1)
-        w_windows = x.size(2)
-        x = rearrange(x, 'b w1 w2 p1 p2 c -> b (w1 w2) (p1 p2) c', p1=self.window_size, p2=self.window_size)
+
+        b, h, w, c = x.shape
+        p = self.window_size
+        h_windows = h // p
+        w_windows = w // p
+        x = x.reshape([b, h_windows, p, w_windows, p, c])
+        x = x.permute([0, 1, 3, 2, 4, 5])
+        x = x.reshape([b, h_windows * w_windows, p * p, c])
+        # x = rearrange(x, 'b (w1 p1) (w2 p2) c -> b w1 w2 p1 p2 c', p1=self.window_size, p2=self.window_size)
+        # h_windows = x.size(1)
+        # w_windows = x.size(2)
+        # x = rearrange(x, 'b w1 w2 p1 p2 c -> b (w1 w2) (p1 p2) c', p1=self.window_size, p2=self.window_size)
         qkv = self.embedding_layer(x)
-        q, k, v = rearrange(qkv, 'b nw np (threeh c) -> threeh b nw np c', c=self.head_dim).chunk(3, dim=0)
+
+        b, nw, np, nc = qkv.shape
+        c = self.head_dim
+        threeh = nc // c
+        tmp = qkv.reshape([b, nw, np, threeh, c])
+        tmp = tmp.permute(3, 0, 1, 2, 4)
+        q, k, v = tmp.chunk(3, dim=0)
+        # q, k, v = rearrange(qkv, 'b nw np (threeh c) -> threeh b nw np c', c=self.head_dim).chunk(3, dim=0)
         sim = torch.einsum('hbwpc,hbwqc->hbwpq', q, k) * self.scale
-        sim = sim + rearrange(self.relative_embedding(), 'h p q -> h 1 1 p q')
+        tmp = self.relative_embedding.to(sim.device)
+        tmp = tmp.unsqueeze(1)
+        tmp = tmp.unsqueeze(1)
+        sim = sim + tmp
+        # sim = sim + rearrange(self.relative_embedding(), 'h p q -> h 1 1 p q')
         if self.type != 'W':
             attn_mask = self.generate_mask(h_windows, w_windows, self.window_size, shift=self.window_size//2)
             sim = sim.masked_fill_(attn_mask, float("-inf"))
 
         probs = nn.functional.softmax(sim, dim=-1)
         output = torch.einsum('hbwij,hbwjc->hbwic', probs, v)
-        output = rearrange(output, 'h b w p c -> b w p (h c)')
+
+        h, b, w, p, c = output.shape
+        output = output.permute(1, 2, 3, 0, 4)
+        output = output.reshape([b, w, p, h*c])
+        # output = rearrange(output, 'h b w p c -> b w p (h c)')
         output = self.linear(output)
-        output = rearrange(output, 'b (w1 w2) (p1 p2) c -> b (w1 p1) (w2 p2) c', w1=h_windows, p1=self.window_size)
+
+        b, w, p, c = output.shape
+        w1 = h_windows
+        w2 = w_windows
+        p1 = p2 = self.window_size
+        output = output.reshape([b, w1, w2, p1, p2, c])
+        output = output.permute(0, 1, 3, 2, 4, 5)
+        output = output.reshape([b, w1*p1, w2*p2, c])
+        # output = rearrange(output, 'b (w1 w2) (p1 p2) c -> b (w1 p1) (w2 p2) c', w1=h_windows, p1=self.window_size)
 
         if self.type!='W': output = torch.roll(output, shifts=(self.window_size//2, self.window_size//2), dims=(1,2))
         return output
 
-    def relative_embedding(self):
+    def get_relative_embedding(self):
         cord = torch.tensor(np.array([[i, j] for i in range(self.window_size) for j in range(self.window_size)]))
         relation = cord[:, None, :] - cord[None, :, :] + self.window_size -1
         return self.relative_position_params[:, relation[:,:,0].long(), relation[:,:,1].long()]
@@ -256,9 +292,11 @@ class ConvTransBlock(nn.Module):
     def forward(self, x):
         conv_x, trans_x = torch.split(self.conv1_1(x), (self.conv_dim, self.trans_dim), dim=1)
         conv_x = self.conv_block(conv_x) + conv_x
-        trans_x = Rearrange('b c h w -> b h w c')(trans_x)
+        trans_x = trans_x.permute(0, 2, 3, 1)
+        # trans_x = Rearrange('b c h w -> b h w c')(trans_x)
         trans_x = self.trans_block(trans_x)
-        trans_x = Rearrange('b h w c -> b c h w')(trans_x)
+        trans_x = trans_x.permute(0, 3, 1, 2)
+        # trans_x = Rearrange('b h w c -> b c h w')(trans_x)
         res = self.conv1_2(torch.cat((conv_x, trans_x), dim=1))
         x = x + res
         return x
@@ -295,14 +333,18 @@ class SwinBlock(nn.Module):
 
     def forward(self, x):
         resize = False
+        padding_row = 0
+        padding_col = 0
         if (x.size(-1) <= self.window_size) or (x.size(-2) <= self.window_size):
             padding_row = (self.window_size - x.size(-2)) // 2
             padding_col = (self.window_size - x.size(-1)) // 2
             x = F.pad(x, (padding_col, padding_col+1, padding_row, padding_row+1))
-        trans_x = Rearrange('b c h w -> b h w c')(x)
+        trans_x = x.permute(0, 2, 3, 1)
+        # trans_x = Rearrange('b c h w -> b h w c')(x)
         trans_x = self.block_1(trans_x)
         trans_x =  self.block_2(trans_x)
-        trans_x = Rearrange('b h w c -> b c h w')(trans_x)
+        trans_x = trans_x.permute(0, 3, 1, 2)
+        # trans_x = Rearrange('b h w c -> b c h w')(trans_x)
         if resize:
             x = F.pad(x, (-padding_col, -padding_col-1, -padding_row, -padding_row-1))
         return trans_x
@@ -415,6 +457,12 @@ class TCM(CompressionModel):
 
         self.entropy_bottleneck = EntropyBottleneck(192)
         self.gaussian_conditional = GaussianConditional(None)
+
+        # Script all submodules if available
+        # for name, child in self.named_children():
+        #     if not isinstance(child, EntropyModel):
+        #         child = torch.jit.script(child)
+        #         self.__setattr__(name, child)
 
     def update(self, scale_table=None, force=False):
         if scale_table is None:
