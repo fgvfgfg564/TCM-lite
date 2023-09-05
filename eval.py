@@ -115,9 +115,9 @@ def main(argv):
                 out_enc = net.compress(x_padded)
                 t = time.time()
                 out_dec = net.decompress(out_enc["strings"], out_enc["shape"])
+                e = time.time()
                 if args.cuda:
                     torch.cuda.synchronize()
-                e = time.time()
                 total_time += (e - s)
                 encode_time += (t - s)
                 decode_time += (e - t)
@@ -126,6 +126,8 @@ def main(argv):
                 print(f'Bitrate: {(sum(len(s[0]) for s in out_enc["strings"]) * 8.0 / num_pixels):.3f}bpp')
                 print(f'MS-SSIM: {compute_msssim(x, out_dec["x_hat"]):.2f}dB')
                 print(f'PSNR: {compute_psnr(x, out_dec["x_hat"]):.2f}dB')
+                print(f'Enc_time: {(t-s) * 1000:.0f}ms')
+                print(f'Dec_time: {(e-t) * 1000:.0f}ms')
                 Bit_rate += sum(len(s[0]) for s in out_enc["strings"]) * 8.0 / num_pixels
                 PSNR += compute_psnr(x, out_dec["x_hat"])
                 MS_SSIM += compute_msssim(x, out_dec["x_hat"])
