@@ -22,7 +22,6 @@ from timm.models.layers import trunc_normal_, DropPath
 import numpy as np
 import math
 
-
 SCALES_MIN = 0.11
 SCALES_MAX = 256
 SCALES_LEVELS = 64
@@ -157,8 +156,7 @@ class WMSA(nn.Module):
         trunc_normal_(self.relative_position_params, std=.02)
         self.relative_position_params = torch.nn.Parameter(self.relative_position_params.view(2*window_size-1, 2*window_size-1, self.n_heads).transpose(1,2).transpose(0,1))
 
-        self.relative_embedding = self.get_relative_embedding()
-
+    @torch.jit.ignore
     def generate_mask(self, h: int, w: int, p: int, shift: int):
         """ generating the mask of SW-MSA
         Args:
@@ -209,10 +207,15 @@ class WMSA(nn.Module):
         threeh = nc // c
         tmp = qkv.reshape([b, nw, np, threeh, c])
         tmp = tmp.permute(3, 0, 1, 2, 4)
-        q, k, v = tmp.chunk(3, dim=0)
+
+        nh = threeh // 3
+        q = tmp[:nh, ...]
+        k = tmp[nh:2*nh, ...]
+        v = tmp[2*nh:, ...]
+        # q, k, v = torch.chunk(tmp, 3, dim=0)
         # q, k, v = rearrange(qkv, 'b nw np (threeh c) -> threeh b nw np c', c=self.head_dim).chunk(3, dim=0)
         sim = torch.einsum('hbwpc,hbwqc->hbwpq', q, k) * self.scale
-        tmp = self.relative_embedding.to(sim.device)
+        tmp = self.get_relative_embedding()
         tmp = tmp.unsqueeze(1)
         tmp = tmp.unsqueeze(1)
         sim = sim + tmp
@@ -243,7 +246,13 @@ class WMSA(nn.Module):
         return output
 
     def get_relative_embedding(self):
-        cord = torch.tensor(np.array([[i, j] for i in range(self.window_size) for j in range(self.window_size)]))
+        N = self.window_size
+        H = torch.arange(N)
+        cord = torch.meshgrid([H, H])
+        cord = torch.stack(cord, dim=2)
+        cord = torch.reshape(cord, [N*N, 2])
+
+        # cord = torch.tensor(np.array([[i, j] for i in range(self.window_size) for j in range(self.window_size)]))
         relation = cord[:, None, :] - cord[None, :, :] + self.window_size -1
         return self.relative_position_params[:, relation[:,:,0].long(), relation[:,:,1].long()]
 
@@ -457,12 +466,6 @@ class TCM(CompressionModel):
 
         self.entropy_bottleneck = EntropyBottleneck(192)
         self.gaussian_conditional = GaussianConditional(None)
-
-        # Script all submodules if available
-        # for name, child in self.named_children():
-        #     if not isinstance(child, EntropyModel):
-        #         child = torch.jit.script(child)
-        #         self.__setattr__(name, child)
 
     def update(self, scale_table=None, force=False):
         if scale_table is None:
