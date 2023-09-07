@@ -147,7 +147,7 @@ class WMSA(nn.Module):
         self.scale = self.head_dim ** -0.5
         self.n_heads = input_dim//head_dim
         self.window_size = window_size
-        self.type=type
+        self._type=type
         self.embedding_layer = nn.Linear(self.input_dim, 3*self.input_dim, bias=True)
         self.relative_position_params = nn.Parameter(torch.zeros((2 * window_size - 1)*(2 * window_size -1), self.n_heads))
 
@@ -155,29 +155,6 @@ class WMSA(nn.Module):
 
         trunc_normal_(self.relative_position_params, std=.02)
         self.relative_position_params = torch.nn.Parameter(self.relative_position_params.view(2*window_size-1, 2*window_size-1, self.n_heads).transpose(1,2).transpose(0,1))
-
-    @torch.jit.ignore
-    def generate_mask(self, h: int, w: int, p: int, shift: int):
-        """ generating the mask of SW-MSA
-        Args:
-            shift: shift parameters in CyclicShift.
-        Returns:
-            attn_mask: should be (1 1 w p p),
-        """
-        attn_mask = torch.zeros(h, w, p, p, p, p, dtype=torch.bool, device=self.relative_position_params.device)
-        if self.type == 'W':
-            return attn_mask
-
-        s = p - shift
-        attn_mask[-1, :, :s, :, s:, :] = True
-        attn_mask[-1, :, s:, :, :s, :] = True
-        attn_mask[:, -1, :, :s, :, s:] = True
-        attn_mask[:, -1, :, s:, :, :s] = True
-
-        w1, w2, p1, p2, p3, p4 = attn_mask.shape
-        attn_mask = torch.reshape(attn_mask, [1, 1, w1*w2, p1*p2, p3*p4])
-        # attn_mask = rearrange(attn_mask, 'w1 w2 p1 p2 p3 p4 -> 1 1 (w1 w2) (p1 p2) (p3 p4)')
-        return attn_mask
 
     def forward(self, x):
         """ Forward pass of Window Multi-head Self-attention module.
@@ -187,7 +164,7 @@ class WMSA(nn.Module):
         Returns:
             output: tensor shape [b h w c]
         """
-        if self.type!='W': x = torch.roll(x, shifts=(-(self.window_size//2), -(self.window_size//2)), dims=(1,2))
+        if self._type!='W': x = torch.roll(x, shifts=(-(self.window_size//2), -(self.window_size//2)), dims=(1,2))
 
         b, h, w, c = x.shape
         p = self.window_size
@@ -220,9 +197,10 @@ class WMSA(nn.Module):
         tmp = tmp.unsqueeze(1)
         sim = sim + tmp
         # sim = sim + rearrange(self.relative_embedding(), 'h p q -> h 1 1 p q')
-        if self.type != 'W':
-            attn_mask = self.generate_mask(h_windows, w_windows, self.window_size, shift=self.window_size//2)
-            sim = sim.masked_fill_(attn_mask, float("-inf"))
+        # if self._type != 'W':
+        #     attn_mask = self.generate_mask(h_windows, w_windows, self.window_size, shift=self.window_size//2)
+            # sim = sim.masked_fill_(attn_mask, float("-inf"))
+            # sim += attn_mask
 
         probs = nn.functional.softmax(sim, dim=-1)
         output = torch.einsum('hbwij,hbwjc->hbwic', probs, v)
@@ -242,7 +220,7 @@ class WMSA(nn.Module):
         output = output.reshape([b, w1*p1, w2*p2, c])
         # output = rearrange(output, 'b (w1 w2) (p1 p2) c -> b (w1 p1) (w2 p2) c', w1=h_windows, p1=self.window_size)
 
-        if self.type!='W': output = torch.roll(output, shifts=(self.window_size//2, self.window_size//2), dims=(1,2))
+        if self._type!='W': output = torch.roll(output, shifts=(self.window_size//2, self.window_size//2), dims=(1,2))
         return output
 
     def get_relative_embedding(self):
@@ -264,9 +242,9 @@ class Block(nn.Module):
         self.input_dim = input_dim
         self.output_dim = output_dim
         assert type in ['W', 'SW']
-        self.type = type
+        self._type = type
         self.ln1 = nn.LayerNorm(input_dim)
-        self.msa = WMSA(input_dim, input_dim, head_dim, window_size, self.type)
+        self.msa = WMSA(input_dim, input_dim, head_dim, window_size, self._type)
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.ln2 = nn.LayerNorm(input_dim)
         self.mlp = nn.Sequential(
@@ -290,9 +268,9 @@ class ConvTransBlock(nn.Module):
         self.head_dim = head_dim
         self.window_size = window_size
         self.drop_path = drop_path
-        self.type = type
-        assert self.type in ['W', 'SW']
-        self.trans_block = Block(self.trans_dim, self.trans_dim, self.head_dim, self.window_size, self.drop_path, self.type)
+        self._type = type
+        assert self._type in ['W', 'SW']
+        self.trans_block = Block(self.trans_dim, self.trans_dim, self.head_dim, self.window_size, self.drop_path, self._type)
         self.conv1_1 = nn.Conv2d(self.conv_dim+self.trans_dim, self.conv_dim+self.trans_dim, 1, 1, 0, bias=True)
         self.conv1_2 = nn.Conv2d(self.conv_dim+self.trans_dim, self.conv_dim+self.trans_dim, 1, 1, 0, bias=True)
 

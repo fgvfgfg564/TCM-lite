@@ -12,6 +12,7 @@ import time
 import warnings
 from pytorch_msssim import ms_ssim
 from PIL import Image
+import torch_tensorrt
 warnings.filterwarnings("ignore")
 
 print(torch.cuda.is_available())
@@ -83,9 +84,11 @@ def main(argv):
         device = 'cuda:0'
     else:
         device = 'cpu'
+    load_time_start = time.time()
     net = TCM(config=[2,2,2,2,2,2], head_dim=[8, 16, 32, 32, 16, 8], drop_path_rate=0.0, N=128, M=320)
     net = net.to(device)
     net.eval()
+    load_time_end = time.time()
     count = 0
     PSNR = 0
     Bit_rate = 0
@@ -100,6 +103,8 @@ def main(argv):
         for k, v in checkpoint["state_dict"].items():
             dictory[k.replace("module.", "")] = v
         net.load_state_dict(dictory)
+    print(f"Load time: {load_time_end - load_time_start:.2f}s")
+
     if args.real:
         net.update()
         for img_name in img_list:
