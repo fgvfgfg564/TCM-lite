@@ -27,6 +27,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+backup
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -71,6 +72,9 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+
+# VSCode debugger
+launch.json
 
 # PyBuilder
 target/

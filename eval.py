@@ -12,6 +12,7 @@ import time
 import warnings
 from pytorch_msssim import ms_ssim
 from PIL import Image
+import torch_tensorrt
 warnings.filterwarnings("ignore")
 
 print(torch.cuda.is_available())
@@ -83,14 +84,18 @@ def main(argv):
         device = 'cuda:0'
     else:
         device = 'cpu'
+    load_time_start = time.time()
     net = TCM(config=[2,2,2,2,2,2], head_dim=[8, 16, 32, 32, 16, 8], drop_path_rate=0.0, N=128, M=320)
     net = net.to(device)
     net.eval()
+    load_time_end = time.time()
     count = 0
     PSNR = 0
     Bit_rate = 0
     MS_SSIM = 0
     total_time = 0
+    encode_time = 0
+    decode_time = 0
     dictory = {}
     if args.checkpoint:  # load from previous checkpoint
         print("Loading", args.checkpoint)
@@ -98,6 +103,8 @@ def main(argv):
         for k, v in checkpoint["state_dict"].items():
             dictory[k.replace("module.", "")] = v
         net.load_state_dict(dictory)
+    print(f"Load time: {load_time_end - load_time_start:.2f}s")
+
     if args.real:
         net.update()
         for img_name in img_list:
@@ -111,16 +118,23 @@ def main(argv):
                     torch.cuda.synchronize()
                 s = time.time()
                 out_enc = net.compress(x_padded)
+                t = time.time()
                 out_dec = net.decompress(out_enc["strings"], out_enc["shape"])
                 if args.cuda:
                     torch.cuda.synchronize()
                 e = time.time()
                 total_time += (e - s)
+                encode_time += (t - s)
+                decode_time += (e - t)
                 out_dec["x_hat"] = crop(out_dec["x_hat"], padding)
                 num_pixels = x.size(0) * x.size(2) * x.size(3)
                 print(f'Bitrate: {(sum(len(s[0]) for s in out_enc["strings"]) * 8.0 / num_pixels):.3f}bpp')
+                mse = torch.mean((x - out_dec["x_hat"])**2).item()
+                print(f'MSE: {mse:.2f}dB')
                 print(f'MS-SSIM: {compute_msssim(x, out_dec["x_hat"]):.2f}dB')
                 print(f'PSNR: {compute_psnr(x, out_dec["x_hat"]):.2f}dB')
+                print(f'Enc_time: {(t-s) * 1000:.0f}ms')
+                print(f'Dec_time: {(e-t) * 1000:.0f}ms')
                 Bit_rate += sum(len(s[0]) for s in out_enc["strings"]) * 8.0 / num_pixels
                 PSNR += compute_psnr(x, out_dec["x_hat"])
                 MS_SSIM += compute_msssim(x, out_dec["x_hat"])
@@ -153,10 +167,14 @@ def main(argv):
     MS_SSIM = MS_SSIM / count
     Bit_rate = Bit_rate / count
     total_time = total_time / count
+    encode_time = encode_time / count
+    decode_time = decode_time / count
     print(f'average_PSNR: {PSNR:.2f}dB')
     print(f'average_MS-SSIM: {MS_SSIM:.4f}')
     print(f'average_Bit-rate: {Bit_rate:.3f} bpp')
     print(f'average_time: {total_time:.3f} ms')
+    print(f'average_time(encode): {encode_time:.3f} ms')
+    print(f'average_time(decode): {decode_time:.3f} ms')
     
 
 if __name__ == "__main__":
