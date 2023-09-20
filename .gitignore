@@ -137,3 +137,5 @@ dmypy.json
 testcode/
 *.pth.tar
 launch.json
+
+*.ts
