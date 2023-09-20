@@ -6,24 +6,39 @@ from .registry import VIRTUALIZE_TENSORRT_MODULES
 from .modules import TorchTensorRTPlaceholder
 
 def compile(model: torch.nn.Module, output_folder):
+    model.eval()
     new_state_dict = {}
     for name, child in model.named_children():
         if hasattr(child, "tensorrt_compilable") and child.tensorrt_compilable:
-            print(f"Compiling module: {name} into TensorRT TorchScript")
             input_shape = child.input_shape
+            print(f"Compiling module: {name} into TensorRT TorchScript; input_shape={input_shape}")
+            print(child)
             example_inputs = torch.randn(input_shape)
             scripted_model = torch.jit.script(child, example_inputs=[example_inputs])
-            trt_model = torch_tensorrt.ts.compile(scripted_model, 
-                inputs= [torch_tensorrt.Input(input_shape, dtype=torch.half)],
-                enabled_precisions= {torch.float, torch.half},
-                debug=True,
-                require_full_compilation=True,
-            )
+            print(scripted_model.code)
+            with torch_tensorrt.logging.info():
+                trt_model = torch_tensorrt.ts.compile(scripted_model, 
+                    inputs= [torch_tensorrt.Input(input_shape, dtype=torch.half)],
+                    enabled_precisions= {torch.float, torch.half},
+                    debug=True,
+                    require_full_compilation=True,
+                )
+            torch.jit.save(trt_model, f"g_s_6.ts")
             torch.jit.save(trt_model, os.path.join(output_folder, name+".ts"))
         else:
             child_state_dict = child.state_dict(prefix=name+".")
             new_state_dict.update(child_state_dict)
     torch.save(new_state_dict, os.path.join(output_folder, "state_dict.pth.tar"))
+
+
+class InitTRTModelWithPlaceholder:
+    def __enter__(self):
+        global VIRTUALIZE_TENSORRT_MODULES
+        VIRTUALIZE_TENSORRT_MODULES = True
+    
+    def __exit__(self, *args, **kwargs):
+        global VIRTUALIZE_TENSORRT_MODULES
+        VIRTUALIZE_TENSORRT_MODULES = False
 
 def load_weights(model: torch.nn.Module, state_dict_folder):
     """
