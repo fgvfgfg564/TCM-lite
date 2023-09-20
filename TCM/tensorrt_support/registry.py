@@ -14,8 +14,17 @@ def tensorrt_compiled_module(cls):
     """
     Any class wrapped by this decorator must have 'input_shape' property
     """
-    if VIRTUALIZE_TENSORRT_MODULES:
-        return TorchTensorRTPlaceholder
-    else:
-        setattr(cls, 'tensorrt_compilable', True)
-        return cls
+
+    old_init_ = cls.__init__
+
+    def new_init_(self, *args, **kwargs):
+        print(VIRTUALIZE_TENSORRT_MODULES)
+        if VIRTUALIZE_TENSORRT_MODULES:
+            TorchTensorRTPlaceholder.__init__(self, *args, **kwargs)
+            self.__class__ = TorchTensorRTPlaceholder
+        else:
+            old_init_(self, *args, **kwargs)
+            setattr(self, 'tensorrt_compilable', True)
+    
+    cls.__init__ = new_init_
+    return cls
