@@ -68,17 +68,17 @@ def main(argv):
     input_shape = [1, 320, 32, 48]
     benchmark(model, input_shape)
 
-    scripted_model = torch.jit.script(model, example_inputs=[torch.randn(input_shape)])
-    print(scripted_model.code, flush=True)
+    # scripted_model = torch.jit.script(model, example_inputs=[torch.randn(input_shape)])
+    # print(scripted_model.code, flush=True)
 
-    with torch_tensorrt.logging.debug():
-        trt_model = torch_tensorrt.ts.compile(scripted_model, 
-            inputs= [torch_tensorrt.Input(input_shape, dtype=torch.half)],
-            enabled_precisions= {torch.float, torch.half},
-            debug=True,
-            require_full_compilation=True,
-        )
-
+    # with torch_tensorrt.logging.debug():
+    #     trt_model = torch_tensorrt.ts.compile(scripted_model, 
+    #         inputs= [torch_tensorrt.Input(input_shape, dtype=torch.half)],
+    #         enabled_precisions= {torch.float, torch.half},
+    #         debug=True,
+    #         require_full_compilation=True,
+    #     )
+    trt_model = torch.jit.load(f"g_s_6.ts").cuda()
     benchmark(trt_model, input_shape, dtype='fp16')
     torch.jit.save(trt_model, f"g_s_6.ts")
 
