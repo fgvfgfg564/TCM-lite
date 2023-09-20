@@ -1,4 +1,4 @@
-from compressai.entropy_models import EntropyBottleneck, GaussianConditional, EntropyModel
+from compressai.entropy_models import EntropyBottleneck, GaussianConditional
 from compressai.ans import BufferedRansEncoder, RansDecoder
 from compressai.models import CompressionModel
 from compressai.layers import (
@@ -15,7 +15,7 @@ import torch.nn.functional as F
 from torch import Tensor
 import torch
 
-from einops import rearrange 
+from einops import rearrange
 from einops.layers.torch import Rearrange
 
 from timm.models.layers import trunc_normal_, DropPath
@@ -25,15 +25,20 @@ import math
 SCALES_MIN = 0.11
 SCALES_MAX = 256
 SCALES_LEVELS = 64
+
+
 def conv1x1(in_ch: int, out_ch: int, stride: int = 1) -> nn.Module:
     """1x1 convolution."""
     return nn.Conv2d(in_ch, out_ch, kernel_size=1, stride=stride)
 
+
 def get_scale_table(min=SCALES_MIN, max=SCALES_MAX, levels=SCALES_LEVELS):
     return torch.exp(torch.linspace(math.log(min), math.log(max), levels))
 
+
 def ste_round(x: Tensor) -> Tensor:
     return torch.round(x) - x.detach() + x
+
 
 def find_named_module(module, query):
     """Helper function to find a named module. Returns a `nn.Module` or `None`
@@ -48,6 +53,7 @@ def find_named_module(module, query):
 
     return next((m for n, m in module.named_modules() if n == query), None)
 
+
 def find_named_buffer(module, query):
     """Helper function to find a named buffer. Returns a `torch.Tensor` or `None`
 
@@ -60,13 +66,14 @@ def find_named_buffer(module, query):
     """
     return next((b for n, b in module.named_buffers() if n == query), None)
 
+
 def _update_registered_buffer(
-    module,
-    buffer_name,
-    state_dict_key,
-    state_dict,
-    policy="resize_if_empty",
-    dtype=torch.int,
+        module,
+        buffer_name,
+        state_dict_key,
+        state_dict,
+        policy="resize_if_empty",
+        dtype=torch.int,
 ):
     new_size = state_dict[state_dict_key].size()
     registered_buf = find_named_buffer(module, buffer_name)
@@ -87,13 +94,14 @@ def _update_registered_buffer(
     else:
         raise ValueError(f'Invalid policy "{policy}"')
 
+
 def update_registered_buffers(
-    module,
-    module_name,
-    buffer_names,
-    state_dict,
-    policy="resize_if_empty",
-    dtype=torch.int,
+        module,
+        module_name,
+        buffer_names,
+        state_dict,
+        policy="resize_if_empty",
+        dtype=torch.int,
 ):
     """Update the registered buffers in a module according to the tensors sized
     in a state_dict.
@@ -120,11 +128,12 @@ def update_registered_buffers(
         _update_registered_buffer(
             module,
             buffer_name,
-            f"{module_name}.{buffer_name}", 
+            f"{module_name}.{buffer_name}",
             state_dict,
             policy,
             dtype,
         )
+
 
 def conv(in_channels, out_channels, kernel_size=5, stride=2):
     return nn.Conv2d(
@@ -135,6 +144,7 @@ def conv(in_channels, out_channels, kernel_size=5, stride=2):
         padding=kernel_size // 2,
     )
 
+
 class WMSA(nn.Module):
     """ Self-attention module in Swin Transformer
     """
@@ -143,18 +153,41 @@ class WMSA(nn.Module):
         super(WMSA, self).__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
-        self.head_dim = head_dim 
+        self.head_dim = head_dim
         self.scale = self.head_dim ** -0.5
-        self.n_heads = input_dim//head_dim
+        self.n_heads = input_dim // head_dim
         self.window_size = window_size
-        self._type=type
-        self.embedding_layer = nn.Linear(self.input_dim, 3*self.input_dim, bias=True)
-        self.relative_position_params = nn.Parameter(torch.zeros((2 * window_size - 1)*(2 * window_size -1), self.n_heads))
+        self.type = type
+        self.embedding_layer = nn.Linear(self.input_dim, 3 * self.input_dim, bias=True)
+        self.relative_position_params = nn.Parameter(
+            torch.zeros((2 * window_size - 1) * (2 * window_size - 1), self.n_heads))
 
         self.linear = nn.Linear(self.input_dim, self.output_dim)
 
         trunc_normal_(self.relative_position_params, std=.02)
-        self.relative_position_params = torch.nn.Parameter(self.relative_position_params.view(2*window_size-1, 2*window_size-1, self.n_heads).transpose(1,2).transpose(0,1))
+        self.relative_position_params = torch.nn.Parameter(
+            self.relative_position_params.view(2 * window_size - 1, 2 * window_size - 1, self.n_heads).transpose(1,
+                                                                                                                 2).transpose(
+                0, 1))
+
+    def generate_mask(self, h, w, p, shift):
+        """ generating the mask of SW-MSA
+        Args:
+            shift: shift parameters in CyclicShift.
+        Returns:
+            attn_mask: should be (1 1 w p p),
+        """
+        attn_mask = torch.zeros(h, w, p, p, p, p, dtype=torch.bool, device=self.relative_position_params.device)
+        if self.type == 'W':
+            return attn_mask
+
+        s = p - shift
+        attn_mask[-1, :, :s, :, s:, :] = True
+        attn_mask[-1, :, s:, :, :s, :] = True
+        attn_mask[:, -1, :, :s, :, s:] = True
+        attn_mask[:, -1, :, s:, :, :s] = True
+        attn_mask = rearrange(attn_mask, 'w1 w2 p1 p2 p3 p4 -> 1 1 (w1 w2) (p1 p2) (p3 p4)')
+        return attn_mask
 
     def forward(self, x):
         """ Forward pass of Window Multi-head Self-attention module.
@@ -164,75 +197,34 @@ class WMSA(nn.Module):
         Returns:
             output: tensor shape [b h w c]
         """
-        if self._type!='W': x = torch.roll(x, shifts=(-(self.window_size//2), -(self.window_size//2)), dims=(1,2))
-
-        b, h, w, c = x.shape
-        p = self.window_size
-        h_windows = h // p
-        w_windows = w // p
-        x = x.reshape([b, h_windows, p, w_windows, p, c])
-        x = x.permute([0, 1, 3, 2, 4, 5])
-        x = x.reshape([b, h_windows * w_windows, p * p, c])
-        # x = rearrange(x, 'b (w1 p1) (w2 p2) c -> b w1 w2 p1 p2 c', p1=self.window_size, p2=self.window_size)
-        # h_windows = x.size(1)
-        # w_windows = x.size(2)
-        # x = rearrange(x, 'b w1 w2 p1 p2 c -> b (w1 w2) (p1 p2) c', p1=self.window_size, p2=self.window_size)
+        if self.type != 'W': x = torch.roll(x, shifts=(-(self.window_size // 2), -(self.window_size // 2)), dims=(1, 2))
+        x = rearrange(x, 'b (w1 p1) (w2 p2) c -> b w1 w2 p1 p2 c', p1=self.window_size, p2=self.window_size)
+        h_windows = x.size(1)
+        w_windows = x.size(2)
+        x = rearrange(x, 'b w1 w2 p1 p2 c -> b (w1 w2) (p1 p2) c', p1=self.window_size, p2=self.window_size)
         qkv = self.embedding_layer(x)
-
-        b, nw, np, nc = qkv.shape
-        c = self.head_dim
-        threeh = nc // c
-        tmp = qkv.reshape([b, nw, np, threeh, c])
-        tmp = tmp.permute(3, 0, 1, 2, 4)
-
-        nh = threeh // 3
-        q = tmp[:nh, ...]
-        k = tmp[nh:2*nh, ...]
-        v = tmp[2*nh:, ...]
-        # q, k, v = torch.chunk(tmp, 3, dim=0)
-        # q, k, v = rearrange(qkv, 'b nw np (threeh c) -> threeh b nw np c', c=self.head_dim).chunk(3, dim=0)
+        q, k, v = rearrange(qkv, 'b nw np (threeh c) -> threeh b nw np c', c=self.head_dim).chunk(3, dim=0)
         sim = torch.einsum('hbwpc,hbwqc->hbwpq', q, k) * self.scale
-        tmp = self.get_relative_embedding()
-        tmp = tmp.unsqueeze(1)
-        tmp = tmp.unsqueeze(1)
-        sim = sim + tmp
-        # sim = sim + rearrange(self.relative_embedding(), 'h p q -> h 1 1 p q')
-        # if self._type != 'W':
-        #     attn_mask = self.generate_mask(h_windows, w_windows, self.window_size, shift=self.window_size//2)
-            # sim = sim.masked_fill_(attn_mask, float("-inf"))
-            # sim += attn_mask
+        sim = sim + rearrange(self.relative_embedding(), 'h p q -> h 1 1 p q')
+        if self.type != 'W':
+            attn_mask = self.generate_mask(h_windows, w_windows, self.window_size, shift=self.window_size // 2)
+            sim = sim.masked_fill_(attn_mask, float("-inf"))
 
         probs = nn.functional.softmax(sim, dim=-1)
         output = torch.einsum('hbwij,hbwjc->hbwic', probs, v)
-
-        h, b, w, p, c = output.shape
-        output = output.permute(1, 2, 3, 0, 4)
-        output = output.reshape([b, w, p, h*c])
-        # output = rearrange(output, 'h b w p c -> b w p (h c)')
+        output = rearrange(output, 'h b w p c -> b w p (h c)')
         output = self.linear(output)
+        output = rearrange(output, 'b (w1 w2) (p1 p2) c -> b (w1 p1) (w2 p2) c', w1=h_windows, p1=self.window_size)
 
-        b, w, p, c = output.shape
-        w1 = h_windows
-        w2 = w_windows
-        p1 = p2 = self.window_size
-        output = output.reshape([b, w1, w2, p1, p2, c])
-        output = output.permute(0, 1, 3, 2, 4, 5)
-        output = output.reshape([b, w1*p1, w2*p2, c])
-        # output = rearrange(output, 'b (w1 w2) (p1 p2) c -> b (w1 p1) (w2 p2) c', w1=h_windows, p1=self.window_size)
-
-        if self._type!='W': output = torch.roll(output, shifts=(self.window_size//2, self.window_size//2), dims=(1,2))
+        if self.type != 'W': output = torch.roll(output, shifts=(self.window_size // 2, self.window_size // 2),
+                                                 dims=(1, 2))
         return output
 
-    def get_relative_embedding(self):
-        N = self.window_size
-        H = torch.arange(N)
-        cord = torch.meshgrid([H, H])
-        cord = torch.stack(cord, dim=2)
-        cord = torch.reshape(cord, [N*N, 2])
+    def relative_embedding(self):
+        cord = torch.tensor(np.array([[i, j] for i in range(self.window_size) for j in range(self.window_size)]))
+        relation = cord[:, None, :] - cord[None, :, :] + self.window_size - 1
+        return self.relative_position_params[:, relation[:, :, 0].long(), relation[:, :, 1].long()]
 
-        # cord = torch.tensor(np.array([[i, j] for i in range(self.window_size) for j in range(self.window_size)]))
-        relation = cord[:, None, :] - cord[None, :, :] + self.window_size -1
-        return self.relative_position_params[:, relation[:,:,0].long(), relation[:,:,1].long()]
 
 class Block(nn.Module):
     def __init__(self, input_dim, output_dim, head_dim, window_size, drop_path, type='W', input_resolution=None):
@@ -242,9 +234,9 @@ class Block(nn.Module):
         self.input_dim = input_dim
         self.output_dim = output_dim
         assert type in ['W', 'SW']
-        self._type = type
+        self.type = type
         self.ln1 = nn.LayerNorm(input_dim)
-        self.msa = WMSA(input_dim, input_dim, head_dim, window_size, self._type)
+        self.msa = WMSA(input_dim, input_dim, head_dim, window_size, self.type)
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.ln2 = nn.LayerNorm(input_dim)
         self.mlp = nn.Sequential(
@@ -258,6 +250,7 @@ class Block(nn.Module):
         x = x + self.drop_path(self.mlp(self.ln2(x)))
         return x
 
+
 class ConvTransBlock(nn.Module):
     def __init__(self, conv_dim, trans_dim, head_dim, window_size, drop_path, type='W'):
         """ SwinTransformer and Conv Block
@@ -268,25 +261,25 @@ class ConvTransBlock(nn.Module):
         self.head_dim = head_dim
         self.window_size = window_size
         self.drop_path = drop_path
-        self._type = type
-        assert self._type in ['W', 'SW']
-        self.trans_block = Block(self.trans_dim, self.trans_dim, self.head_dim, self.window_size, self.drop_path, self._type)
-        self.conv1_1 = nn.Conv2d(self.conv_dim+self.trans_dim, self.conv_dim+self.trans_dim, 1, 1, 0, bias=True)
-        self.conv1_2 = nn.Conv2d(self.conv_dim+self.trans_dim, self.conv_dim+self.trans_dim, 1, 1, 0, bias=True)
+        self.type = type
+        assert self.type in ['W', 'SW']
+        self.trans_block = Block(self.trans_dim, self.trans_dim, self.head_dim, self.window_size, self.drop_path,
+                                 self.type)
+        self.conv1_1 = nn.Conv2d(self.conv_dim + self.trans_dim, self.conv_dim + self.trans_dim, 1, 1, 0, bias=True)
+        self.conv1_2 = nn.Conv2d(self.conv_dim + self.trans_dim, self.conv_dim + self.trans_dim, 1, 1, 0, bias=True)
 
         self.conv_block = ResidualBlock(self.conv_dim, self.conv_dim)
 
     def forward(self, x):
         conv_x, trans_x = torch.split(self.conv1_1(x), (self.conv_dim, self.trans_dim), dim=1)
         conv_x = self.conv_block(conv_x) + conv_x
-        trans_x = trans_x.permute(0, 2, 3, 1)
-        # trans_x = Rearrange('b c h w -> b h w c')(trans_x)
+        trans_x = Rearrange('b c h w -> b h w c')(trans_x)
         trans_x = self.trans_block(trans_x)
-        trans_x = trans_x.permute(0, 3, 1, 2)
-        # trans_x = Rearrange('b h w c -> b c h w')(trans_x)
+        trans_x = Rearrange('b h w c -> b c h w')(trans_x)
         res = self.conv1_2(torch.cat((conv_x, trans_x), dim=1))
         x = x + res
         return x
+
 
 class SWAtten(AttentionBlock):
     def __init__(self, input_dim, output_dim, head_dim, window_size, drop_path, inter_dim=192) -> None:
@@ -311,6 +304,7 @@ class SWAtten(AttentionBlock):
         out = self.out_conv(out)
         return out
 
+
 class SwinBlock(nn.Module):
     def __init__(self, input_dim, output_dim, head_dim, window_size, drop_path) -> None:
         super().__init__()
@@ -320,24 +314,22 @@ class SwinBlock(nn.Module):
 
     def forward(self, x):
         resize = False
-        padding_row = 0
-        padding_col = 0
         if (x.size(-1) <= self.window_size) or (x.size(-2) <= self.window_size):
             padding_row = (self.window_size - x.size(-2)) // 2
             padding_col = (self.window_size - x.size(-1)) // 2
-            x = F.pad(x, (padding_col, padding_col+1, padding_row, padding_row+1))
-        trans_x = x.permute(0, 2, 3, 1)
-        # trans_x = Rearrange('b c h w -> b h w c')(x)
+            x = F.pad(x, (padding_col, padding_col + 1, padding_row, padding_row + 1))
+        trans_x = Rearrange('b c h w -> b h w c')(x)
         trans_x = self.block_1(trans_x)
-        trans_x =  self.block_2(trans_x)
-        trans_x = trans_x.permute(0, 3, 1, 2)
-        # trans_x = Rearrange('b h w c -> b c h w')(trans_x)
+        trans_x = self.block_2(trans_x)
+        trans_x = Rearrange('b h w c -> b c h w')(trans_x)
         if resize:
-            x = F.pad(x, (-padding_col, -padding_col-1, -padding_row, -padding_row-1))
+            x = F.pad(x, (-padding_col, -padding_col - 1, -padding_row, -padding_row - 1))
         return trans_x
 
+
 class TCM(CompressionModel):
-    def __init__(self, config=[2, 2, 2, 2, 2, 2], head_dim=[8, 16, 32, 32, 16, 8], drop_path_rate=0, N=128,  M=320, num_slices=5, max_support_slices=5, **kwargs):
+    def __init__(self, config=[2, 2, 2, 2, 2, 2], head_dim=[8, 16, 32, 32, 16, 8], drop_path_rate=0, N=128, M=320,
+                 num_slices=5, max_support_slices=5, **kwargs):
         super().__init__(entropy_bottleneck_channels=N)
         self.config = config
         self.head_dim = head_dim
@@ -349,96 +341,101 @@ class TCM(CompressionModel):
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(config))]
         begin = 0
 
-        self.m_down1 = [ConvTransBlock(dim, dim, self.head_dim[0], self.window_size, dpr[i+begin], 'W' if not i%2 else 'SW') 
-                      for i in range(config[0])] + \
-                      [ResidualBlockWithStride(2*N, 2*N, stride=2)]
-        self.m_down2 = [ConvTransBlock(dim, dim, self.head_dim[1], self.window_size, dpr[i+begin], 'W' if not i%2 else 'SW')
-                      for i in range(config[1])] + \
-                      [ResidualBlockWithStride(2*N, 2*N, stride=2)]
-        self.m_down3 = [ConvTransBlock(dim, dim, self.head_dim[2], self.window_size, dpr[i+begin], 'W' if not i%2 else 'SW')
-                      for i in range(config[2])] + \
-                      [conv3x3(2*N, M, stride=2)]
+        self.m_down1 = [ConvTransBlock(dim, dim, self.head_dim[0], self.window_size, dpr[i + begin],
+                                       'W' if not i % 2 else 'SW')
+                        for i in range(config[0])] + \
+                       [ResidualBlockWithStride(2 * N, 2 * N, stride=2)]
+        self.m_down2 = [ConvTransBlock(dim, dim, self.head_dim[1], self.window_size, dpr[i + begin],
+                                       'W' if not i % 2 else 'SW')
+                        for i in range(config[1])] + \
+                       [ResidualBlockWithStride(2 * N, 2 * N, stride=2)]
+        self.m_down3 = [ConvTransBlock(dim, dim, self.head_dim[2], self.window_size, dpr[i + begin],
+                                       'W' if not i % 2 else 'SW')
+                        for i in range(config[2])] + \
+                       [conv3x3(2 * N, M, stride=2)]
 
-        self.m_up1 = [ConvTransBlock(dim, dim, self.head_dim[3], self.window_size, dpr[i+begin], 'W' if not i%2 else 'SW') 
+        self.m_up1 = [ConvTransBlock(dim, dim, self.head_dim[3], self.window_size, dpr[i + begin],
+                                     'W' if not i % 2 else 'SW')
                       for i in range(config[3])] + \
-                      [ResidualBlockUpsample(2*N, 2*N, 2)]
-        self.m_up2 = [ConvTransBlock(dim, dim, self.head_dim[4], self.window_size, dpr[i+begin], 'W' if not i%2 else 'SW') 
+                     [ResidualBlockUpsample(2 * N, 2 * N, 2)]
+        self.m_up2 = [ConvTransBlock(dim, dim, self.head_dim[4], self.window_size, dpr[i + begin],
+                                     'W' if not i % 2 else 'SW')
                       for i in range(config[4])] + \
-                      [ResidualBlockUpsample(2*N, 2*N, 2)]
-        self.m_up3 = [ConvTransBlock(dim, dim, self.head_dim[5], self.window_size, dpr[i+begin], 'W' if not i%2 else 'SW') 
+                     [ResidualBlockUpsample(2 * N, 2 * N, 2)]
+        self.m_up3 = [ConvTransBlock(dim, dim, self.head_dim[5], self.window_size, dpr[i + begin],
+                                     'W' if not i % 2 else 'SW')
                       for i in range(config[5])] + \
-                      [subpel_conv3x3(2*N, 3, 2)]
-        
-        self.g_a = nn.Sequential(*[ResidualBlockWithStride(3, 2*N, 2)] + self.m_down1 + self.m_down2 + self.m_down3)
-        
+                     [subpel_conv3x3(2 * N, 3, 2)]
 
-        self.g_s = nn.Sequential(*[ResidualBlockUpsample(M, 2*N, 2)] + self.m_up1 + self.m_up2 + self.m_up3)
+        self.g_a = nn.Sequential(*[ResidualBlockWithStride(3, 2 * N, 2)] + self.m_down1 + self.m_down2 + self.m_down3)
 
-        self.ha_down1 = [ConvTransBlock(N, N, 32, 4, 0, 'W' if not i%2 else 'SW') 
-                      for i in range(config[0])] + \
-                      [conv3x3(2*N, 192, stride=2)]
+        self.g_s = nn.Sequential(*[ResidualBlockUpsample(M, 2 * N, 2)] + self.m_up1 + self.m_up2 + self.m_up3)
+
+        self.ha_down1 = [ConvTransBlock(N, N, 32, 4, 0, 'W' if not i % 2 else 'SW')
+                         for i in range(config[0])] + \
+                        [conv3x3(2 * N, 192, stride=2)]
 
         self.h_a = nn.Sequential(
-            *[ResidualBlockWithStride(320, 2*N, 2)] + \
-            self.ha_down1
+            *[ResidualBlockWithStride(320, 2 * N, 2)] + \
+             self.ha_down1
         )
 
-        self.hs_up1 = [ConvTransBlock(N, N, 32, 4, 0, 'W' if not i%2 else 'SW') 
-                      for i in range(config[3])] + \
-                      [subpel_conv3x3(2*N, 320, 2)]
+        self.hs_up1 = [ConvTransBlock(N, N, 32, 4, 0, 'W' if not i % 2 else 'SW')
+                       for i in range(config[3])] + \
+                      [subpel_conv3x3(2 * N, 320, 2)]
 
         self.h_mean_s = nn.Sequential(
-            *[ResidualBlockUpsample(192, 2*N, 2)] + \
-            self.hs_up1
+            *[ResidualBlockUpsample(192, 2 * N, 2)] + \
+             self.hs_up1
         )
 
-        self.hs_up2 = [ConvTransBlock(N, N, 32, 4, 0, 'W' if not i%2 else 'SW') 
-                      for i in range(config[3])] + \
-                      [subpel_conv3x3(2*N, 320, 2)]
-
+        self.hs_up2 = [ConvTransBlock(N, N, 32, 4, 0, 'W' if not i % 2 else 'SW')
+                       for i in range(config[3])] + \
+                      [subpel_conv3x3(2 * N, 320, 2)]
 
         self.h_scale_s = nn.Sequential(
-            *[ResidualBlockUpsample(192, 2*N, 2)] + \
-            self.hs_up2
+            *[ResidualBlockUpsample(192, 2 * N, 2)] + \
+             self.hs_up2
         )
-
 
         self.atten_mean = nn.ModuleList(
             nn.Sequential(
-                SWAtten((320 + (320//self.num_slices)*min(i, 5)), (320 + (320//self.num_slices)*min(i, 5)), 16, self.window_size,0, inter_dim=128)
+                SWAtten((320 + (320 // self.num_slices) * min(i, 5)), (320 + (320 // self.num_slices) * min(i, 5)), 16,
+                        self.window_size, 0, inter_dim=128)
             ) for i in range(self.num_slices)
-            )
+        )
         self.atten_scale = nn.ModuleList(
             nn.Sequential(
-                SWAtten((320 + (320//self.num_slices)*min(i, 5)), (320 + (320//self.num_slices)*min(i, 5)), 16, self.window_size,0, inter_dim=128)
+                SWAtten((320 + (320 // self.num_slices) * min(i, 5)), (320 + (320 // self.num_slices) * min(i, 5)), 16,
+                        self.window_size, 0, inter_dim=128)
             ) for i in range(self.num_slices)
-            )
+        )
         self.cc_mean_transforms = nn.ModuleList(
             nn.Sequential(
-                conv(320 + (320//self.num_slices)*min(i, 5), 224, stride=1, kernel_size=3),
+                conv(320 + (320 // self.num_slices) * min(i, 5), 224, stride=1, kernel_size=3),
                 nn.GELU(),
                 conv(224, 128, stride=1, kernel_size=3),
                 nn.GELU(),
-                conv(128, (320//self.num_slices), stride=1, kernel_size=3),
+                conv(128, (320 // self.num_slices), stride=1, kernel_size=3),
             ) for i in range(self.num_slices)
         )
         self.cc_scale_transforms = nn.ModuleList(
             nn.Sequential(
-                conv(320 + (320//self.num_slices)*min(i, 5), 224, stride=1, kernel_size=3),
+                conv(320 + (320 // self.num_slices) * min(i, 5), 224, stride=1, kernel_size=3),
                 nn.GELU(),
                 conv(224, 128, stride=1, kernel_size=3),
                 nn.GELU(),
-                conv(128, (320//self.num_slices), stride=1, kernel_size=3),
+                conv(128, (320 // self.num_slices), stride=1, kernel_size=3),
             ) for i in range(self.num_slices)
-            )
+        )
 
         self.lrp_transforms = nn.ModuleList(
             nn.Sequential(
-                conv(320 + (320//self.num_slices)*min(i+1, 6), 224, stride=1, kernel_size=3),
+                conv(320 + (320 // self.num_slices) * min(i + 1, 6), 224, stride=1, kernel_size=3),
                 nn.GELU(),
                 conv(224, 128, stride=1, kernel_size=3),
                 nn.GELU(),
-                conv(128, (320//self.num_slices), stride=1, kernel_size=3),
+                conv(128, (320 // self.num_slices), stride=1, kernel_size=3),
             ) for i in range(self.num_slices)
         )
 
@@ -451,7 +448,7 @@ class TCM(CompressionModel):
         updated = self.gaussian_conditional.update_scale_table(scale_table, force=force)
         updated |= super().update(force=force)
         return updated
-    
+
     def forward(self, x):
         y = self.g_a(x)
         y_shape = y.shape[2:]
@@ -504,7 +501,7 @@ class TCM(CompressionModel):
         return {
             "x_hat": x_hat,
             "likelihoods": {"y": y_likelihoods, "z": z_likelihoods},
-            "para":{"means": means, "scales":scales, "y":y}
+            "para": {"means": means, "scales": scales, "y": y}
         }
 
     def load_state_dict(self, state_dict):
@@ -570,7 +567,6 @@ class TCM(CompressionModel):
 
             symbols_list.extend(y_q_slice.reshape(-1).tolist())
             indexes_list.extend(index.reshape(-1).tolist())
-
 
             lrp_support = torch.cat([mean_support, y_hat_slice], dim=1)
             lrp = self.lrp_transforms[slice_index](lrp_support)
@@ -659,9 +655,9 @@ class bm(nn.Module):
     def __init__(self):
         super(bm, self).__init__()
 
-        self.fcn1 = nn.Linear(1, 100)
-        self.fcn2 = nn.Linear(100, 100)
-        self.fcn3 = nn.Linear(100, 100)
+        self.fcn1 = nn.Linear(1, 128)
+        self.fcn2 = nn.Linear(128, 128)
+        self.fcn3 = nn.Linear(128, 128)
         self.Relu = nn.ReLU()
 
     def forward(self, y):
@@ -673,8 +669,9 @@ class bm(nn.Module):
 
         return mask
 
+
 class Modnet(nn.Module):
-    def __init__(self, in_channels, latent_channels):
+    def __init__(self, in_channels=320, latent_channels=128):
         super(Modnet, self).__init__()
 
         self.m = int(in_channels)
@@ -690,22 +687,23 @@ class Modnet(nn.Module):
 
     def forward(self, x, lmd):
 
-        b=x.size()[0]
-        y=lmd.cuda()
+        b = x.size()[0]
+        y = lmd.cuda()
         masks = []
 
         for i in range(7):
             mask_i = self.lmd_map[i](y)
-            masks.append(torch.reshape(mask_i,(b,self.c,1,1)).cuda())
+            masks.append(torch.reshape(mask_i, (b, self.c, 1, 1)).cuda())
 
         x0 = self.convs[0](x)
         for i in range(7):
             x0 = masks[i] * x0
-            x0 = self.convs[i+1](x0)
+            x0 = self.convs[i + 1](x0)
 
         output = x * F.sigmoid(x0)
 
         return output
+
 
 class TCM_vbr(CompressionModel):
     def __init__(self, config=[2, 2, 2, 2, 2, 2], head_dim=[8, 16, 32, 32, 16, 8], drop_path_rate=0, N=128, M=320,
@@ -822,7 +820,7 @@ class TCM_vbr(CompressionModel):
         self.entropy_bottleneck = EntropyBottleneck(192)
         self.gaussian_conditional = GaussianConditional(None)
 
-        self.modnet = Modnet(M,N)
+        self.modnet = Modnet(M, N)
 
     def update(self, scale_table=None, force=False):
         if scale_table is None:
@@ -831,10 +829,22 @@ class TCM_vbr(CompressionModel):
         updated |= super().update(force=force)
         return updated
 
-    def forward(self, x, lmd):
-        y = self.g_a(x)
+    def forward(self, x, lmd=0):
+        b = x.size()[0]
 
-        y = self.modnet(y, lmd)
+        if lmd == 0:  # training
+            rand_lambda = np.random.rand(b)
+            rand_lambda = 0.002 * rand_lambda + 0.001
+            lmd_info = np.array(rand_lambda, dtype=np.float32)
+
+            lmd_info = torch.from_numpy(lmd_info).cuda()
+            lmd_info = torch.reshape(lmd_info, (b, 1)).cuda()
+        else:
+            lmd_info = lmd * torch.ones((b, 1))
+            lmd_info = lmd_info.cuda()
+
+        y = self.g_a(x)
+        y = self.modnet(y, lmd_info)
 
         y_shape = y.shape[2:]
         z = self.h_a(y)
@@ -878,15 +888,14 @@ class TCM_vbr(CompressionModel):
             y_hat_slices.append(y_hat_slice)
 
         y_hat = torch.cat(y_hat_slices, dim=1)
-        means = torch.cat(mu_list, dim=1)
-        scales = torch.cat(scale_list, dim=1)
+
         y_likelihoods = torch.cat(y_likelihood, dim=1)
         x_hat = self.g_s(y_hat)
 
         return {
             "x_hat": x_hat,
             "likelihoods": {"y": y_likelihoods, "z": z_likelihoods},
-            "para": {"means": means, "scales": scales, "y": y}
+            "lmd_info": lmd_info,
         }
 
     def load_state_dict(self, state_dict):

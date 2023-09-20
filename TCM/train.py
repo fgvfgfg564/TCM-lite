@@ -14,8 +14,8 @@ from compressai.datasets import ImageFolder
 from compressai.zoo import models
 from pytorch_msssim import ms_ssim
 
-from models import TCM
-from torch.utils.tensorboard import SummaryWriter   
+from models import TCM, TCM_vbr
+from torch.utils.tensorboard import SummaryWriter
 import os
 
 torch.backends.cudnn.deterministic=True
@@ -27,11 +27,9 @@ def compute_msssim(a, b):
 class RateDistortionLoss(nn.Module):
     """Custom rate distortion loss with a Lagrangian parameter."""
 
-    def __init__(self, lmbda=1e-2, type='mse'):
+    def __init__(self):
         super().__init__()
         self.mse = nn.MSELoss()
-        self.lmbda = lmbda
-        self.type = type
 
     def forward(self, output, target):
         N, _, H, W = target.size()
@@ -42,12 +40,11 @@ class RateDistortionLoss(nn.Module):
             (torch.log(likelihoods).sum() / (-math.log(2) * num_pixels))
             for likelihoods in output["likelihoods"].values()
         )
-        if self.type == 'mse':
-            out["mse_loss"] = self.mse(output["x_hat"], target)
-            out["loss"] = self.lmbda * 255 ** 2 * out["mse_loss"] + out["bpp_loss"]
-        else:
-            out['ms_ssim_loss'] = compute_msssim(output["x_hat"], target)
-            out["loss"] = self.lmbda * (1 - out['ms_ssim_loss']) + out["bpp_loss"]
+
+        out["mse_loss"] = torch.mean((output["x_hat"] - target)**2,dim=(1,2,3))
+        out["dloss"] = 255 ** 2 * torch.dot(output["lmd_info"].squeeze(1),out["mse_loss"])
+        out["mse_loss"] = torch.mean(out["mse_loss"])
+        out["loss"] = out["dloss"] + out["bpp_loss"]
 
         return out
 
@@ -158,81 +155,51 @@ def train_one_epoch(
                 )
 
 
-def test_epoch(epoch, test_dataloader, model, criterion, type='mse'):
+def test_epoch(epoch, test_dataloader, model, criterion):
     model.eval()
     device = next(model.parameters()).device
-    if type == 'mse':
-        loss = AverageMeter()
-        bpp_loss = AverageMeter()
-        mse_loss = AverageMeter()
-        aux_loss = AverageMeter()
 
-        with torch.no_grad():
+    loss = AverageMeter()
+    bpp_loss = AverageMeter()
+    mse_loss = AverageMeter()
+    aux_loss = AverageMeter()
+
+    with torch.no_grad():
+        for lmd in [0.001,0.002,0.003]:
             for d in test_dataloader:
                 d = d.to(device)
-                out_net = model(d)
+                out_net = model(d,lmd)
                 out_criterion = criterion(out_net, d)
 
                 aux_loss.update(model.aux_loss())
                 bpp_loss.update(out_criterion["bpp_loss"])
                 loss.update(out_criterion["loss"])
                 mse_loss.update(out_criterion["mse_loss"])
+            print(bpp_loss.avg,mse_loss.avg)
 
-        print(
-            f"Test epoch {epoch}: Average losses:"
-            f"\tLoss: {loss.avg:.3f} |"
-            f"\tMSE loss: {mse_loss.avg:.3f} |"
-            f"\tBpp loss: {bpp_loss.avg:.2f} |"
-            f"\tAux loss: {aux_loss.avg:.2f}\n"
-        )
-
-    else:
-        loss = AverageMeter()
-        bpp_loss = AverageMeter()
-        ms_ssim_loss = AverageMeter()
-        aux_loss = AverageMeter()
-
-        with torch.no_grad():
-            for d in test_dataloader:
-                d = d.to(device)
-                out_net = model(d)
-                out_criterion = criterion(out_net, d)
-
-                aux_loss.update(model.aux_loss())
-                bpp_loss.update(out_criterion["bpp_loss"])
-                loss.update(out_criterion["loss"])
-                ms_ssim_loss.update(out_criterion["ms_ssim_loss"])
-
-        print(
-            f"Test epoch {epoch}: Average losses:"
-            f"\tLoss: {loss.avg:.3f} |"
-            f"\tMS_SSIM loss: {ms_ssim_loss.avg:.3f} |"
-            f"\tBpp loss: {bpp_loss.avg:.2f} |"
-            f"\tAux loss: {aux_loss.avg:.2f}\n"
-        )
+    print(
+        f"Test epoch {epoch}: Average losses:"
+        f"\tLoss: {loss.avg:.3f} |"
+        f"\tMSE loss: {mse_loss.avg:.3f} |"
+        f"\tBpp loss: {bpp_loss.avg:.2f} |"
+        f"\tAux loss: {aux_loss.avg:.2f}\n"
+    )
 
     return loss.avg
 
 
-def save_checkpoint(state, is_best, epoch, save_path, filename):
-    torch.save(state, save_path + "checkpoint_latest.pth.tar")
-    if epoch % 5 == 0:
-        torch.save(state, filename)
+def save_checkpoint(state, is_best, save_path):
+    torch.save(state, save_path + "vcip_vbr.pth.tar")
+
     if is_best:
-        torch.save(state, save_path + "checkpoint_best.pth.tar")
+        torch.save(state, save_path + "vcip_vbr_best.pth.tar")
 
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Example training script.")
+
     parser.add_argument(
-        "-m",
-        "--model",
-        default="bmshj2018-factorized",
-        choices=models.keys(),
-        help="Model architecture (default: %(default)s)",
-    )
-    parser.add_argument(
-        "-d", "--dataset", type=str, required=True, help="Training dataset"
+        "-d", "--dataset", type=str, default='/backup3/zqge/flicker', help="Training dataset"
     )
     parser.add_argument(
         "-e",
@@ -243,47 +210,41 @@ def parse_args(argv):
     )
     parser.add_argument(
         "-lr",
-        "--learning-rate",
+        "--learning_rate",
         default=1e-4,
         type=float,
         help="Learning rate (default: %(default)s)",
     )
     parser.add_argument(
         "-n",
-        "--num-workers",
+        "--num_workers",
         type=int,
         default=20,
         help="Dataloaders threads (default: %(default)s)",
     )
+
     parser.add_argument(
-        "--lambda",
-        dest="lmbda",
-        type=float,
-        default=3,
-        help="Bit-rate distortion parameter (default: %(default)s)",
+        "--batch_size", "-bs", type=int, default=8, help="Batch size (default: %(default)s)"
     )
     parser.add_argument(
-        "--batch-size", type=int, default=8, help="Batch size (default: %(default)s)"
-    )
-    parser.add_argument(
-        "--test-batch-size",
+        "--test_batch_size",
         type=int,
         default=8,
         help="Test batch size (default: %(default)s)",
     )
     parser.add_argument(
-        "--aux-learning-rate",
+        "--aux_learning_rate",
         default=1e-3,
         help="Auxiliary loss learning rate (default: %(default)s)",
     )
     parser.add_argument(
-        "--patch-size",
+        "--patch_size",
         type=int,
         nargs=2,
         default=(256, 256),
         help="Size of the patches to be cropped (default: %(default)s)",
     )
-    parser.add_argument("--cuda", action="store_true", help="Use cuda")
+    parser.add_argument("--cuda", action="store_true", default=True, help="Use cuda")
     parser.add_argument(
         "--save", action="store_true", default=True, help="Save model to disk"
     )
@@ -298,7 +259,7 @@ def parse_args(argv):
     )
     parser.add_argument("--checkpoint", type=str, help="Path to a checkpoint")
     parser.add_argument("--type", type=str, default='mse', help="loss type", choices=['mse', "ms-ssim"])
-    parser.add_argument("--save_path", type=str, help="save_path")
+    parser.add_argument("--save_path", type=str, default='./', help="save_path")
     parser.add_argument(
         "--skip_epoch", type=int, default=0
     )
@@ -306,7 +267,7 @@ def parse_args(argv):
         "--N", type=int, default=128,
     )
     parser.add_argument(
-        "--lr_epoch", nargs='+', type=int
+        "--lr_epoch", nargs='+', type=int, default=[45,48]
     )
     parser.add_argument(
         "--continue_train", action="store_true", default=True
@@ -320,7 +281,7 @@ def main(argv):
     for arg in vars(args):
         print(arg, ":", getattr(args, arg))
     type = args.type
-    save_path = os.path.join(args.save_path, str(args.lmbda))
+    save_path = os.path.join(args.save_path)
     if not os.path.exists(save_path):
         os.makedirs(save_path)
         os.makedirs(save_path + "tensorboard/")
@@ -336,7 +297,6 @@ def main(argv):
     test_transforms = transforms.Compose(
         [transforms.CenterCrop(args.patch_size), transforms.ToTensor()]
     )
-
 
     train_dataset = ImageFolder(args.dataset, split="train", transform=train_transforms)
     test_dataset = ImageFolder(args.dataset, split="test", transform=test_transforms)
@@ -361,7 +321,7 @@ def main(argv):
         pin_memory=(device == "cuda"),
     )
 
-    net = TCM(config=[2,2,2,2,2,2], head_dim=[8, 16, 32, 32, 16, 8], drop_path_rate=0.0, N=args.N, M=320)
+    net = TCM_vbr(config=[2,2,2,2,2,2], head_dim=[8, 16, 32, 32, 16, 8], drop_path_rate=0.0, N=args.N, M=320)
     net = net.to(device)
 
     if args.cuda and torch.cuda.device_count() > 1:
@@ -372,7 +332,7 @@ def main(argv):
     print("milestones: ", milestones)
     lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones, gamma=0.1, last_epoch=-1)
 
-    criterion = RateDistortionLoss(lmbda=args.lmbda, type=type)
+    criterion = RateDistortionLoss()
 
     last_epoch = 0
     if args.checkpoint:  # load from previous checkpoint
@@ -398,7 +358,7 @@ def main(argv):
             args.clip_max_norm,
             type
         )
-        loss = test_epoch(epoch, test_dataloader, net, criterion, type)
+        loss = test_epoch(epoch, test_dataloader, net, criterion)
         writer.add_scalar('test_loss', loss, epoch)
         lr_scheduler.step()
 
@@ -409,16 +369,14 @@ def main(argv):
             save_checkpoint(
                 {
                     "epoch": epoch,
-                    "state_dict": net.state_dict(),
+                    "state_dict": net.module.state_dict() if torch.cuda.device_count() > 1 else net.state_dict(),
                     "loss": loss,
                     "optimizer": optimizer.state_dict(),
                     "aux_optimizer": aux_optimizer.state_dict(),
                     "lr_scheduler": lr_scheduler.state_dict(),
                 },
                 is_best,
-                epoch,
                 save_path,
-                save_path + str(epoch) + "_checkpoint.pth.tar",
             )
 
 
