@@ -5,7 +5,6 @@ import os
 from models.tcm import *
 from tensorrt_support import *
 
-@tensorrt_compiled_module
 class G_a(nn.Sequential):
     def __init__(self, head_dim, window_size, dim, dpr, begin, config, N, M, block_size):
         m_down1 = [ConvTransBlock(dim, dim, head_dim[0], window_size, dpr[i + begin],
@@ -40,6 +39,11 @@ class G_s(nn.Sequential):
                      [subpel_conv3x3(2 * N, 3, 2)]
         super().__init__(*[ResidualBlockUpsample(M, 2 * N, 2)] + m_up1 + m_up2 + m_up3)
         self.input_shape = [1, M, block_size // 16, block_size // 16]
+    
+    def forward(self, input):
+        for module in self:
+            input = module(input)
+        return input
 
 class TCMModelEngine(CompressionModel):
     def __init__(self, mode, config=[2, 2, 2, 2, 2, 2], head_dim=[8, 16, 32, 32, 16, 8], drop_path_rate=0, N=128, M=320, num_slices=5, max_support_slices=5, block_size=512, **kwargs):
@@ -237,8 +241,14 @@ class TCMModelEngine(CompressionModel):
         net.load_state_dict(state_dict)
         return net
 
-    def compress(self, x):
+    def compress(self, x, lmd):
         y = self.g_a(x)
+        b = x.size()[0]
+
+        lmd_info = lmd * torch.ones((b, 1))
+        lmd_info = lmd_info.cuda()
+        y = self.modnet(y, lmd_info)
+
         y_shape = y.shape[2:]
 
         z = self.h_a(y)
