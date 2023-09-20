@@ -17,6 +17,7 @@ if __name__ == "__main__":
 
         with InitTRTModelWithPlaceholder():
             engine = TCMModelEngine("decode")
-        print(engine)
 
-        engine.load(args.model_weight)
+    print(engine.g_s)
+    engine.load(args.model_weight)
+    print(engine.g_s)

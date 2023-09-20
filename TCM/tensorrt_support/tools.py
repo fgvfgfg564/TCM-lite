@@ -2,7 +2,6 @@ import torch
 import torch_tensorrt
 import os
 
-from .registry import VIRTUALIZE_TENSORRT_MODULES
 from .modules import TorchTensorRTPlaceholder
 
 def compile(model: torch.nn.Module, output_folder):
@@ -29,16 +28,6 @@ def compile(model: torch.nn.Module, output_folder):
             child_state_dict = child.state_dict(prefix=name+".")
             new_state_dict.update(child_state_dict)
     torch.save(new_state_dict, os.path.join(output_folder, "state_dict.pth.tar"))
-
-
-class InitTRTModelWithPlaceholder:
-    def __enter__(self):
-        global VIRTUALIZE_TENSORRT_MODULES
-        VIRTUALIZE_TENSORRT_MODULES = True
-    
-    def __exit__(self, *args, **kwargs):
-        global VIRTUALIZE_TENSORRT_MODULES
-        VIRTUALIZE_TENSORRT_MODULES = False
 
 def load_weights(model: torch.nn.Module, state_dict_folder):
     """
