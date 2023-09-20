@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import os
 
-from ..models.tcm import *
-from ..tensorrt_support import *
+from models.tcm import *
+from tensorrt_support import *
 
 @tensorrt_compiled_module
 class G_a(nn.Sequential):
@@ -366,6 +366,10 @@ class TCMModelEngine(CompressionModel):
         return {"x_hat": x_hat}
     
     def compile(self, target_path):
+        try:
+            os.makedirs(target_path)
+        except FileExistsError:
+            pass
         compile(self, target_path)
     
     def load(self, weight_path):

@@ -8,11 +8,11 @@ from .modules import TorchTensorRTPlaceholder
 def compile(model: torch.nn.Module, output_folder):
     new_state_dict = {}
     for name, child in model.named_children():
-        print(f"Compiling module: {name}")
-        if child.tensorrt_compilable:
+        if hasattr(child, "tensorrt_compilable") and child.tensorrt_compilable:
+            print(f"Compiling module: {name} into TensorRT TorchScript")
             input_shape = child.input_shape
             example_inputs = torch.randn(input_shape)
-            scripted_model = torch.jit.script(child, example_inputs=example_inputs)
+            scripted_model = torch.jit.script(child, example_inputs=[example_inputs])
             trt_model = torch_tensorrt.ts.compile(scripted_model, 
                 inputs= [torch_tensorrt.Input(input_shape, dtype=torch.half)],
                 enabled_precisions= {torch.float, torch.half},
