@@ -1,7 +1,7 @@
 import time
 import torch
 
-__all__ = {"timing_decorator", "Timer"}
+__all__ = ["timing_decorator", "Timer"]
 
 LEVEL = 0
 ENABLE = True

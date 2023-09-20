@@ -245,8 +245,7 @@ class TCMModelEngine(CompressionModel):
         y = self.g_a(x)
         b = x.size()[0]
 
-        lmd_info = lmd * torch.ones((b, 1))
-        lmd_info = lmd_info.cuda()
+        lmd_info = lmd * torch.ones((b, 1), device=lmd.device)
         y = self.modnet(y, lmd_info)
 
         y_shape = y.shape[2:]
