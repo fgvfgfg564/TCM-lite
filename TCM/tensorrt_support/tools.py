@@ -18,7 +18,7 @@ def compile_with_state_dict(model: torch.nn.Module, state_dict_filename: str, ou
     new_state_dict = {}
     for name, child in model.named_children():
         print(f"Compiling module: {name}")
-        if child.use_tensorrt:
+        if child.tensorrt_compilable:
             input_shape = child.input_shape
             example_inputs = torch.randn(input_shape)
             scripted_model = torch.jit.script(child, example_inputs=example_inputs)
