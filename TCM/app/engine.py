@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
+import os
 
 from ..models.tcm import *
-from ..tensorrt_support import tensorrt_compiled_module
+from ..tensorrt_support import *
 
 @tensorrt_compiled_module
 class G_a(nn.Sequential):
@@ -145,7 +146,7 @@ class TCMModelEngine(CompressionModel):
         b = x.size()[0]
 
         if lmd == 0:  # training
-            rand_lambda = np.random.rand(b)
+            rand_lambda = np.random.rand(b) 
             rand_lambda = 0.002 * rand_lambda + 0.001
             lmd_info = np.array(rand_lambda, dtype=np.float32)
 
@@ -210,7 +211,7 @@ class TCMModelEngine(CompressionModel):
             "lmd_info": lmd_info,
         }
 
-    def load_state_dict(self, state_dict):
+    def load_state_dict(self, state_dict, strict=True):
         # todo: change
         update_registered_buffers(
             self.gaussian_conditional,
@@ -218,7 +219,13 @@ class TCMModelEngine(CompressionModel):
             ["_quantized_cdf", "_offset", "_cdf_length", "scale_table"],
             state_dict,
         )
-        super().load_state_dict(state_dict)
+        update_registered_buffers(
+            self.entropy_bottleneck,
+            "entropy_bottleneck",
+            ["_quantized_cdf", "_offset", "_cdf_length"],
+            state_dict,
+        )
+        nn.Module.load_state_dict(self, state_dict, strict)
 
     @classmethod
     def from_state_dict(cls, state_dict):
@@ -357,3 +364,14 @@ class TCMModelEngine(CompressionModel):
         x_hat = self.g_s(y_hat).clamp_(0, 1)
 
         return {"x_hat": x_hat}
+    
+    def compile(self, target_path):
+        compile(self, target_path)
+    
+    def load(self, weight_path):
+        if os.path.isdir(weight_path):
+            load_weights(self, weight_path)
+        else:
+            # Not compiled yet; a checkpoint from training
+            state_dict = torch.load(weight_path)
+            self.load_state_dict(state_dict["state_dict"], strict=False)
