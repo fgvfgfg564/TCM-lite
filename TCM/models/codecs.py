@@ -267,6 +267,19 @@ class BPG(BinaryCodec):
         cmd = [self.decoder_path, "-o", rec_filepath, out_filepath]
         return cmd
 
+    def encode(self, in_filepath, out_filepath, quality):
+        run_command(self._get_encode_cmd(in_filepath, quality, out_filepath))
+        size = filesize(out_filepath)
+
+        img = self._load_img(in_filepath)
+        bpp_val = float(size) * 8 / (img.size[0] * img.size[1])
+
+        out = {
+            "bpp": bpp_val,
+        }
+
+        return out
+
     def decode(self, out_filepath, in_filepath):
         fd0, png_filepath = mkstemp(suffix=".png")
 
@@ -435,6 +448,74 @@ class VTM(Codec):
             (rec_arr.clip(0, 1).transpose(1, 2, 0) * 255.0).astype(np.uint8)
         )
         return out, rec
+
+    def encode(self, in_filepath, out_filepath, quality):
+        if not 0 <= quality <= 63:
+            raise ValueError(f"Invalid quality value: {quality} (0,63)")
+
+        bitdepth = 8
+
+        # Convert input image to yuv 444 file
+        arr = np.asarray(self._load_img(in_filepath))
+        fd, yuv_path = mkstemp(suffix=".yuv")
+
+        arr = arr.transpose((2, 0, 1))  # color channel first
+
+        if not self.rgb:
+            # convert rgb content to YCbCr
+            rgb = arr.astype(np.float32) / (2 ** bitdepth - 1)
+            arr = np.clip(rgb2yuv(rgb), 0, 1)
+            arr = (arr * (2 ** bitdepth - 1)).astype(np.uint8)
+
+        with open(yuv_path, "wb") as f:
+            f.write(arr.tobytes())
+
+        # Encode
+        height, width = arr.shape[1:]
+        cmd = [
+            self.encoder_path,
+            "-i",
+            yuv_path,
+            "-c",
+            self.config_path,
+            "-q",
+            quality,
+            "-o",
+            "/dev/null",
+            "-b",
+            out_filepath,
+            "-wdt",
+            width,
+            "-hgt",
+            height,
+            "-fr",
+            "1",
+            "-f",
+            "1",
+            "--InputChromaFormat=444",
+            "--InputBitDepth=8",
+            "--ConformanceWindowMode=1",
+        ]
+
+        if self.rgb:
+            cmd += [
+                "--InputColourSpaceConvert=RGBtoGBR",
+                "--SNRInternalColourSpace=1",
+                "--OutputInternalColourSpace=0",
+            ]
+        run_command(cmd)
+
+        # cleanup encoder input
+        os.close(fd)
+        os.unlink(yuv_path)
+
+        bpp = filesize(out_filepath) * 8.0 / (height * width)
+
+        out = {
+            "bpp": bpp,
+        }
+
+        return out
 
     def decode(self, out_filepath, in_filepath):
         bitdepth = 8
