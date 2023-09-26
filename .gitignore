@@ -139,3 +139,6 @@ testcode/
 launch.json
 
 *.ts
+
+*.bin
+*/output_json
