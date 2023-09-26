@@ -58,7 +58,7 @@ class EncoderApp(nn.Module):
         i_frame_net.update(force=True)
         self.model_name = model_name
         self.model_id = get_model_id(model_name)
-        self.i_frame_net: image_model.EVC = i_frame_net
+        self.i_frame_net: image_model.EVC = i_frame_net.half()
 
     @staticmethod
     def read_img(img_path):
@@ -68,7 +68,7 @@ class EncoderApp(nn.Module):
         rgb = Image.open(img_path).convert('RGB')
         rgb = np.asarray(rgb).astype('float32').transpose(2, 0, 1)
         rgb = rgb / 255.
-        rgb = torch.from_numpy(rgb).type(torch.FloatTensor)
+        rgb = torch.from_numpy(rgb).type(torch.half)
         rgb = rgb.unsqueeze(0)
         rgb = rgb.cuda()
         return rgb

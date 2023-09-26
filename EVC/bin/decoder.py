@@ -16,6 +16,9 @@ from src.utils.png_reader import PNGReader
 from src.utils.stream_helper import get_padding_size, get_state_dict
 
 from src.models.MLCodec_rans import RansEncoder, RansDecoder
+from src.utils.timer import Timer
+
+torch.jit.optimized_execution(False)
 
 MODELS = {
     "EVC_LL": 'EVC_LL.pth.tar',
@@ -71,7 +74,7 @@ class DecoderApp(nn.Module):
         i_frame_net.update(force=True)
         self.model_name = model_name
         self.model_id = get_model_id(model_name)
-        self.i_frame_net: image_model.EVC = i_frame_net
+        self.i_frame_net: image_model.EVC = i_frame_net.half()
 
         self.cuda()
         # Save model to disk
@@ -90,41 +93,49 @@ class DecoderApp(nn.Module):
     
     @classmethod
     def from_model_name(cls, model_name):
-        model_path, compiled_path = cls.get_model_path(model_name)
-        if os.path.isfile(compiled_path):
-            print("loading from compiled model.")
-            decoder_app = torch.load(compiled_path)
-            decoder_app.i_frame_net.entropy_coder.encoder = RansEncoder(True, 2)
-            decoder_app.i_frame_net.entropy_coder.decoder = RansDecoder(2)
-            return decoder_app
-        else:
-            decoder_app = cls(model_name)
+        with Timer("Loading"):
+            model_path, compiled_path = cls.get_model_path(model_name)
+            if os.path.isfile(compiled_path):
+                with Timer("loading from compiled model."):
+                    decoder_app = torch.load(compiled_path)
+                    decoder_app.i_frame_net.entropy_coder.encoder = RansEncoder(True, 2)
+                    decoder_app.i_frame_net.entropy_coder.decoder = RansDecoder(2)
+                    decoder_app = decoder_app.cuda()
+                    torch.cuda.synchronize()
+            else:
+                with Timer("loading weights from file."):
+                    decoder_app = cls(model_name)
+                    torch.cuda.synchronize()
+            dummy_input = torch.zeros([1, 512, 512, 3], device='cuda')
+            decoder_app.i_frame_net(dummy_input, 0.)
             return decoder_app
     
     def decompress_bits(self, bits, height, width, q_scale):
-        recon_img = self.i_frame_net.decompress(bits, height, width, q_scale)['x_hat']
+        with Timer("Decompress network."):
+            recon_img = self.i_frame_net.decompress(bits, height, width, q_scale)['x_hat']
         return recon_img
     
     @classmethod
     def decompress(cls, input_pth, output_pth, id_bias):
-        file_obj = open(input_pth, "rb")
-        headersize = struct.calcsize('B2Hf')
-        header_bits = file_obj.read(headersize)
-        model_id, h, w, q_scale = struct.unpack('B2Hf', header_bits)
-        model_id -= id_bias
-        model_name = get_model_name(model_id)
+        with Timer("Decompress."):
+            file_obj = open(input_pth, "rb")
+            headersize = struct.calcsize('B2Hf')
+            header_bits = file_obj.read(headersize)
+            model_id, h, w, q_scale = struct.unpack('B2Hf', header_bits)
+            model_id -= id_bias
+            model_name = get_model_name(model_id)
 
-        main_bits = file_obj.read()
-        file_obj.close()
+            main_bits = file_obj.read()
+            file_obj.close()
 
-        padding_l, padding_r, padding_t, padding_b = get_padding_size(h, w)
-        padded_h = h + padding_t + padding_b
-        padded_w = w + padding_l + padding_r
+            padding_l, padding_r, padding_t, padding_b = get_padding_size(h, w)
+            padded_h = h + padding_t + padding_b
+            padded_w = w + padding_l + padding_r
 
-        decoder_app = cls.from_model_name(model_name)
-        recon_img = decoder_app.decompress_bits(main_bits, padded_h, padded_w, q_scale)
-        recon_img = F.pad(recon_img, (-padding_l, -padding_r, -padding_t, -padding_b))
-        save_torch_image(recon_img, output_pth)
+            decoder_app = cls.from_model_name(model_name)
+            recon_img = decoder_app.decompress_bits(main_bits, padded_h, padded_w, q_scale)
+            recon_img = F.pad(recon_img, (-padding_l, -padding_r, -padding_t, -padding_b))
+            save_torch_image(recon_img, output_pth)
 
 
 def main():
@@ -134,4 +145,5 @@ def main():
     DecoderApp.decompress(args.input, args.output, args.id_bias)
 
 if __name__ == "__main__":
-    main()
+    with torch.no_grad():
+        main()
