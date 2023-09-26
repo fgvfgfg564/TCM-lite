@@ -17,7 +17,7 @@ from src.utils.stream_helper import get_padding_size, get_state_dict
 
 from src.models.MLCodec_rans import RansEncoder, RansDecoder
 from src.utils.timer import Timer
-from src.tensorrt_support import compile
+from src.tensorrt_support import *
 
 torch.jit.optimized_execution(False)
 
@@ -78,13 +78,7 @@ class DecoderApp(nn.Module):
         self.model_name = model_name
         self.model_id = get_model_id(model_name)
         self.i_frame_net: image_model.EVC = i_frame_net.half()
-
         self.cuda()
-        
-        dummy_input = torch.zeros([1, 3, BLOCK_SIZE, BLOCK_SIZE], device='cuda', dtype=torch.half)
-        self.i_frame_net(dummy_input, 0.5)
-
-        self.compile(model_path+".trt")
     
     def decompress_bits(self, bits, height, width, q_scale):
         with Timer("Decompress network."):
@@ -120,17 +114,28 @@ class DecoderApp(nn.Module):
     def get_model_path(cls, model_name):
         model_path = MODELS[model_name]
         model_path = os.path.join("checkpoints", model_path)
-        compiled_path = model_path + ".compiled"
+        compiled_path = model_path + ".trt"
         return model_path, compiled_path
     
     @classmethod
     def from_model_name(cls, model_name):
         with Timer("Loading"):
             model_path, compiled_path = cls.get_model_path(model_name)
-            with Timer("loading weights from file."):
+            if os.path.isdir(compiled_path):
+                print("Load from compiled model")
+                with InitTRTModelWithPlaceholder():
+                    decoder_app = cls(model_name)
+                load_weights(decoder_app.i_frame_net, compiled_path)
+
+                dummy_input = torch.zeros([1, 3, BLOCK_SIZE, BLOCK_SIZE], device='cuda', dtype=torch.half)
+                decoder_app.i_frame_net(dummy_input, 0.5)
+            else:
                 decoder_app = cls(model_name)
                 torch.cuda.synchronize()
-            return decoder_app
+                dummy_input = torch.zeros([1, 3, BLOCK_SIZE, BLOCK_SIZE], device='cuda', dtype=torch.half)
+                decoder_app.i_frame_net(dummy_input, 0.5)
+                decoder_app.compile(compiled_path)
+        return decoder_app
 
 
 def main():

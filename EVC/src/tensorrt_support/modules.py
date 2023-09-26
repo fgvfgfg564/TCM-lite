@@ -1,4 +1,6 @@
 import torch
+from torch import Tensor
 
 class TorchTensorRTPlaceholder(torch.nn.Identity):
-    pass
+    def forward(self, input: Tensor) -> Tensor:
+        raise ValueError("Placeholder cannot be forwarded.")

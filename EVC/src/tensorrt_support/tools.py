@@ -23,7 +23,7 @@ def compile(model: torch.nn.Module, output_folder):
             with torch_tensorrt.logging.debug():
                 trt_model = torch_tensorrt.ts.compile(scripted_model, 
                     inputs= [torch_tensorrt.Input(input_shape, dtype=torch.half)],
-                    enabled_precisions= {torch.float, torch.half},
+                    enabled_precisions={torch.half},
                     debug=True,
                     require_full_compilation=True,
                 )
