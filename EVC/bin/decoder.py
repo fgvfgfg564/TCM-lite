@@ -85,6 +85,7 @@ class DecoderApp(nn.Module):
         self.i_frame_net.entropy_coder.decoder = RansDecoder(2)
         for name, child in self.i_frame_net.named_children():
             print(name)
+            print(child)
     
     @classmethod
     def get_model_path(cls, model_name):
