@@ -83,6 +83,8 @@ class DecoderApp(nn.Module):
         torch.save(self, compiled_path)
         self.i_frame_net.entropy_coder.encoder = RansEncoder(True, 2)
         self.i_frame_net.entropy_coder.decoder = RansDecoder(2)
+        for name, child in self.i_frame_net.named_children():
+            print(name)
     
     @classmethod
     def get_model_path(cls, model_name):
@@ -106,8 +108,8 @@ class DecoderApp(nn.Module):
                 with Timer("loading weights from file."):
                     decoder_app = cls(model_name)
                     torch.cuda.synchronize()
-            dummy_input = torch.zeros([1, 512, 512, 3], device='cuda')
-            decoder_app.i_frame_net(dummy_input, 0.)
+            dummy_input = torch.zeros([1, 3, 512, 512], device='cuda', dtype=torch.half)
+            decoder_app.i_frame_net(dummy_input, 0.5)
             return decoder_app
     
     def decompress_bits(self, bits, height, width, q_scale):
