@@ -77,15 +77,6 @@ class DecoderApp(nn.Module):
         self.i_frame_net: image_model.EVC = i_frame_net.half()
 
         self.cuda()
-        # Save model to disk
-        self.i_frame_net.entropy_coder.encoder = None
-        self.i_frame_net.entropy_coder.decoder = None
-        torch.save(self, compiled_path)
-        self.i_frame_net.entropy_coder.encoder = RansEncoder(True, 2)
-        self.i_frame_net.entropy_coder.decoder = RansDecoder(2)
-        for name, child in self.i_frame_net.named_children():
-            print(name)
-            print(child)
     
     @classmethod
     def get_model_path(cls, model_name):
@@ -98,17 +89,9 @@ class DecoderApp(nn.Module):
     def from_model_name(cls, model_name):
         with Timer("Loading"):
             model_path, compiled_path = cls.get_model_path(model_name)
-            if os.path.isfile(compiled_path):
-                with Timer("loading from compiled model."):
-                    decoder_app = torch.load(compiled_path)
-                    decoder_app.i_frame_net.entropy_coder.encoder = RansEncoder(True, 2)
-                    decoder_app.i_frame_net.entropy_coder.decoder = RansDecoder(2)
-                    decoder_app = decoder_app.cuda()
-                    torch.cuda.synchronize()
-            else:
-                with Timer("loading weights from file."):
-                    decoder_app = cls(model_name)
-                    torch.cuda.synchronize()
+            with Timer("loading weights from file."):
+                decoder_app = cls(model_name)
+                torch.cuda.synchronize()
             dummy_input = torch.zeros([1, 3, 512, 512], device='cuda', dtype=torch.half)
             decoder_app.i_frame_net(dummy_input, 0.5)
             return decoder_app

@@ -3,7 +3,6 @@ import torch_tensorrt
 import os
 
 from .modules import TorchTensorRTPlaceholder
-from utils import Timer
 
 def compile(model: torch.nn.Module, output_folder):
     model.eval()
@@ -41,6 +40,5 @@ def load_weights(model: torch.nn.Module, state_dict_folder):
 
     for name, child in model.named_children():
         if isinstance(child, TorchTensorRTPlaceholder):
-            with Timer("Load tensorrt script"):
-                trt_filename = os.path.join(state_dict_folder, name+".ts")
-                model._modules[name] = torch.jit.load(trt_filename)
+            trt_filename = os.path.join(state_dict_folder, name+".ts")
+            model._modules[name] = torch.jit.load(trt_filename)

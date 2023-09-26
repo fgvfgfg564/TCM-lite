@@ -1,3 +1,4 @@
+from typing import Any
 import torch
 import torch_tensorrt
 from .modules import TorchTensorRTPlaceholder
@@ -19,6 +20,20 @@ class InitTRTModelWithPlaceholder:
         global VIRTUALIZE_TENSORRT_MODULES
         VIRTUALIZE_TENSORRT_MODULES = False
 
+class OneTimeInputShapeRecorderHook:
+    def __init__(self, module: torch.nn.Module) -> None:
+        self.module = module
+        self.handle = module.register_forward_hook(self)
+
+    def __call__(self, module, inputs, outputs) -> Any:
+        module.input_shape = inputs[0].shape
+        print(f"Recorded input shape: {module.input_shape}")
+        self.handle.remove()
+    
+    @classmethod
+    def attach(cls, module):
+        cls(module)
+
 def tensorrt_compiled_module(cls):
     """
     Any class wrapped by this decorator must have 'input_shape' property
@@ -34,6 +49,7 @@ def tensorrt_compiled_module(cls):
         else:
             old_init_(self, *args, **kwargs)
             setattr(self, 'tensorrt_compilable', True)
+            OneTimeInputShapeRecorderHook.attach(self)
     
     cls.__init__ = new_init_
     return cls
@@ -46,4 +62,5 @@ def maybe_tensorrt(module):
         return TorchTensorRTPlaceholder()
     else:
         module.tensorrt_compilable = True
+        OneTimeInputShapeRecorderHook.attach(module)
         return module
