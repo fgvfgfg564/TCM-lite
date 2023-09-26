@@ -5,12 +5,13 @@ import numpy as np
 from torch import nn
 import torch.nn.functional as F
 
+from .MLCodec_rans import RansEncoder, RansDecoder
+
 
 class EntropyCoder():
     def __init__(self, ec_thread=False):
         super().__init__()
 
-        from .MLCodec_rans import RansEncoder, RansDecoder
         self.encoder = RansEncoder(ec_thread, 2)
         self.decoder = RansDecoder(2)
 

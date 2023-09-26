@@ -13,7 +13,6 @@ from src.models import build_model, image_model
 from src.utils.common import str2bool, interpolate_log, create_folder, dump_json
 from src.utils.stream_helper import get_padding_size, get_state_dict
 from src.utils.png_reader import PNGReader
-from src.utils.stream_helper import get_padding_size, get_state_dict
 
 MODELS = {
     "EVC_LL": 'EVC_LL.pth.tar',
