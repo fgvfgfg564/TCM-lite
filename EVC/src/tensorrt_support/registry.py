@@ -37,3 +37,13 @@ def tensorrt_compiled_module(cls):
     
     cls.__init__ = new_init_
     return cls
+
+def maybe_tensorrt(module):
+    """
+    Add to the initialization of a module. To replace the module if tensorrt is used.
+    """
+    if VIRTUALIZE_TENSORRT_MODULES:
+        return TorchTensorRTPlaceholder()
+    else:
+        module.tensorrt_compilable = True
+        return module
