@@ -1,0 +1,1012 @@
+{
+  "kodak": {
+    "kodim01.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.579572,
+        "psnr": 29.957819,
+        "msssim": 0.973330,
+        "test_time": 1.433117,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim01.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.883687,
+        "psnr": 32.207314,
+        "msssim": 0.984977,
+        "test_time": 0.032700,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim01.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 1.249509,
+        "psnr": 34.261200,
+        "msssim": 0.991497,
+        "test_time": 0.032634,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim01.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 1.608293,
+        "psnr": 35.624702,
+        "msssim": 0.994478,
+        "test_time": 0.032986,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim01.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim02.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.184479,
+        "psnr": 32.635059,
+        "msssim": 0.944726,
+        "test_time": 0.035025,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim02.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.317986,
+        "psnr": 34.280800,
+        "msssim": 0.963715,
+        "test_time": 0.035008,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim02.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.538301,
+        "psnr": 36.106384,
+        "msssim": 0.977530,
+        "test_time": 0.035033,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim02.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.797446,
+        "psnr": 37.548111,
+        "msssim": 0.984818,
+        "test_time": 0.041169,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim02.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim03.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.164845,
+        "psnr": 34.921268,
+        "msssim": 0.974619,
+        "test_time": 0.032973,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim03.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.249806,
+        "psnr": 36.769085,
+        "msssim": 0.982834,
+        "test_time": 0.032485,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim03.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.372424,
+        "psnr": 38.606976,
+        "msssim": 0.988737,
+        "test_time": 0.031897,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim03.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.519276,
+        "psnr": 39.992634,
+        "msssim": 0.992173,
+        "test_time": 0.032052,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim03.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim04.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.215985,
+        "psnr": 32.931030,
+        "msssim": 0.959583,
+        "test_time": 0.034908,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim04.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.353105,
+        "psnr": 34.766712,
+        "msssim": 0.974761,
+        "test_time": 0.035067,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim04.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.556075,
+        "psnr": 36.658817,
+        "msssim": 0.984682,
+        "test_time": 0.035118,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim04.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.789996,
+        "psnr": 38.114712,
+        "msssim": 0.989675,
+        "test_time": 0.036972,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim04.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim05.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.607206,
+        "psnr": 30.393082,
+        "msssim": 0.978139,
+        "test_time": 0.035685,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim05.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.864576,
+        "psnr": 32.589218,
+        "msssim": 0.987631,
+        "test_time": 0.034961,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim05.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 1.210877,
+        "psnr": 34.691208,
+        "msssim": 0.993098,
+        "test_time": 0.034587,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim05.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 1.555570,
+        "psnr": 36.112743,
+        "msssim": 0.995630,
+        "test_time": 0.035071,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim05.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim06.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.412008,
+        "psnr": 31.337900,
+        "msssim": 0.964026,
+        "test_time": 0.032809,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim06.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.628172,
+        "psnr": 33.495415,
+        "msssim": 0.979059,
+        "test_time": 0.033714,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim06.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.915675,
+        "psnr": 35.621552,
+        "msssim": 0.987922,
+        "test_time": 0.041975,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim06.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 1.212806,
+        "psnr": 37.143150,
+        "msssim": 0.992268,
+        "test_time": 0.034254,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim06.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim07.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.242902,
+        "psnr": 34.333691,
+        "msssim": 0.984335,
+        "test_time": 0.044377,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim07.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.344241,
+        "psnr": 36.370426,
+        "msssim": 0.989741,
+        "test_time": 0.046011,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim07.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.487401,
+        "psnr": 38.332321,
+        "msssim": 0.993119,
+        "test_time": 0.045473,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim07.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.651447,
+        "psnr": 39.765182,
+        "msssim": 0.994969,
+        "test_time": 0.045760,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim07.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim08.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.630201,
+        "psnr": 30.044107,
+        "msssim": 0.978822,
+        "test_time": 0.045033,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim08.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.908749,
+        "psnr": 32.006386,
+        "msssim": 0.986922,
+        "test_time": 0.045282,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim08.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 1.270605,
+        "psnr": 33.748352,
+        "msssim": 0.992242,
+        "test_time": 0.044545,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim08.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 1.632637,
+        "psnr": 34.946026,
+        "msssim": 0.994902,
+        "test_time": 0.045245,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim08.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim09.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.183060,
+        "psnr": 34.598831,
+        "msssim": 0.978857,
+        "test_time": 0.039829,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim09.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.268448,
+        "psnr": 36.372475,
+        "msssim": 0.984689,
+        "test_time": 0.040267,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim09.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.389882,
+        "psnr": 38.035202,
+        "msssim": 0.988414,
+        "test_time": 0.039291,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim09.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.529531,
+        "psnr": 39.166256,
+        "msssim": 0.990534,
+        "test_time": 0.038592,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim09.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim10.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.196802,
+        "psnr": 34.329647,
+        "msssim": 0.974289,
+        "test_time": 0.033841,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim10.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.290557,
+        "psnr": 36.169617,
+        "msssim": 0.982781,
+        "test_time": 0.033831,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim10.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.427230,
+        "psnr": 37.867073,
+        "msssim": 0.988248,
+        "test_time": 0.034192,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim10.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.592186,
+        "psnr": 39.133270,
+        "msssim": 0.991172,
+        "test_time": 0.033873,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim10.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim11.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.327014,
+        "psnr": 31.708567,
+        "msssim": 0.960915,
+        "test_time": 0.032978,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim11.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.515530,
+        "psnr": 33.689213,
+        "msssim": 0.976590,
+        "test_time": 0.035070,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim11.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.783245,
+        "psnr": 35.677876,
+        "msssim": 0.986549,
+        "test_time": 0.032572,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim11.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 1.077426,
+        "psnr": 37.177784,
+        "msssim": 0.991507,
+        "test_time": 0.033567,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim11.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim12.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.161841,
+        "psnr": 34.018970,
+        "msssim": 0.959504,
+        "test_time": 0.035522,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim12.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.264263,
+        "psnr": 35.752209,
+        "msssim": 0.973389,
+        "test_time": 0.032817,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim12.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.430712,
+        "psnr": 37.684536,
+        "msssim": 0.983723,
+        "test_time": 0.032881,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim12.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.632101,
+        "psnr": 39.266376,
+        "msssim": 0.989321,
+        "test_time": 0.036676,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim12.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim13.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.833777,
+        "psnr": 28.357464,
+        "msssim": 0.966858,
+        "test_time": 0.034446,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim13.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 1.221258,
+        "psnr": 30.331017,
+        "msssim": 0.982356,
+        "test_time": 0.036184,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim13.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 1.660056,
+        "psnr": 31.868343,
+        "msssim": 0.989903,
+        "test_time": 0.034313,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim13.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 2.054600,
+        "psnr": 32.690109,
+        "msssim": 0.993002,
+        "test_time": 0.033974,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim13.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim14.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.447207,
+        "psnr": 30.602222,
+        "msssim": 0.965610,
+        "test_time": 0.033604,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim14.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.693850,
+        "psnr": 32.633415,
+        "msssim": 0.980209,
+        "test_time": 0.033494,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim14.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 1.030741,
+        "psnr": 34.755386,
+        "msssim": 0.989104,
+        "test_time": 0.033967,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim14.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 1.388722,
+        "psnr": 36.304649,
+        "msssim": 0.993344,
+        "test_time": 0.033262,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim14.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim15.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.205020,
+        "psnr": 33.194538,
+        "msssim": 0.968067,
+        "test_time": 0.035914,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim15.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.325166,
+        "psnr": 34.914078,
+        "msssim": 0.978518,
+        "test_time": 0.037566,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim15.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.506751,
+        "psnr": 36.685108,
+        "msssim": 0.986128,
+        "test_time": 0.036287,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim15.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.707644,
+        "psnr": 37.883305,
+        "msssim": 0.990102,
+        "test_time": 0.036192,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim15.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim16.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.241588,
+        "psnr": 32.954895,
+        "msssim": 0.963668,
+        "test_time": 0.032503,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim16.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.392688,
+        "psnr": 35.029213,
+        "msssim": 0.978258,
+        "test_time": 0.034287,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim16.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.611751,
+        "psnr": 37.227131,
+        "msssim": 0.987423,
+        "test_time": 0.031613,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim16.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.851019,
+        "psnr": 38.951252,
+        "msssim": 0.991935,
+        "test_time": 0.032583,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim16.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim17.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.230557,
+        "psnr": 33.492664,
+        "msssim": 0.971864,
+        "test_time": 0.035459,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim17.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.347285,
+        "psnr": 35.315529,
+        "msssim": 0.982418,
+        "test_time": 0.034164,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim17.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.516090,
+        "psnr": 37.035946,
+        "msssim": 0.988966,
+        "test_time": 0.034376,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim17.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.717416,
+        "psnr": 38.332512,
+        "msssim": 0.992395,
+        "test_time": 0.034511,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim17.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim18.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.472357,
+        "psnr": 30.441267,
+        "msssim": 0.964732,
+        "test_time": 0.035498,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim18.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.703456,
+        "psnr": 32.339401,
+        "msssim": 0.978034,
+        "test_time": 0.035151,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim18.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 1.002280,
+        "psnr": 33.973534,
+        "msssim": 0.986123,
+        "test_time": 0.036226,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim18.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 1.319630,
+        "psnr": 35.020683,
+        "msssim": 0.990222,
+        "test_time": 0.050597,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim18.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim19.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.284275,
+        "psnr": 32.107361,
+        "msssim": 0.964584,
+        "test_time": 0.035295,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim19.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.462352,
+        "psnr": 34.096939,
+        "msssim": 0.977978,
+        "test_time": 0.034861,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim19.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.701410,
+        "psnr": 36.003262,
+        "msssim": 0.986080,
+        "test_time": 0.035896,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim19.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.948697,
+        "psnr": 37.365261,
+        "msssim": 0.990187,
+        "test_time": 0.035431,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim19.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim20.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.190203,
+        "psnr": 33.882652,
+        "msssim": 0.977533,
+        "test_time": 0.031672,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim20.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.305016,
+        "psnr": 35.751133,
+        "msssim": 0.985162,
+        "test_time": 0.032142,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim20.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.460910,
+        "psnr": 37.547527,
+        "msssim": 0.989497,
+        "test_time": 0.031404,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim20.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.618524,
+        "psnr": 38.687637,
+        "msssim": 0.991460,
+        "test_time": 0.031937,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim20.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim21.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.380062,
+        "psnr": 31.888908,
+        "msssim": 0.975535,
+        "test_time": 0.032932,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim21.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.564697,
+        "psnr": 33.972614,
+        "msssim": 0.983346,
+        "test_time": 0.032804,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim21.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.788552,
+        "psnr": 35.783726,
+        "msssim": 0.988172,
+        "test_time": 0.033244,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim21.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 1.018212,
+        "psnr": 36.937729,
+        "msssim": 0.990793,
+        "test_time": 0.033459,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim21.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim22.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.320104,
+        "psnr": 31.449125,
+        "msssim": 0.954276,
+        "test_time": 0.035665,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim22.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.519973,
+        "psnr": 33.381317,
+        "msssim": 0.972304,
+        "test_time": 0.034166,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim22.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.792960,
+        "psnr": 35.292416,
+        "msssim": 0.983328,
+        "test_time": 0.034772,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim22.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 1.080499,
+        "psnr": 36.649612,
+        "msssim": 0.988456,
+        "test_time": 0.034705,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim22.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim23.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.149801,
+        "psnr": 35.511330,
+        "msssim": 0.976320,
+        "test_time": 0.033147,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim23.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.213683,
+        "psnr": 37.092606,
+        "msssim": 0.983803,
+        "test_time": 0.033982,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim23.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.313114,
+        "psnr": 38.742764,
+        "msssim": 0.988879,
+        "test_time": 0.036911,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim23.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.435874,
+        "psnr": 39.824734,
+        "msssim": 0.991760,
+        "test_time": 0.033849,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim23.png",
+        "rate_idx": 3
+      }
+    },
+    "kodim24.png": {
+      "000": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.477186,
+        "psnr": 30.677967,
+        "msssim": 0.971474,
+        "test_time": 0.034085,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim24.png",
+        "rate_idx": 0
+      },
+      "001": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.696218,
+        "psnr": 32.620388,
+        "msssim": 0.983433,
+        "test_time": 0.035669,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim24.png",
+        "rate_idx": 1
+      },
+      "002": {
+        "frame_pixel_num": 393216,
+        "bpp": 0.972361,
+        "psnr": 34.231464,
+        "msssim": 0.990316,
+        "test_time": 0.036189,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim24.png",
+        "rate_idx": 2
+      },
+      "003": {
+        "frame_pixel_num": 393216,
+        "bpp": 1.263603,
+        "psnr": 35.287720,
+        "msssim": 0.993655,
+        "test_time": 0.035077,
+        "ds_name": "kodak",
+        "img_path": "/home/xyhang/home/dataset/kodak/kodim24.png",
+        "rate_idx": 3
+      }
+    }
+  }
+}

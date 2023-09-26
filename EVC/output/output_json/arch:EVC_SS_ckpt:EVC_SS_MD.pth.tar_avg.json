@@ -1,0 +1,17 @@
+{
+  "name": "output/output_json/arch:EVC_SS_ckpt:EVC_SS_MD.pth.tar.json",
+  "kodak": {
+    "bpp": [
+      0.339085,
+      0.513948,
+      0.749538,
+      1.000131
+    ],
+    "psnr": [
+      32.323765,
+      34.247772,
+      36.101588,
+      37.413590
+    ]
+  }
+}
