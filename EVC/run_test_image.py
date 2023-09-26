@@ -15,7 +15,7 @@ def test_one_model(i_frame_model, checkpoint):
                     f" --i_frame_model_path {image_model}"
                     f" --test_config ./test_cfg/{test_cfg}"
                     " --cuda 1 -w 1 --rate_num 4"
-                    " --write_stream 0 --ec_thread 1"
+                    " --write_stream 1 --ec_thread 1"
                     " --verbose 1"
                     # " --save_decoded_frame True"
                     f" --output_path {output_json_path}")
