@@ -17,6 +17,7 @@ from src.utils.stream_helper import get_padding_size, get_state_dict
 
 from src.models.MLCodec_rans import RansEncoder, RansDecoder
 from src.utils.timer import Timer
+from src.tensorrt_support import compile
 
 torch.jit.optimized_execution(False)
 
@@ -58,6 +59,8 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+BLOCK_SIZE = 512
+
 class DecoderApp(nn.Module):
     def __init__(self, model_name) -> None:
         super().__init__()
@@ -77,29 +80,19 @@ class DecoderApp(nn.Module):
         self.i_frame_net: image_model.EVC = i_frame_net.half()
 
         self.cuda()
-    
-    @classmethod
-    def get_model_path(cls, model_name):
-        model_path = MODELS[model_name]
-        model_path = os.path.join("checkpoints", model_path)
-        compiled_path = model_path + ".compiled"
-        return model_path, compiled_path
-    
-    @classmethod
-    def from_model_name(cls, model_name):
-        with Timer("Loading"):
-            model_path, compiled_path = cls.get_model_path(model_name)
-            with Timer("loading weights from file."):
-                decoder_app = cls(model_name)
-                torch.cuda.synchronize()
-            dummy_input = torch.zeros([1, 3, 512, 512], device='cuda', dtype=torch.half)
-            decoder_app.i_frame_net(dummy_input, 0.5)
-            return decoder_app
+        
+        dummy_input = torch.zeros([1, 3, BLOCK_SIZE, BLOCK_SIZE], device='cuda', dtype=torch.half)
+        self.i_frame_net(dummy_input, 0.5)
+
+        self.compile(model_path+".trt")
     
     def decompress_bits(self, bits, height, width, q_scale):
         with Timer("Decompress network."):
             recon_img = self.i_frame_net.decompress(bits, height, width, q_scale)['x_hat']
         return recon_img
+    
+    def compile(self, output_dir):
+        compile(self.i_frame_net, output_dir)
     
     @classmethod
     def decompress(cls, input_pth, output_pth, id_bias):
@@ -122,6 +115,22 @@ class DecoderApp(nn.Module):
             recon_img = decoder_app.decompress_bits(main_bits, padded_h, padded_w, q_scale)
             recon_img = F.pad(recon_img, (-padding_l, -padding_r, -padding_t, -padding_b))
             save_torch_image(recon_img, output_pth)
+    
+    @classmethod
+    def get_model_path(cls, model_name):
+        model_path = MODELS[model_name]
+        model_path = os.path.join("checkpoints", model_path)
+        compiled_path = model_path + ".compiled"
+        return model_path, compiled_path
+    
+    @classmethod
+    def from_model_name(cls, model_name):
+        with Timer("Loading"):
+            model_path, compiled_path = cls.get_model_path(model_name)
+            with Timer("loading weights from file."):
+                decoder_app = cls(model_name)
+                torch.cuda.synchronize()
+            return decoder_app
 
 
 def main():

@@ -27,7 +27,7 @@ class OneTimeInputShapeRecorderHook:
 
     def __call__(self, module, inputs, outputs) -> Any:
         module.input_shape = inputs[0].shape
-        print(f"Recorded input shape: {module.input_shape}")
+        print(f"Recorded input shape: {module.input_shape}", id(module))
         self.handle.remove()
     
     @classmethod
