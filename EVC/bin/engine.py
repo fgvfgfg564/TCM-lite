@@ -10,15 +10,15 @@ import numpy as np
 
 from PIL import Image
 
-from src.models import build_model, image_model
-from src.utils.common import str2bool, interpolate_log, create_folder, dump_json
-from src.utils.stream_helper import get_padding_size, get_state_dict
-from src.utils.png_reader import PNGReader
-from src.utils.stream_helper import get_padding_size, get_state_dict
+from ..src.models import build_model, image_model
+from ..src.utils.common import str2bool, interpolate_log, create_folder, dump_json
+from ..src.utils.stream_helper import get_padding_size, get_state_dict
+from ..src.utils.png_reader import PNGReader
+from ..src.utils.stream_helper import get_padding_size, get_state_dict
 
-from src.models.MLCodec_rans import RansEncoder, RansDecoder
-from src.utils.timer import Timer
-from src.tensorrt_support import *
+from ..src.models.MLCodec_rans import RansEncoder, RansDecoder
+from ..src.utils.timer import Timer
+from ..src.tensorrt_support import *
 
 MODELS = {
     "EVC_LL": 'EVC_LL.pth.tar',
@@ -54,48 +54,14 @@ class ModelEngine(nn.Module):
     
     def compile(self, output_dir):
         compile(self.i_frame_net, output_dir)
-
-    @staticmethod
-    def read_img(img_path):
-        if not os.path.exists(img_path):
-            raise FileNotFoundError(img_path)
-
-        rgb = Image.open(img_path).convert('RGB')
-        rgb = np.asarray(rgb).astype('float32').transpose(2, 0, 1)
-        rgb = rgb / 255.
-        rgb = torch.from_numpy(rgb).type(torch.half)
-        rgb = rgb.unsqueeze(0)
-        rgb = rgb.cuda()
-        return rgb
-    
-    @staticmethod
-    def pad_img(x, p):
-        pic_height = x.shape[2]
-        pic_width = x.shape[3]
-        padding_l, padding_r, padding_t, padding_b = get_padding_size(pic_height, pic_width, p)
-        x_padded = F.pad(
-            x,
-            (padding_l, padding_r, padding_t, padding_b),
-            mode="constant",
-            value=0,
-        )
-        return pic_height, pic_width, x_padded
     
     def compress_block(self, img_block, q_scale):
         bit_stream = self.i_frame_net.compress(img_block, q_scale)
         return bit_stream
 
-    def decompress_block(self, bit_stream, h, w, q_scale, timeit=False):
-        if timeit:
-            time0 = time.time()
-            recon_img = self.i_frame_net.decompress(bit_stream, h, w, q_scale)['x_hat']
-            torch.cuda.synchronize()
-            time1 = time.time()
-            time_passed = time1 - time0
-        else:
-            recon_img = self.i_frame_net.decompress(bit_stream, h, w, q_scale)['x_hat']
-            time_passed = None
-        return recon_img, time_passed
+    def decompress_block(self, bit_stream, h, w, q_scale):
+        recon_img = self.i_frame_net.decompress(bit_stream, h, w, q_scale)['x_hat']
+        return recon_img
     
     @classmethod
     def get_model_path(cls, model_name):

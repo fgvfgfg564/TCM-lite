@@ -12,8 +12,6 @@ def parse_args():
     args = parser.parse_args()
     return args
 
-
-
 def main():
     torch.backends.cudnn.enabled = True
     args = parse_args()
