@@ -1,6 +1,7 @@
 import os
 import argparse
 import struct
+import time
 
 import torch
 import torch.nn as nn
@@ -86,10 +87,10 @@ class ModelEngine(nn.Module):
         return rgb
     
     @staticmethod
-    def pad_img(x):
+    def pad_img(x, p):
         pic_height = x.shape[2]
         pic_width = x.shape[3]
-        padding_l, padding_r, padding_t, padding_b = get_padding_size(pic_height, pic_width)
+        padding_l, padding_r, padding_t, padding_b = get_padding_size(pic_height, pic_width, p)
         x_padded = F.pad(
             x,
             (padding_l, padding_r, padding_t, padding_b),
@@ -98,45 +99,61 @@ class ModelEngine(nn.Module):
         )
         return pic_height, pic_width, x_padded
     
-    def compress(self, input_pth, target_bpp, output_pth, id_bias):
-        x = self.read_img(input_pth)
-        h, w, x_padded = self.pad_img(x)
+    # def compress(self, input_pth, target_bpp, output_pth, id_bias):
+    #     with Timer("Compress"):
+    #         x = self.read_img(input_pth)
+    #         h, w, x_padded = self.pad_img(x, p=BLOCK_SIZE)
 
-        # ignore target_bpp and patchification first
-        q_scale = 0.5
-        compress_results = self.i_frame_net.compress(x_padded, q_scale)
-        bit_stream = compress_results['bit_stream']
 
-        # Create model header
-        model_id = self.model_id + id_bias
-        header = struct.pack("B2Hf", model_id, h, w, float(q_scale))
+    #         # Create model header
+    #         model_id = self.model_id + id_bias
+    #         header = struct.pack("B2H", model_id, h, w)
+    #         out_fd = open(output_pth, "wb")
+    #         out_fd.write(header)
 
-        file_obj = open(output_pth, "wb")
-        file_obj.write(header)
-        file_obj.write(bit_stream)
-        file_obj.close()
+    #         # ignore target_bpp and patchification first
+    #         # Process blocks
+    #         for i in 
+
+    #         out_fd.close()
     
-    def decompress(self, input_pth, output_pth, id_bias):
-        with Timer("Decompress."):
-            file_obj = open(input_pth, "rb")
-            headersize = struct.calcsize('B2Hf')
-            header_bits = file_obj.read(headersize)
-            model_id, h, w, q_scale = struct.unpack('B2Hf', header_bits)
-            model_id -= id_bias
-            model_name = get_model_name(model_id)
-            assert(model_id == self.model_id)
+    def compress_block(self, img_block, q_scale):
+        bit_stream = self.i_frame_net.compress(img_block, q_scale)
+        return bit_stream
+    
+    # def decompress(self, input_pth, output_pth, id_bias):
+    #     with Timer("Decompress."):
+    #         file_obj = open(input_pth, "rb")
+    #         headersize = struct.calcsize('B2Hf')
+    #         header_bits = file_obj.read(headersize)
+    #         model_id, h, w, q_scale = struct.unpack('B2Hf', header_bits)
+    #         model_id -= id_bias
+    #         model_name = get_model_name(model_id)
+    #         assert(model_id == self.model_id)
 
-            main_bits = file_obj.read()
-            file_obj.close()
+    #         main_bits = file_obj.read()
+    #         file_obj.close()
 
-            padding_l, padding_r, padding_t, padding_b = get_padding_size(h, w)
-            padded_h = h + padding_t + padding_b
-            padded_w = w + padding_l + padding_r
+    #         padding_l, padding_r, padding_t, padding_b = get_padding_size(h, w)
+    #         padded_h = h + padding_t + padding_b
+    #         padded_w = w + padding_l + padding_r
 
-            with Timer("Decompress network."):
-                recon_img = self.i_frame_net.decompress(main_bits, padded_h, padded_w, q_scale)['x_hat']
-            recon_img = F.pad(recon_img, (-padding_l, -padding_r, -padding_t, -padding_b))
-            save_torch_image(recon_img, output_pth)
+    #         with Timer("Decompress network."):
+    #             recon_img = self.i_frame_net.decompress(main_bits, padded_h, padded_w, q_scale)['x_hat']
+    #         recon_img = F.pad(recon_img, (-padding_l, -padding_r, -padding_t, -padding_b))
+    #         save_torch_image(recon_img, output_pth)
+
+    def decompress_block(self, bit_stream, h, w, q_scale, timeit=False):
+        if timeit:
+            time0 = time.time()
+            recon_img = self.i_frame_net.decompress(bit_stream, h, w, q_scale)['x_hat']
+            torch.cuda.synchronize()
+            time1 = time.time()
+            time_passed = time1 - time0
+        else:
+            recon_img = self.i_frame_net.decompress(bit_stream, h, w, q_scale)['x_hat']
+            time_passed = None
+        return recon_img, time_passed
     
     @classmethod
     def get_model_id(cls, input_pth, id_bias):
@@ -151,7 +168,8 @@ class ModelEngine(nn.Module):
     @classmethod
     def get_model_path(cls, model_name):
         model_path = MODELS[model_name]
-        model_path = os.path.join("checkpoints", model_path)
+        file_folder = os.path.split(__file__)[0]
+        model_path = os.path.join(file_folder, "../checkpoints", model_path)
         compiled_path = model_path + ".trt"
         return model_path, compiled_path
     
