@@ -56,10 +56,12 @@ class ModelEngine(nn.Module):
         compile(self.i_frame_net, output_dir)
     
     def compress_block(self, img_block, q_scale):
-        bit_stream = self.i_frame_net.compress(img_block, q_scale)
+        q_scale *= 4
+        bit_stream = self.i_frame_net.compress(img_block, q_scale)['bit_stream']
         return bit_stream
 
     def decompress_block(self, bit_stream, h, w, q_scale):
+        q_scale *= 4
         recon_img = self.i_frame_net.decompress(bit_stream, h, w, q_scale)['x_hat']
         return recon_img
     

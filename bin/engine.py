@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from EVC.bin.engine import ModelEngine, MODELS
 
-def get_padding_size(height, width, p=64):
+def get_padding_size(height, width, p=768):
     new_h = (height + p - 1) // p * p
     new_w = (width + p - 1) // p * p
     # padding_left = (new_w - width) // 2
@@ -19,7 +19,7 @@ def get_padding_size(height, width, p=64):
     return padding_left, padding_right, padding_top, padding_bottom
 
 class Engine:
-    def __init__(self, ctu_size=768) -> None:
+    def __init__(self, ctu_size=512) -> None:
         self.ctu_size = ctu_size
         self.methods = []
         idx = 0
@@ -36,14 +36,14 @@ class Engine:
         while min_qs < max_qs - 1e-7:
             mid_qs = (max_qs + min_qs) / 2.
             bits = method.compress_block(image_block, mid_qs)
-            len_bits = bits * 8
-            if len_bits > target_bits:
+            len_bits = len(bits) * 8
+            if len_bits <= target_bits:
                 max_qs = mid_qs
             else:
                 min_qs = mid_qs
         
-        bits = method.compress_block(image_block, min_qs)
-        return bits, min_qs
+        bits = method.compress_block(image_block, max_qs)
+        return bits, max_qs
 
     def _estimate_loss(self, method, image_block, target_bits, repeat=3): 
         times = []
@@ -58,7 +58,7 @@ class Engine:
             times.append(time.time() - time0)
             mses.append(torch.mean((image_block - recon_img) ** 2).detach().cpu().numpy().item())
         
-        return np.mean(mses), np.mean(times)
+        return np.mean(mses), np.mean(times), bits, recon_img
 
     @staticmethod
     def read_img(img_path):
@@ -96,4 +96,13 @@ class Engine:
         h, w, padded_img = self.pad_img(input_img)
 
         img_blocks = padded_img.unfold(2, self.ctu_size, self.ctu_size).unfold(3, self.ctu_size, self.ctu_size)
-        print(img_blocks.shape)
+
+        img_blocks = torch.permute(img_blocks, (2, 3, 0, 1, 4, 5))
+        n_block_h, n_block_w, _, c, ctu_h, ctu_w = img_blocks.shape
+        for i in range(n_block_h):
+            for j in range(n_block_w):
+                block = img_blocks[i, j]
+                method = self.methods[0][0]
+                target_bits = np.floor(target_bpp * ctu_h * ctu_w).astype(np.int32)
+                result = self._estimate_loss(method, block, target_bits)
+                print(result[0], result[1], len(result[2])*8, target_bits)
