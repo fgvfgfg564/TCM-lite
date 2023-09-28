@@ -23,8 +23,11 @@ class Engine:
         self.ctu_size = ctu_size
         self.methods = []
         idx = 0
+
+        # EVC models
         for model_name in MODELS.keys():
             self.methods.append((ModelEngine.from_model_name(model_name), idx))
+            idx += 1
     
     def _compress_with_bitrate(self, method, image_block, target_bits):
         min_qs = 1e-5
@@ -90,7 +93,7 @@ class Engine:
 
     def encode(self, input_pth, output_pth, target_bpp):
         input_img = self.read_img(input_pth)
-        padded_img: torch.Tensor = self.pad_img(input_img)
+        h, w, padded_img = self.pad_img(input_img)
 
         img_blocks = padded_img.unfold(2, self.ctu_size, self.ctu_size).unfold(3, self.ctu_size, self.ctu_size)
         print(img_blocks.shape)
