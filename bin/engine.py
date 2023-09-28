@@ -26,7 +26,7 @@ class Engine:
 
         # EVC models
         for model_name in MODELS.keys():
-            self.methods.append((ModelEngine.from_model_name(model_name), idx))
+            self.methods.append((ModelEngine.from_model_name(model_name, True), model_name, idx))
             idx += 1
     
     def _compress_with_bitrate(self, method, image_block, target_bits):
@@ -58,7 +58,7 @@ class Engine:
             times.append(time.time() - time0)
             mses.append(torch.mean((image_block - recon_img) ** 2).detach().cpu().numpy().item())
         
-        return np.mean(mses), np.mean(times), bits, recon_img
+        return np.mean(mses), np.mean(times), bits, recon_img, q_scale
 
     @staticmethod
     def read_img(img_path):
@@ -101,8 +101,9 @@ class Engine:
         n_block_h, n_block_w, _, c, ctu_h, ctu_w = img_blocks.shape
         for i in range(n_block_h):
             for j in range(n_block_w):
+                print("Encoding with method: ", self.methods[0][1])
                 block = img_blocks[i, j]
                 method = self.methods[0][0]
                 target_bits = np.floor(target_bpp * ctu_h * ctu_w).astype(np.int32)
                 result = self._estimate_loss(method, block, target_bits)
-                print(result[0], result[1], len(result[2])*8, target_bits)
+                print(result[0], result[1], len(result[2])*8, target_bits, "q_scale =", result[4])

@@ -74,12 +74,13 @@ class ModelEngine(nn.Module):
         return model_path, compiled_path
     
     @classmethod
-    def _load_from_weight(cls, model_name, compiled_path):
+    def _load_from_weight(cls, model_name, compiled_path, compile=True):
         decoder_app = cls(model_name)
         torch.cuda.synchronize()
         dummy_input = torch.zeros([1, 3, BLOCK_SIZE, BLOCK_SIZE], device='cuda', dtype=torch.half)
         decoder_app.i_frame_net(dummy_input, 0.5)
-        decoder_app.compile(compiled_path)
+        if compile:
+            decoder_app.compile(compiled_path)
         return decoder_app
     
     @classmethod
@@ -94,14 +95,14 @@ class ModelEngine(nn.Module):
         return decoder_app
 
     @classmethod
-    def from_model_name(cls, model_name):
+    def from_model_name(cls, model_name, ignore_tensorrt=False):
         with Timer("Loading"):
             model_path, compiled_path = cls.get_model_path(model_name)
-            if os.path.isdir(compiled_path):
+            if not ignore_tensorrt and os.path.isdir(compiled_path):
                 try:
                     decoder_app = cls._load_from_compiled(model_name, compiled_path)
                 except FileNotFoundError:
-                    decoder_app = cls._load_from_weight(model_name, compiled_path)
+                    decoder_app = cls._load_from_weight(model_name, compiled_path, not ignore_tensorrt)
             else:
-                decoder_app = cls._load_from_weight(model_name, compiled_path)
+                decoder_app = cls._load_from_weight(model_name, compiled_path, not ignore_tensorrt)
         return decoder_app
