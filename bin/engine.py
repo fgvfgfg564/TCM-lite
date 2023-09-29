@@ -13,8 +13,6 @@ from scipy import interpolate
 
 from EVC.bin.engine import ModelEngine, MODELS
 
-MINIMAL_BITS = 512
-
 def get_padding_size(height, width, p=768):
     new_h = (height + p - 1) // p * p
     new_w = (width + p - 1) // p * p
@@ -30,7 +28,29 @@ class Header:
     def __init__(self, method_ids, target_bitses) -> None:
         self.method_ids = method_ids
         self.target_bitses = target_bitses
+    
+    def normalize_target_bitses(self, min_table, max_table, total_target):
+        n_block_h, n_block_w = self.method_ids.shape
+        min_bits = np.zeros_like(self.target_bitses,dtype=np.int32)
+        max_bits = np.zeros_like(self.target_bitses,dtype=np.int32)
 
+        for i in range(n_block_h):
+            for j in range(n_block_w):
+                min_bits[i, j] = min_table[self.method_ids[i, j]][i][j]
+                max_bits[i, j] = max_table[self.method_ids[i, j]][i][j]
+        
+        old_target = self.target_bitses
+        old_target -= min_bits
+        old_target = np.maximum(old_target, 0)
+        old_target = old_target.astype(np.float32)
+        old_target_rate = old_target / np.sum(old_target)
+
+        new_target = old_target_rate * (total_target - np.sum(min_bits))
+        new_target = np.floor(new_target).astype(np.int32)
+        new_target += min_bits
+        new_target = np.minimum(new_target, max_bits)
+        self.target_bitses = new_target
+        assert(np.sum(self.target_bitses) <= total_target)
 
 class Engine:
     def __init__(self, ctu_size=512, num_qscale_samples=20) -> None:
@@ -44,7 +64,7 @@ class Engine:
             idx += 1
         
         self.num_qscale_samples = num_qscale_samples
-        self.qscale_samples = np.linspace(0, 1, num_qscale_samples)
+        self.qscale_samples = np.linspace(0, 1, num_qscale_samples)[::-1]
     
     def _compress_with_bitrate(self, method, image_block, target_bits):
         min_qs = 1e-5
@@ -73,7 +93,7 @@ class Engine:
     @classmethod
     def torch_pseudo_quantize_to_uint8(cls, x):
         x = cls.torch_to_uint8(x)
-        x = x.to(torch.float32) / 255.0
+        x = x.to(torch.half) / 255.0
         return x
 
     def _estimate_loss(self, method, image_block, target_bits=None, q_scale=None, repeat=1): 
@@ -105,8 +125,16 @@ class Engine:
     
     def _precompute_loss(self, img_blocks):
         n_block_h, n_block_w, _, c, ctu_h, ctu_w = img_blocks.shape
+        n_methods = len(self.methods)
+
         self._precomputed_curve = {}
-        for method, _, idx in tqdm.tqdm(self.methods):
+        self._minimal_bits = np.zeros([n_methods, n_block_h, n_block_w], dtype=np.int32)
+        self._maximal_bits = np.zeros([n_methods, n_block_h, n_block_w], dtype=np.int32)
+
+        pbar = tqdm.trange(n_methods * n_block_h * n_block_w)
+        pbar.set_description("Precomputing loss")
+        pbar_iter = pbar.__iter__()
+        for method, _, idx in self.methods:
             self._precomputed_curve[idx] = {}
             for i in range(n_block_h):
                 self._precomputed_curve[idx][i] = {}
@@ -123,10 +151,15 @@ class Engine:
                         num_bits.append(num_bit)
                         mses.append(mse)
                         times.append(dec_time)
+
+                    self._minimal_bits[idx, i, j] = num_bits[0]
+                    self._maximal_bits[idx, i, j] = num_bits[-1]
+
                     b_m = interpolate.interp1d(num_bits, mses, kind='cubic')
                     b_t = interpolate.interp1d(num_bits, times, kind='cubic')
                     self._precomputed_curve[idx][i][j]['b_m'] = b_m
                     self._precomputed_curve[idx][i][j]['b_t'] = b_t
+                    pbar_iter.__next__()
     
     def _search(self, img_blocks, method_ids, target_bitses):
         n_block_h, n_block_w, _, c, ctu_h, ctu_w = img_blocks.shape
@@ -142,8 +175,8 @@ class Engine:
 
                 precomputed_results = self._precomputed_curve[method_id][i][j]
 
-                mse = precomputed_results['b_m'](target_bitses)
-                t = precomputed_results['b_t'](target_bitses)
+                mse = precomputed_results['b_m'](target_bits)
+                t = precomputed_results['b_t'](target_bits)
 
                 global_time += t
                 global_mse.append(mse)
@@ -156,17 +189,6 @@ class Engine:
         noise = np.random.normal(0, sigma, x.shape).astype(np.int32)
         return noise
     
-    def _normalize_target_bits(self, x, total_target_bits):
-        x = np.maximum(x, MINIMAL_BITS)
-        new_total = np.sum(x)
-        valid = x > MINIMAL_BITS
-        num_valid = np.sum(valid)
-        bias_per_block = np.floor((total_target_bits - new_total) / num_valid).astype(np.int32)
-        x[valid] += bias_per_block
-        assert(np.sum(x) <= total_target_bits)
-        return x
-
-    
     def _hybrid(self, header1, header2, total_target_bits):
         size = header1.method_ids.shape
 
@@ -177,9 +199,10 @@ class Engine:
         # Mutate target bitrates
         mutate_target = np.random.choice([0, 1], size)
         new_target = np.select([mutate_target == 0, mutate_target == 1], [header1.target_bitses, header2.target_bitses])
-        new_target = self._normalize_target_bits(new_target, total_target_bits)
+        new_header = Header(new_method_ids, new_target)
+        new_header.normalize_target_bitses(self._minimal_bits, self._maximal_bits, total_target_bits)
 
-        return Header(new_method_ids, new_target)
+        return new_header
     
     def _mutate(self, header: Header, total_target_bits, method_mutate_p=0.5, bit_mutate_sigma=8192, inplace=True):
         n_block_h, n_block_w = header.method_ids.shape
@@ -199,9 +222,10 @@ class Engine:
         old_target = header.target_bitses
         bitrate_noise = self._normal_noise_like(old_target, bit_mutate_sigma)
         new_target = old_target + bitrate_noise
-        new_target = self._normalize_target_bits(new_target, total_target_bits)
-
         header.target_bitses = new_target
+
+        header.normalize_target_bitses(self._minimal_bits, self._maximal_bits, total_target_bits)
+
         return header
     
     def _search_init_qscale(self, method, img_blocks, total_target_bits):
@@ -226,7 +250,7 @@ class Engine:
         
         return max_qs, target_bits
 
-    def _solve_genetic(self, img_blocks, total_target_bits, N=100, num_generation=10000, survive_rate=0.05):
+    def _solve_genetic(self, img_blocks, total_target_bits, N=10000, num_generation=10000, survive_rate=0.1):
         n_block_h, n_block_w, _, c, ctu_h, ctu_w = img_blocks.shape
         n_blocks = n_block_h * n_block_w
 

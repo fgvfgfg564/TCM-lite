@@ -25,8 +25,8 @@ def test_one_model(i_frame_model, checkpoint):
 
 
 def main():
-    # i_frame_model = "EVC_LL"
-    # checkpoint = 'EVC_LL.pth.tar'
+    i_frame_model = "EVC_LL"
+    checkpoint = 'EVC_LL.pth.tar'
 
     # i_frame_model = "EVC_ML"
     # checkpoint = 'EVC_ML_MD.pth.tar'
@@ -43,8 +43,8 @@ def main():
     # i_frame_model = "EVC_MM"
     # checkpoint = 'EVC_MM_MD.pth.tar'
 
-    i_frame_model = "EVC_SS"
-    checkpoint = 'EVC_SS_MD.pth.tar'
+    # i_frame_model = "EVC_SS"
+    # checkpoint = 'EVC_SS_MD.pth.tar'
 
     # i_frame_model = "Scale_EVC_SL"
     # checkpoint = 'Scale_EVC_SL_MDRRL.pth.tar'
