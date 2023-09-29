@@ -57,6 +57,20 @@ class Engine:
         
         bits = method.compress_block(image_block, max_qs)
         return bits, max_qs
+    
+    @classmethod
+    def torch_to_uint8(cls, x):
+        x = torch.clamp(x, 0, 1)
+        x *= 255
+        x = torch.round(x)
+        x = x.to(torch.uint8)
+        return x
+    
+    @classmethod
+    def torch_pseudo_quantize_to_uint8(cls, x):
+        x = cls.torch_to_uint8(x)
+        x = x.to(torch.float32) / 255.0
+        return x
 
     def _estimate_loss(self, method, image_block, target_bits, repeat=1): 
         times = []
@@ -66,13 +80,19 @@ class Engine:
             bits, q_scale = self._compress_with_bitrate(method, image_block, target_bits)
             time0 = time.time()
             recon_img = method.decompress_block(bits, h, w, q_scale)
+            recon_img = torch.clamp(recon_img, 0, 1)
 
             torch.cuda.synchronize()
             times.append(time.time() - time0)
-            mses.append(torch.mean((image_block - recon_img) ** 2).detach().cpu().numpy().item())
+
+            image_block = self.torch_pseudo_quantize_to_uint8(image_block)
+            recon_img = self.torch_pseudo_quantize_to_uint8(recon_img)
+
+            mse = torch.mean((image_block - recon_img)**2).detach().cpu().numpy()
+            mses.append(mse)
+
         mse = np.mean(mses)
         psnr = -10*np.log10(mse)
-        print(f"bpp={len(bits)*8/(self.ctu_size**2)}, q_scale={q_scale}, mse={mse}, psnr={psnr}")
         
         return mse, np.mean(times), bits, recon_img, q_scale
     
@@ -176,6 +196,7 @@ class Engine:
         n_block_h, n_block_w, _, c, ctu_h, ctu_w = img_blocks.shape
         n_blocks = n_block_h * n_block_w
 
+        print("Initializing qscale")
         default_qscale, default_target_bits = self._search_init_qscale(self.methods[0][0], img_blocks, total_target_bits)
         
         # Generate initial solves
