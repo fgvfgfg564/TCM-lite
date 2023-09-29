@@ -7,6 +7,8 @@ import torch.nn.functional as F
 
 import tqdm
 import copy
+import math
+import random
 
 from EVC.bin.engine import ModelEngine, MODELS
 
@@ -68,8 +70,11 @@ class Engine:
             torch.cuda.synchronize()
             times.append(time.time() - time0)
             mses.append(torch.mean((image_block - recon_img) ** 2).detach().cpu().numpy().item())
+        mse = np.mean(mses)
+        psnr = -10*np.log10(mse)
+        print(f"bpp={len(bits)*8/(self.ctu_size**2)}, q_scale={q_scale}, mse={mse}, psnr={psnr}")
         
-        return np.mean(mses), np.mean(times), bits, recon_img, q_scale
+        return mse, np.mean(times), bits, recon_img, q_scale
     
     def _search(self, img_blocks, method_ids, target_bitses):
         n_block_h, n_block_w, _, c, ctu_h, ctu_w = img_blocks.shape
@@ -91,7 +96,7 @@ class Engine:
         
         global_mse = np.mean(global_mse)
         psnr = -10*np.log10(global_mse)
-        return psnr - global_time
+        return psnr - global_time, psnr, global_time
     
     def _normal_noise_like(self, x, sigma):
         noise = np.random.normal(0, sigma, x.shape).astype(np.int32)
@@ -144,41 +149,79 @@ class Engine:
 
         header.target_bitses = new_target
         return header
+    
+    def _search_init_qscale(self, method, img_blocks, total_target_bits):
+        min_qs = 1e-5
+        max_qs = 1.
+        n_block_h, n_block_w, _, c, ctu_h, ctu_w = img_blocks.shape
+        target_bits = np.zeros([n_block_h, n_block_w])
 
-    def _solve_genetic(self, img_blocks, total_target_bits, N=100, num_generation=100):
+        while min_qs < max_qs - 1e-3:
+            mid_qs = (max_qs + min_qs) / 2.
+            total_bits = 0
+            for i in range(n_block_h):
+                for j in range(n_block_w):
+                    bits = method.compress_block(img_blocks[i, j], mid_qs)
+                    len_bits = len(bits) * 8
+                    target_bits[i, j] = len_bits
+                    total_bits += len_bits
+            if total_bits <= total_target_bits:
+                max_qs = mid_qs
+            else:
+                min_qs = mid_qs
+        
+        return max_qs, target_bits
+
+    def _solve_genetic(self, img_blocks, total_target_bits, N=100, num_generation=10000, survive_rate=0.05):
         n_block_h, n_block_w, _, c, ctu_h, ctu_w = img_blocks.shape
         n_blocks = n_block_h * n_block_w
 
-        default_target_bits = total_target_bits // n_blocks
+        default_qscale, default_target_bits = self._search_init_qscale(self.methods[0][0], img_blocks, total_target_bits)
         
         # Generate initial solves
         solves = []
-        for k in range(N*3):
+        for k in range(N):
             method_ids = np.zeros([n_block_h, n_block_w], dtype=np.int32)
-            target_bitses = default_target_bits + np.zeros([n_block_h, n_block_w], dtype=np.int32)
+            target_bitses = default_target_bits
             method = Header(method_ids, target_bitses)
             self._mutate(method, total_target_bits)
             solves.append(method)
         
+        max_score = None
+        best_psnr = None
+        best_time = None
+
         for u in (pbar := tqdm.tqdm(solves)):
-            pbar.set_description(f"Calculating loss for generation 0")
+            pbar.set_description(f"Calculating loss for generation 0; max_score={max_score}; best_psnr={best_psnr}; best_time={best_time}")
             if not hasattr(u, 'loss'):
-                u.loss = self._search(img_blocks, u.method_ids, u.target_bitses)
+                u.loss, u.psnr, u.time = self._search(img_blocks, u.method_ids, u.target_bitses)
+                if max_score is None or max_score < u.loss:
+                    max_score = u.loss
+                    best_time = u.time
+                    best_psnr = u.psnr
         
+        num_alive = int(math.floor(N*survive_rate))
+
         for k in range(num_generation):
             solves.sort(key=lambda x:x.loss, reverse=True)
-            print(f"best loss on generation {k}: {solves[0].loss}; total_bits={np.sum(solves[0].target_bitses)}", flush=True)
+
+            # show best solution on generation
+            best_solution:Header = solves[0]
+            print(f"best loss on generation {k}: {best_solution.loss}; total_bits={np.sum(best_solution.target_bitses)}", flush=True)
+            print("method_ids =", best_solution.method_ids.flatten())
+            print("target_bits =", best_solution.target_bitses.flatten())
 
             # Kill last solutions
-            solves = solves[:2*N]
+            solves = solves[:num_alive]
 
             # Hybrid
-            pbar = tqdm.tqdm(range(N))
-            pbar.set_description(f"Calculating loss for generation {k+1}")
-            for i in pbar:
-                newborn = self._hybrid(solves[i*2], solves[i*2+1], total_target_bits)
+            for i in (pbar := tqdm.tqdm(range(N - num_alive))):
+                pbar.set_description(f"Calculating loss for generation {k+1}; max_score={max_score}; best_psnr={best_psnr}; best_time={best_time}")
+                parent_id1 = random.randint(0, num_alive - 1)
+                parent_id2 = random.randint(0, num_alive - 1)
+                newborn = self._hybrid(solves[parent_id1], solves[parent_id2], total_target_bits)
                 self._mutate(newborn, total_target_bits)
-                newborn.loss = self._search(img_blocks, newborn.method_ids, newborn.target_bitses)
+                newborn.loss, newborn.psnr, newborn.time = self._search(img_blocks, newborn.method_ids, newborn.target_bitses)
                 solves.append(newborn)
                     
 

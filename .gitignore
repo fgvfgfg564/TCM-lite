@@ -143,3 +143,4 @@ launch.json
 *.bin
 */output_json
 *.compiled
+images/
