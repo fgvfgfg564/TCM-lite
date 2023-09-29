@@ -9,6 +9,7 @@ import tqdm
 import copy
 import math
 import random
+from scipy import interpolate
 
 from EVC.bin.engine import ModelEngine, MODELS
 
@@ -32,7 +33,7 @@ class Header:
 
 
 class Engine:
-    def __init__(self, ctu_size=512) -> None:
+    def __init__(self, ctu_size=512, num_qscale_samples=20) -> None:
         self.ctu_size = ctu_size
         self.methods = []
         idx = 0
@@ -41,6 +42,9 @@ class Engine:
         for model_name in MODELS.keys():
             self.methods.append((ModelEngine.from_model_name(model_name), model_name, idx))
             idx += 1
+        
+        self.num_qscale_samples = num_qscale_samples
+        self.qscale_samples = np.linspace(0, 1, num_qscale_samples)
     
     def _compress_with_bitrate(self, method, image_block, target_bits):
         min_qs = 1e-5
@@ -72,12 +76,15 @@ class Engine:
         x = x.to(torch.float32) / 255.0
         return x
 
-    def _estimate_loss(self, method, image_block, target_bits, repeat=1): 
+    def _estimate_loss(self, method, image_block, target_bits=None, q_scale=None, repeat=1): 
         times = []
         mses = []
         _, c, h, w = image_block.shape
         for i in range(repeat):
-            bits, q_scale = self._compress_with_bitrate(method, image_block, target_bits)
+            if q_scale is None:
+                bits, q_scale = self._compress_with_bitrate(method, image_block, target_bits)
+            else:
+                bits = method.compress_block(image_block, q_scale)
             time0 = time.time()
             recon_img = method.decompress_block(bits, h, w, q_scale)
             recon_img = torch.clamp(recon_img, 0, 1)
@@ -94,7 +101,32 @@ class Engine:
         mse = np.mean(mses)
         psnr = -10*np.log10(mse)
         
-        return mse, np.mean(times), bits, recon_img, q_scale
+        return mse, psnr, np.mean(times), bits, recon_img, q_scale
+    
+    def _precompute_loss(self, img_blocks):
+        n_block_h, n_block_w, _, c, ctu_h, ctu_w = img_blocks.shape
+        self._precomputed_curve = {}
+        for method, _, idx in tqdm.tqdm(self.methods):
+            self._precomputed_curve[idx] = {}
+            for i in range(n_block_h):
+                self._precomputed_curve[idx][i] = {}
+                for j in range(n_block_w):
+                    self._precomputed_curve[idx][i][j] = {}
+                    mses = []
+                    num_bits = []
+                    times = []
+                    for qscale in self.qscale_samples:
+                        image_block = img_blocks[i, j]
+                        
+                        mse, psnr, dec_time, bits, __, ___ = self._estimate_loss(method, image_block, None, qscale, 5)
+                        num_bit = len(bits) * 8
+                        num_bits.append(num_bit)
+                        mses.append(mse)
+                        times.append(dec_time)
+                    b_m = interpolate.interp1d(num_bits, mses, kind='cubic')
+                    b_t = interpolate.interp1d(num_bits, times, kind='cubic')
+                    self._precomputed_curve[idx][i][j]['b_m'] = b_m
+                    self._precomputed_curve[idx][i][j]['b_t'] = b_t
     
     def _search(self, img_blocks, method_ids, target_bitses):
         n_block_h, n_block_w, _, c, ctu_h, ctu_w = img_blocks.shape
@@ -108,8 +140,10 @@ class Engine:
                 method_id = method_ids[i][j]
                 target_bits = target_bitses[i][j]
 
-                method = self.methods[method_id][0]
-                mse, t, _, __, ___ = self._estimate_loss(method, img_block, target_bits)
+                precomputed_results = self._precomputed_curve[method_id][i][j]
+
+                mse = precomputed_results['b_m'](target_bitses)
+                t = precomputed_results['b_t'](target_bitses)
 
                 global_time += t
                 global_mse.append(mse)
@@ -147,7 +181,7 @@ class Engine:
 
         return Header(new_method_ids, new_target)
     
-    def _mutate(self, header: Header, total_target_bits, method_mutate_p=0.1, bit_mutate_sigma=1024, inplace=True):
+    def _mutate(self, header: Header, total_target_bits, method_mutate_p=0.5, bit_mutate_sigma=8192, inplace=True):
         n_block_h, n_block_w = header.method_ids.shape
         n_blocks = n_block_h * n_block_w
 
@@ -198,6 +232,9 @@ class Engine:
 
         print("Initializing qscale")
         default_qscale, default_target_bits = self._search_init_qscale(self.methods[0][0], img_blocks, total_target_bits)
+
+        print("Precompute all losses")
+        self._precompute_loss(img_blocks)
         
         # Generate initial solves
         solves = []
@@ -208,12 +245,12 @@ class Engine:
             self._mutate(method, total_target_bits)
             solves.append(method)
         
-        max_score = None
-        best_psnr = None
-        best_time = None
+        max_score = -1
+        best_psnr = -1
+        best_time = -1
 
         for u in (pbar := tqdm.tqdm(solves)):
-            pbar.set_description(f"Calculating loss for generation 0; max_score={max_score}; best_psnr={best_psnr}; best_time={best_time}")
+            pbar.set_description(f"Calculating loss for generation 0; max_score={max_score:.3f}; best_psnr={best_psnr:.3f}; best_time={best_time:.3f}")
             if not hasattr(u, 'loss'):
                 u.loss, u.psnr, u.time = self._search(img_blocks, u.method_ids, u.target_bitses)
                 if max_score is None or max_score < u.loss:
@@ -237,13 +274,17 @@ class Engine:
 
             # Hybrid
             for i in (pbar := tqdm.tqdm(range(N - num_alive))):
-                pbar.set_description(f"Calculating loss for generation {k+1}; max_score={max_score}; best_psnr={best_psnr}; best_time={best_time}")
+                pbar.set_description(f"Calculating loss for generation {k+1}; max_score={max_score:.3f}; best_psnr={best_psnr:.3f}; best_time={best_time:.3f}")
                 parent_id1 = random.randint(0, num_alive - 1)
                 parent_id2 = random.randint(0, num_alive - 1)
                 newborn = self._hybrid(solves[parent_id1], solves[parent_id2], total_target_bits)
                 self._mutate(newborn, total_target_bits)
                 newborn.loss, newborn.psnr, newborn.time = self._search(img_blocks, newborn.method_ids, newborn.target_bitses)
                 solves.append(newborn)
+                if max_score is None or max_score < newborn.loss:
+                    max_score = newborn.loss
+                    best_time = newborn.time
+                    best_psnr = newborn.psnr
                     
 
     @staticmethod
