@@ -12,6 +12,7 @@ import random
 from scipy import interpolate
 
 from EVC.bin.engine import ModelEngine, MODELS
+np.seterr(all='raise')
 
 def get_padding_size(height, width, p=768):
     new_h = (height + p - 1) // p * p
@@ -41,16 +42,17 @@ class Header:
         
         old_target = self.target_bitses
         old_target -= min_bits
-        old_target = np.maximum(old_target, 0)
+        old_target = np.maximum(old_target, 1)
         old_target = old_target.astype(np.float32)
         old_target_rate = old_target / np.sum(old_target)
 
+        total_target = np.maximum(total_target, np.sum(min_bits))
+
         new_target = old_target_rate * (total_target - np.sum(min_bits))
-        new_target = np.floor(new_target).astype(np.int32)
         new_target += min_bits
         new_target = np.minimum(new_target, max_bits)
+        new_target = np.floor(new_target).astype(np.int32)
         self.target_bitses = new_target
-        assert(np.sum(self.target_bitses) <= total_target)
 
 class Engine:
     def __init__(self, ctu_size=512, num_qscale_samples=20) -> None:
@@ -131,7 +133,7 @@ class Engine:
         self._minimal_bits = np.zeros([n_methods, n_block_h, n_block_w], dtype=np.int32)
         self._maximal_bits = np.zeros([n_methods, n_block_h, n_block_w], dtype=np.int32)
 
-        pbar = tqdm.trange(n_methods * n_block_h * n_block_w)
+        pbar = tqdm.trange(n_methods * n_block_h * n_block_w * len(self.qscale_samples))
         pbar.set_description("Precomputing loss")
         pbar_iter = pbar.__iter__()
         for method, _, idx in self.methods:
@@ -151,6 +153,7 @@ class Engine:
                         num_bits.append(num_bit)
                         mses.append(mse)
                         times.append(dec_time)
+                        pbar_iter.__next__()
 
                     self._minimal_bits[idx, i, j] = num_bits[0]
                     self._maximal_bits[idx, i, j] = num_bits[-1]
@@ -159,9 +162,10 @@ class Engine:
                     b_t = interpolate.interp1d(num_bits, times, kind='cubic')
                     self._precomputed_curve[idx][i][j]['b_m'] = b_m
                     self._precomputed_curve[idx][i][j]['b_t'] = b_t
-                    pbar_iter.__next__()
     
-    def _search(self, img_blocks, method_ids, target_bitses):
+    def _search(self, img_blocks, method_ids, target_bitses, total_target):
+        if np.sum(target_bitses) > total_target:
+            return -np.inf, -np.inf, np.inf
         n_block_h, n_block_w, _, c, ctu_h, ctu_w = img_blocks.shape
 
         global_mse = []
@@ -276,7 +280,7 @@ class Engine:
         for u in (pbar := tqdm.tqdm(solves)):
             pbar.set_description(f"Calculating loss for generation 0; max_score={max_score:.3f}; best_psnr={best_psnr:.3f}; best_time={best_time:.3f}")
             if not hasattr(u, 'loss'):
-                u.loss, u.psnr, u.time = self._search(img_blocks, u.method_ids, u.target_bitses)
+                u.loss, u.psnr, u.time = self._search(img_blocks, u.method_ids, u.target_bitses, total_target_bits)
                 if max_score is None or max_score < u.loss:
                     max_score = u.loss
                     best_time = u.time
@@ -303,7 +307,7 @@ class Engine:
                 parent_id2 = random.randint(0, num_alive - 1)
                 newborn = self._hybrid(solves[parent_id1], solves[parent_id2], total_target_bits)
                 self._mutate(newborn, total_target_bits)
-                newborn.loss, newborn.psnr, newborn.time = self._search(img_blocks, newborn.method_ids, newborn.target_bitses)
+                newborn.loss, newborn.psnr, newborn.time = self._search(img_blocks, newborn.method_ids, newborn.target_bitses, total_target_bits)
                 solves.append(newborn)
                 if max_score is None or max_score < newborn.loss:
                     max_score = newborn.loss
