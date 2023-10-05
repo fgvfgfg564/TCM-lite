@@ -50,18 +50,26 @@ class ModelEngine(nn.Module):
         i_frame_net.update(force=True)
         self.model_name = model_name
         self.i_frame_net: image_model.EVC = i_frame_net.half()
+        self.q_scales = i_state_dict["q_scale"].half()
+        self.q_scale_min = self.q_scales[-1]
+        self.q_scale_max = self.q_scales[0]
         self.cuda()
+    
+    def _q_scale_mapping(self, q_scale_0_1):
+        # 0 -> self.q_scale_min
+        # 1 -> self.q_scale_max
+        return self.q_scale_min + q_scale_0_1 * (self.q_scale_max - self.q_scale_min)
     
     def compile(self, output_dir):
         compile(self.i_frame_net, output_dir)
     
     def compress_block(self, img_block, q_scale):
-        q_scale = q_scale * 0.5 + 0.5
+        q_scale = self._q_scale_mapping(q_scale).to(img_block.device)
         bit_stream = self.i_frame_net.compress(img_block, q_scale)['bit_stream']
         return bit_stream
 
     def decompress_block(self, bit_stream, h, w, q_scale):
-        q_scale = q_scale * 0.5 + 0.5
+        q_scale = self._q_scale_mapping(q_scale).cuda()
         recon_img = self.i_frame_net.decompress(bit_stream, h, w, q_scale)['x_hat']
         return recon_img
     

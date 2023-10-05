@@ -3,6 +3,7 @@ import math
 import random
 import sys
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -16,6 +17,8 @@ from src.models import build_model, model_architectures
 from torch.utils.tensorboard import SummaryWriter
 import os
 
+from dataset import VCIP_Training
+
 torch.backends.cudnn.deterministic=True
 torch.backends.cudnn.benchmark=False
 
@@ -26,7 +29,7 @@ class RateDistortionLoss(nn.Module):
         super().__init__()
         self.mse = nn.MSELoss()
 
-    def forward(self, output, target):
+    def forward(self, output, target, lmbda):
         N, _, H, W = target.size()
         out = {}
         num_pixels = N * H * W
@@ -37,9 +40,10 @@ class RateDistortionLoss(nn.Module):
         )
 
         out["mse_loss"] = torch.mean((output["x_hat"] - target)**2,dim=(1,2,3))
-        out["dloss"] = 255 ** 2 * torch.dot(output["lmd_info"].squeeze(1),out["mse_loss"])
+        out["dloss"] = 255 ** 2 * torch.dot(lmbda, out["mse_loss"])
         out["mse_loss"] = torch.mean(out["mse_loss"])
         out["loss"] = out["dloss"] + out["bpp_loss"]
+        out["psnr_loss"] = -10*torch.log10(out["mse_loss"])
 
         return out
 
@@ -105,7 +109,7 @@ def configure_optimizers(net, args):
 
 
 def train_one_epoch(
-    model, criterion, train_dataloader, optimizer, aux_optimizer, epoch, clip_max_norm, type='mse'
+    model, lmbdas, criterion, train_dataloader, optimizer, aux_optimizer, epoch, clip_max_norm, type='mse'
 ):
     model.train()
     device = next(model.parameters()).device
@@ -115,9 +119,15 @@ def train_one_epoch(
         optimizer.zero_grad()
         aux_optimizer.zero_grad()
 
-        out_net = model(d)
+        # randomly select lmbda
+        B, _, H, W = d.shape
+        lmbda_index = np.random.randint(0, len(lmbdas), size=[B])
+        lmbda = lmbdas[lmbda_index]
+        qscale = torch.gather(model.q_scale, 0, lmbda_index)
 
-        out_criterion = criterion(out_net, d)
+        out_net = model(d, qscale)
+
+        out_criterion = criterion(out_net, d, lmbda)
         out_criterion["loss"].backward()
         if clip_max_norm > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), clip_max_norm)
@@ -150,35 +160,29 @@ def train_one_epoch(
                 )
 
 
-def test_epoch(epoch, test_dataloader, model, criterion):
+def test_epoch(epoch, test_dataloader, lmbdas, model, criterion):
     model.eval()
     device = next(model.parameters()).device
 
-    loss = AverageMeter()
-    bpp_loss = AverageMeter()
-    mse_loss = AverageMeter()
-    aux_loss = AverageMeter()
-
     with torch.no_grad():
-        for lmd in [0.001,0.002,0.003]:
+        for (i, lmd) in lmbdas:
+            loss = AverageMeter()
+            bpp_loss = AverageMeter()
+            mse_loss = AverageMeter()
+            psnr_loss = AverageMeter()
+
             for d in test_dataloader:
                 d = d.to(device)
-                out_net = model(d,lmd)
+                qscale = model.q_scale[i]
+                out_net = model(d, qscale)
                 out_criterion = criterion(out_net, d)
 
-                aux_loss.update(model.aux_loss())
                 bpp_loss.update(out_criterion["bpp_loss"])
                 loss.update(out_criterion["loss"])
                 mse_loss.update(out_criterion["mse_loss"])
-            print(bpp_loss.avg,mse_loss.avg)
-
-    print(
-        f"Test epoch {epoch}: Average losses:"
-        f"\tLoss: {loss.avg:.3f} |"
-        f"\tMSE loss: {mse_loss.avg:.3f} |"
-        f"\tBpp loss: {bpp_loss.avg:.2f} |"
-        f"\tAux loss: {aux_loss.avg:.2f}\n"
-    )
+                psnr_loss.update(out_criterion["psnr_loss"])
+                
+            print(f"Testing results for lmbda={lmd:.4f}: loss={loss.avg:.5f} - bpp_loss={bpp_loss.avg:.5f} - mse_loss={mse_loss.avg:.5f} - avg_psnr={psnr_loss:.3f}")
 
     return loss.avg
 
@@ -194,6 +198,7 @@ def parse_args(argv):
     parser = argparse.ArgumentParser(description="Example training script.")
 
     parser.add("model", type=str, choices=list(model_architectures.keys()))
+    parser.add_argument("-l", "--lmbdas", nargs=4, type=float, help="lambdas for training", required=True)
     parser.add_argument(
         "-e",
         "--epochs",
@@ -270,17 +275,8 @@ def main(argv):
         torch.manual_seed(args.seed)
         random.seed(args.seed)
     writer = SummaryWriter(save_path + "tensorboard/")
-
-    train_transforms = transforms.Compose(
-        [transforms.RandomCrop(args.patch_size), transforms.ToTensor()]
-    )
-
-    test_transforms = transforms.Compose(
-        [transforms.CenterCrop(args.patch_size), transforms.ToTensor()]
-    )
-
-    train_dataset = ImageFolder(args.dataset, split="train", transform=train_transforms)
-    test_dataset = ImageFolder(args.dataset, split="test", transform=test_transforms)
+    train_dataset = VCIP_Training()
+    test_dataset = VCIP_Training(buffer_size=128, stable=True)
 
     device = "cuda" if args.cuda and torch.cuda.is_available() else "cpu"
     print(device)
@@ -325,12 +321,15 @@ def main(argv):
             optimizer.load_state_dict(checkpoint["optimizer"])
             aux_optimizer.load_state_dict(checkpoint["aux_optimizer"])
             lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
+    
+    lmbdas = args.lmbdas
 
     best_loss = float("inf")
     for epoch in range(last_epoch, args.epochs):
         print(f"Learning rate: {optimizer.param_groups[0]['lr']}")
         train_one_epoch(
             net,
+            lmbdas,
             criterion,
             train_dataloader,
             optimizer,
@@ -339,7 +338,7 @@ def main(argv):
             args.clip_max_norm,
             type
         )
-        loss = test_epoch(epoch, test_dataloader, net, criterion)
+        loss = test_epoch(epoch, test_dataloader, lmbdas, net, criterion)
         writer.add_scalar('test_loss', loss, epoch)
         lr_scheduler.step()
 
