@@ -4,6 +4,7 @@ import numpy as np
 import glob
 from PIL import Image
 import random
+from tqdm import tqdm
 
 class VCIP_Training(Dataset):
     """
@@ -27,7 +28,9 @@ class VCIP_Training(Dataset):
             self.len_image_list = self.buffer_size
             self.image_list = self.image_list[:self.buffer_size]
         
+        print("Initializing buffer ...")
         self._fill_buffer()
+        print("Buffer initialized ...")
     
     def __len__(self):
         return self.len_image_list*self.samples_per_img
@@ -37,7 +40,7 @@ class VCIP_Training(Dataset):
             return
         
         if self.stable:
-            for i in range(self.buffer_size):
+            for i in tqdm(range(self.buffer_size), "Filling stable buffer"):
                 img = Image.open(self.image_list[i])
                 img = ToTensor()(img)
 

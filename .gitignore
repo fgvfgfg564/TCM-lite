@@ -144,3 +144,5 @@ launch.json
 */output_json
 *.compiled
 images/
+
+*tfevents*
