@@ -14,6 +14,7 @@ from torchvision import transforms
 from compressai.datasets import ImageFolder
 
 from src.models import build_model, model_architectures
+from src.utils.stream_helper import get_padding_size, get_state_dict, consume_prefix_in_state_dict_if_present
 from torch.utils.tensorboard import SummaryWriter
 import os
 
@@ -34,15 +35,13 @@ class RateDistortionLoss(nn.Module):
         out = {}
         num_pixels = N * H * W
 
-        out["bpp_loss"] = sum(
-            (torch.log(likelihoods).sum() / (-math.log(2) * num_pixels))
-            for likelihoods in output["likelihoods"].values()
-        )
-
+        out["bpp_loss"] = torch.mean(output["bpp"])
+        out["bpp_y_loss"] = torch.mean(output["bpp_y"])
+        out["bpp_z_loss"] = torch.mean(output["bpp_z"])
         out["mse_loss"] = torch.mean((output["x_hat"] - target)**2,dim=(1,2,3))
-        out["dloss"] = 255 ** 2 * torch.dot(lmbda, out["mse_loss"])
+        dloss = 255 ** 2 * torch.sum(torch.mul(lmbda, out["mse_loss"]))
         out["mse_loss"] = torch.mean(out["mse_loss"])
-        out["loss"] = out["dloss"] + out["bpp_loss"]
+        out["loss"] = dloss + out["bpp_loss"]
         out["psnr_loss"] = -10*torch.log10(out["mse_loss"])
 
         return out
@@ -75,11 +74,8 @@ class CustomDataParallel(nn.DataParallel):
 
 
 def configure_optimizers(net: torch.nn.Module, args):
-    """Separate parameters for the main optimizer and the auxiliary optimizer.
-    Return two optimizers"""
-
     parameters = net.parameters()
-    optimizer = optim.Adam(
+    optimizer = optim.SGD(
         parameters,
         lr=args.learning_rate,
     )
@@ -99,7 +95,8 @@ def train_one_epoch(
         # randomly select lmbda
         B, _, H, W = d.shape
         lmbda_index = np.random.randint(0, len(lmbdas), size=[B])
-        lmbda = lmbdas[lmbda_index]
+        lmbda = torch.tensor(lmbdas[lmbda_index]).cuda().to(torch.float32)
+        lmbda_index = torch.tensor(lmbda_index).cuda().reshape([B, 1, 1, 1])
         qscale = torch.gather(model.q_scale, 0, lmbda_index)
 
         out_net = model(d, qscale)
@@ -110,29 +107,24 @@ def train_one_epoch(
             torch.nn.utils.clip_grad_norm_(model.parameters(), clip_max_norm)
         optimizer.step()
 
-        aux_loss = model.aux_loss()
-        aux_loss.backward()
-
-        if i % 1000 == 0:
+        if i % 100 == 0:
             if type == 'mse':
                 print(
                     f"Train epoch {epoch}: ["
                     f"{i*len(d)}/{len(train_dataloader.dataset)}"
                     f" ({100. * i / len(train_dataloader):.0f}%)]"
-                    f'\tLoss: {out_criterion["loss"].item():.3f} |'
-                    f'\tMSE loss: {out_criterion["mse_loss"].item():.3f} |'
-                    f'\tBpp loss: {out_criterion["bpp_loss"].item():.2f} |'
-                    f"\tAux loss: {aux_loss.item():.2f}"
+                    f'\tLoss: {out_criterion["loss"].item():.6f} |'
+                    f'\tMSE loss: {out_criterion["mse_loss"].item():.6f} |'
+                    f'\tBpp loss: {out_criterion["bpp_loss"].item():.4f}'
                 )
             else:
                 print(
                     f"Train epoch {epoch}: ["
                     f"{i*len(d)}/{len(train_dataloader.dataset)}"
                     f" ({100. * i / len(train_dataloader):.0f}%)]"
-                    f'\tLoss: {out_criterion["loss"].item():.3f} |'
-                    f'\tMS_SSIM loss: {out_criterion["ms_ssim_loss"].item():.3f} |'
-                    f'\tBpp loss: {out_criterion["bpp_loss"].item():.2f} |'
-                    f"\tAux loss: {aux_loss.item():.2f}"
+                    f'\tLoss: {out_criterion["loss"].item():.6f} |'
+                    f'\tMS_SSIM loss: {out_criterion["ms_ssim_loss"].item():.6f} |'
+                    f'\tBpp loss: {out_criterion["bpp_loss"].item():.4f}'
                 )
 
 
@@ -142,27 +134,27 @@ def test_epoch(epoch, test_dataloader, lmbdas, model, criterion):
 
     with torch.no_grad():
         losses = []
-        for (i, lmd) in lmbdas:
-            loss = AverageMeter()
-            bpp_loss = AverageMeter()
-            mse_loss = AverageMeter()
-            psnr_loss = AverageMeter()
+        for (i, lmd) in enumerate(lmbdas):
+            lmd = torch.tensor(np.array(lmd)).to(torch.float32).cuda()
+            loss_dict = {}
 
             for d in test_dataloader:
                 d = d.to(device)
                 qscale = model.q_scale[i]
                 out_net = model(d, qscale)
-                out_criterion = criterion(out_net, d)
+                out_criterion = criterion(out_net, d, lmd)
+                for key, value in out_criterion.items():
+                    loss_dict.setdefault(key, AverageMeter())
+                    loss_dict[key].update(value)
 
-                bpp_loss.update(out_criterion["bpp_loss"])
-                loss.update(out_criterion["loss"])
-                mse_loss.update(out_criterion["mse_loss"])
-                psnr_loss.update(out_criterion["psnr_loss"])
+            print(f"Testing results for epoch {epoch} - lmbda={lmd:.6f}: ", end="")
+            loss_items = []
+            for k, meter in loss_dict.items():
+                loss_items.append(f"{k}={meter.avg:.5f}")
+            print(*loss_items, sep=' - ')
+            losses.append(loss_dict["loss"].avg.cpu().numpy().item())
 
-            print(f"Testing results for lmbda={lmd:.4f}: loss={loss.avg:.5f} - bpp_loss={bpp_loss.avg:.5f} - mse_loss={mse_loss.avg:.5f} - avg_psnr={psnr_loss:.3f}")
-            losses.append(loss)
-
-    return np.mean(loss)
+    return np.mean(losses)
 
 
 def save_checkpoint(state, is_best, save_path):
@@ -187,7 +179,7 @@ def parse_args(argv):
     parser.add_argument(
         "-lr",
         "--learning_rate",
-        default=1e-5,
+        default=1e-6,
         type=float,
         help="Learning rate (default: %(default)s)",
     )
@@ -200,12 +192,12 @@ def parse_args(argv):
     )
 
     parser.add_argument(
-        "--batch_size", "-bs", type=int, default=8, help="Batch size (default: %(default)s)"
+        "--batch_size", "-bs", type=int, default=4, help="Batch size (default: %(default)s)"
     )
     parser.add_argument(
         "--test_batch_size",
         type=int,
-        default=8,
+        default=1,
         help="Test batch size (default: %(default)s)",
     )
     parser.add_argument(
@@ -234,7 +226,7 @@ def parse_args(argv):
         "--lr_epoch", nargs='+', type=int, default=[10]
     )
     parser.add_argument(
-        "--continue_train", action="store_true", default=True
+        "--continue_train", action="store_true", default=False
     )
     args = parser.parse_args(argv)
     return args
@@ -291,13 +283,15 @@ def main(argv):
     if args.checkpoint:  # load from previous checkpoint
         print("Loading", args.checkpoint)
         checkpoint = torch.load(args.checkpoint, map_location=device)
-        net.load_state_dict(checkpoint["state_dict"])
+        net_state_dict = checkpoint['state_dict']
+        consume_prefix_in_state_dict_if_present(net_state_dict, prefix="module.")
+        net.load_state_dict(net_state_dict)
         if args.continue_train:
             last_epoch = checkpoint["epoch"] + 1
             optimizer.load_state_dict(checkpoint["optimizer"])
             lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
     
-    lmbdas = args.lmbdas
+    lmbdas = np.array(args.lmbdas)
 
     best_loss = float("inf")
     for epoch in range(last_epoch, args.epochs):
@@ -326,7 +320,6 @@ def main(argv):
                     "state_dict": net.module.state_dict() if torch.cuda.device_count() > 1 else net.state_dict(),
                     "loss": loss,
                     "optimizer": optimizer.state_dict(),
-                    "aux_optimizer": aux_optimizer.state_dict(),
                     "lr_scheduler": lr_scheduler.state_dict(),
                 },
                 is_best,
