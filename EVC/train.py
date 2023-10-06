@@ -110,7 +110,6 @@ def configure_optimizers(net: torch.nn.Module, args):
 
     optimizer = optim.Adam(
         (params_dict[n] for n in sorted(parameters)),
-        betas=(0.5, 0.9), 
         lr=args.learning_rate, 
     )
     qscale_optimizer = optim.SGD(
