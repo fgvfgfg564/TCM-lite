@@ -23,6 +23,12 @@ from dataset import VCIP_Training
 torch.backends.cudnn.deterministic=True
 torch.backends.cudnn.benchmark=False
 
+"""
+In each epoch:
+    Step 1: Train every parameter except q_scales at highest lambda; fix smallest q_scale at 0.5
+    Step 2: Freeze every parameter and train each q_scale (except the smallest) separately; Use SGD
+"""
+
 class RateDistortionLoss(nn.Module):
     """Custom rate distortion loss with a Lagrangian parameter."""
 
@@ -74,30 +80,65 @@ class CustomDataParallel(nn.DataParallel):
 
 
 def configure_optimizers(net: torch.nn.Module, args):
-    parameters = net.parameters()
-    optimizer = optim.SGD(
-        parameters,
+    """
+    Returns:
+    - (optimizer_for_parameters, optimizer_for_q_scale)
+    """
+    parameters = {
+        n
+        for n, p in net.named_parameters()
+        if not n.endswith("q_scale") and p.requires_grad
+    }
+    q_scale_parameters = {
+        n
+        for n, p in net.named_parameters()
+        if n.endswith("q_scale") and p.requires_grad
+    }
+
+    # Make sure we don't have an intersection of parameters
+    params_dict = dict(net.named_parameters())
+    inter_params = parameters & q_scale_parameters
+    union_params = parameters | q_scale_parameters
+
+    assert len(inter_params) == 0
+    assert len(union_params) - len(params_dict.keys()) == 0
+
+    print("Trainable parameters:", sorted(parameters))
+    print("Q-Scale parameters:", sorted(q_scale_parameters))
+
+    # Create Optimizers
+
+    optimizer = optim.AdamW(
+        (params_dict[n] for n in sorted(parameters)),
         lr=args.learning_rate,
     )
-    return optimizer
+    qscale_optimizer = optim.SGD(
+        (params_dict[n] for n in sorted(q_scale_parameters)),
+        lr=args.aux_learning_rate,
+    )
+    return optimizer, qscale_optimizer
 
 
 def train_one_epoch(
-    model, lmbdas, criterion, train_dataloader, optimizer, epoch, clip_max_norm, type='mse'
+    model, lmbdas, criterion, train_dataloader, optimizer, qscale_optimizer, qscale_steps, epoch, clip_max_norm, type='mse'
 ):
     model.train()
     device = next(model.parameters()).device
+    num_samples = len(lmbdas)
 
+    # Update main network at highest lambda
     for i, d in enumerate(train_dataloader):
         d = d.to(device)
         optimizer.zero_grad()
 
         # randomly select lmbda
         B, _, H, W = d.shape
-        lmbda_index = np.random.randint(0, len(lmbdas), size=[B])
+        lmbda_index = np.zeros(shape=[B], dtype=np.int64) + (num_samples - 1)
         lmbda = torch.tensor(lmbdas[lmbda_index]).cuda().to(torch.float32)
         lmbda_index = torch.tensor(lmbda_index).cuda().reshape([B, 1, 1, 1])
         qscale = torch.gather(model.q_scale, 0, lmbda_index)
+
+        print(lmbda, qscale)
 
         out_net = model(d, qscale)
 
@@ -108,24 +149,53 @@ def train_one_epoch(
         optimizer.step()
 
         if i % 100 == 0:
-            if type == 'mse':
+            print(
+                f"Train epoch {epoch}: ["
+                f"{i*len(d)}/{len(train_dataloader.dataset)}"
+                f" ({100. * i / len(train_dataloader):.0f}%)]"
+                f'\tLoss: {out_criterion["loss"].item():.6f} |'
+                f'\tMSE loss: {out_criterion["mse_loss"].item():.6f} |'
+                f'\tBpp loss: {out_criterion["bpp_loss"].item():.4f}'
+            )
+
+    # Update q-scales
+    for i in range(num_samples - 1):
+        for step, d in enumerate(train_dataloader):
+            d = d.to(device)
+            qscale_optimizer.zero_grad()
+
+            # randomly select lmbda
+            B, _, H, W = d.shape
+            lmbda_index = np.zeros(shape=[B], dtype=np.int64) + i
+            lmbda = torch.tensor(lmbdas[lmbda_index]).cuda().to(torch.float32)
+            lmbda_index = torch.tensor(lmbda_index).cuda().reshape([B, 1, 1, 1])
+            qscale = torch.gather(model.q_scale, 0, lmbda_index)
+
+            print(lmbda, qscale)
+
+            out_net = model(d, qscale)
+
+            out_criterion = criterion(out_net, d, lmbda)
+            out_criterion["loss"].backward()
+            if clip_max_norm > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_max_norm)
+            qscale_optimizer.step()
+            
+            if step % 100 == 0:
                 print(
                     f"Train epoch {epoch}: ["
-                    f"{i*len(d)}/{len(train_dataloader.dataset)}"
-                    f" ({100. * i / len(train_dataloader):.0f}%)]"
+                    f"{step}/{qscale_steps}"
+                    f" ({100. * step / qscale_steps:.0f}%)"
+                    f" lambda={lmbda}]"
+                    f'\tQ-scale: {model.q_scale} |'
                     f'\tLoss: {out_criterion["loss"].item():.6f} |'
                     f'\tMSE loss: {out_criterion["mse_loss"].item():.6f} |'
                     f'\tBpp loss: {out_criterion["bpp_loss"].item():.4f}'
                 )
-            else:
-                print(
-                    f"Train epoch {epoch}: ["
-                    f"{i*len(d)}/{len(train_dataloader.dataset)}"
-                    f" ({100. * i / len(train_dataloader):.0f}%)]"
-                    f'\tLoss: {out_criterion["loss"].item():.6f} |'
-                    f'\tMS_SSIM loss: {out_criterion["ms_ssim_loss"].item():.6f} |'
-                    f'\tBpp loss: {out_criterion["bpp_loss"].item():.4f}'
-                )
+
+            if step == qscale_steps:
+                break
+
 
 
 def test_epoch(epoch, test_dataloader, lmbdas, model, criterion):
@@ -147,7 +217,7 @@ def test_epoch(epoch, test_dataloader, lmbdas, model, criterion):
                     loss_dict.setdefault(key, AverageMeter())
                     loss_dict[key].update(value)
 
-            print(f"Testing results for epoch {epoch} - lmbda={lmd:.6f}: ", end="")
+            print(f"Testing results for epoch {epoch} - lmbda={lmd:.6f} - qscale={qscale[0,0,0]:.6f}: ", end="")
             loss_items = []
             for k, meter in loss_dict.items():
                 loss_items.append(f"{k}={meter.avg:.5f}")
@@ -179,9 +249,22 @@ def parse_args(argv):
     parser.add_argument(
         "-lr",
         "--learning_rate",
-        default=1e-6,
+        default=1e-5,
         type=float,
         help="Learning rate (default: %(default)s)",
+    )
+    parser.add_argument(
+        "-alr",
+        "--aux_learning_rate",
+        default=1e-3,
+        type=float,
+        help="Learning rate for q_scale (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--qscale_update_steps",
+        default=100,
+        type=int,
+        help="Learning rate for q_scale (default: %(default)s)",
     )
     parser.add_argument(
         "-n",
@@ -215,7 +298,7 @@ def parse_args(argv):
     )
     parser.add_argument(
         "--clip_max_norm",
-        default=1.0,
+        default=-1.0,
         type=float,
         help="gradient clipping max norm (default: %(default)s",
     )
@@ -272,7 +355,7 @@ def main(argv):
     net = build_model(args.model)
     net = net.to(device)
 
-    optimizer = configure_optimizers(net, args)
+    optimizer, qscale_optimizer = configure_optimizers(net, args)
     milestones = args.lr_epoch
     print("milestones: ", milestones)
     lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones, gamma=0.1, last_epoch=-1)
@@ -291,7 +374,9 @@ def main(argv):
             optimizer.load_state_dict(checkpoint["optimizer"])
             lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
     
-    lmbdas = np.array(args.lmbdas)
+    lmbdas = np.array(sorted(args.lmbdas))
+
+    _ = test_epoch("INIT", test_dataloader, lmbdas, net, criterion)
 
     best_loss = float("inf")
     for epoch in range(last_epoch, args.epochs):
@@ -302,6 +387,8 @@ def main(argv):
             criterion,
             train_dataloader,
             optimizer,
+            qscale_optimizer,
+            args.qscale_update_steps, 
             epoch,
             args.clip_max_norm,
             type
