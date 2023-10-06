@@ -45,7 +45,7 @@ class RateDistortionLoss(nn.Module):
         out["bpp_y_loss"] = torch.mean(output["bpp_y"])
         out["bpp_z_loss"] = torch.mean(output["bpp_z"])
         out["mse_loss"] = torch.mean((output["x_hat"] - target)**2,dim=(1,2,3))
-        dloss = 255 ** 2 * torch.sum(torch.mul(lmbda, out["mse_loss"]))
+        dloss = 255 ** 2 * torch.mean(torch.mul(lmbda, out["mse_loss"]))
         out["mse_loss"] = torch.mean(out["mse_loss"])
         out["loss"] = dloss + out["bpp_loss"]
         out["psnr_loss"] = -10*torch.log10(out["mse_loss"])
@@ -108,9 +108,10 @@ def configure_optimizers(net: torch.nn.Module, args):
 
     # Create Optimizers
 
-    optimizer = optim.AdamW(
+    optimizer = optim.Adam(
         (params_dict[n] for n in sorted(parameters)),
-        lr=args.learning_rate,
+        betas=(0.5, 0.9), 
+        lr=args.learning_rate, 
     )
     qscale_optimizer = optim.SGD(
         (params_dict[n] for n in sorted(q_scale_parameters)),
@@ -137,8 +138,6 @@ def train_one_epoch(
         lmbda = torch.tensor(lmbdas[lmbda_index]).cuda().to(torch.float32)
         lmbda_index = torch.tensor(lmbda_index).cuda().reshape([B, 1, 1, 1])
         qscale = torch.gather(model.q_scale, 0, lmbda_index)
-
-        print(lmbda, qscale)
 
         out_net = model(d, qscale)
 
@@ -171,8 +170,6 @@ def train_one_epoch(
             lmbda_index = torch.tensor(lmbda_index).cuda().reshape([B, 1, 1, 1])
             qscale = torch.gather(model.q_scale, 0, lmbda_index)
 
-            print(lmbda, qscale)
-
             out_net = model(d, qscale)
 
             out_criterion = criterion(out_net, d, lmbda)
@@ -187,7 +184,7 @@ def train_one_epoch(
                     f"{step}/{qscale_steps}"
                     f" ({100. * step / qscale_steps:.0f}%)"
                     f" lambda={lmbda}]"
-                    f'\tQ-scale: {model.q_scale} |'
+                    f'\tQ-scale: {model.q_scale.detach().cpu().numpy()[:, 0,0,0]} |'
                     f'\tLoss: {out_criterion["loss"].item():.6f} |'
                     f'\tMSE loss: {out_criterion["mse_loss"].item():.6f} |'
                     f'\tBpp loss: {out_criterion["bpp_loss"].item():.4f}'
@@ -262,7 +259,7 @@ def parse_args(argv):
     )
     parser.add_argument(
         "--qscale_update_steps",
-        default=100,
+        default=1000,
         type=int,
         help="Learning rate for q_scale (default: %(default)s)",
     )
@@ -275,7 +272,7 @@ def parse_args(argv):
     )
 
     parser.add_argument(
-        "--batch_size", "-bs", type=int, default=4, help="Batch size (default: %(default)s)"
+        "--batch_size", "-bs", type=int, default=12, help="Batch size (default: %(default)s)"
     )
     parser.add_argument(
         "--test_batch_size",
@@ -287,7 +284,7 @@ def parse_args(argv):
         "--patch_size",
         type=int,
         nargs=2,
-        default=(512, 512),
+        default=(256, 256),
         help="Size of the patches to be cropped (default: %(default)s)",
     )
     parser.add_argument(
@@ -298,7 +295,7 @@ def parse_args(argv):
     )
     parser.add_argument(
         "--clip_max_norm",
-        default=-1.0,
+        default=1.0,
         type=float,
         help="gradient clipping max norm (default: %(default)s",
     )
