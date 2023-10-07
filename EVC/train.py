@@ -106,7 +106,7 @@ def train_one_epoch(
 
         # randomly select lmbda
         B, _, H, W = d.shape
-        lmbda_index = np.random.randint(num_samples, shape=[B], dtype=np.int64)
+        lmbda_index = np.random.randint(num_samples, size=[B], dtype=np.int64)
         lmbda = torch.tensor(lmbdas[lmbda_index]).cuda().to(torch.float32)
         lmbda_index = torch.tensor(lmbda_index).cuda().reshape([B, 1, 1, 1])
         qscale = torch.gather(model.q_scale, 0, lmbda_index)
@@ -188,7 +188,7 @@ def parse_args(argv):
         "-n",
         "--num_workers",
         type=int,
-        default=20,
+        default=1,
         help="Dataloaders threads (default: %(default)s)",
     )
 

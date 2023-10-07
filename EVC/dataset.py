@@ -70,18 +70,20 @@ class VCIP_Validation(Dataset):
         print("Buffer initialized ...")
     
     def __len__(self):
-        return self.len_image_list
+        return len(self.buffer)
 
     def _fill_buffer(self):
         for i in tqdm(range(self.len_image_list), "Filling stable buffer"):
             img = Image.open(self.image_list[i])
+            if img.size[0] * img.size[1] > 89478485:
+                print("Too large image detected: ", self.image_list[i], "size=", img.size)
+                continue
             img = ToTensor()(img)
 
             # Crop out the image centers
             cropper = CenterCrop(self.patch_size)
             patch = cropper(img)
             self.buffer.append(patch)
-            self.buffer_items += 1
 
     def __getitem__(self, idx):
         return self.buffer[idx]
