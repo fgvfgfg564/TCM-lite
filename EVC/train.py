@@ -18,7 +18,7 @@ from src.utils.stream_helper import get_padding_size, get_state_dict, consume_pr
 from torch.utils.tensorboard import SummaryWriter
 import os
 
-from dataset import VCIP_Training
+from dataset import VCIP_Training, VCIP_Validation
 
 torch.backends.cudnn.deterministic=True
 torch.backends.cudnn.benchmark=False
@@ -250,7 +250,7 @@ def main(argv):
     writer = SummaryWriter(tb_path)
     
     train_dataset = VCIP_Training(patch_size=args.patch_size)
-    test_dataset = VCIP_Training(patch_size=args.patch_size, buffer_size=128, stable=True)
+    test_dataset = VCIP_Validation(patch_size=args.patch_size)
 
     device = 'cuda'
 
