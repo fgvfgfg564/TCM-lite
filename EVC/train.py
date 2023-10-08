@@ -159,10 +159,10 @@ def test_epoch(epoch, test_dataloader, lmbdas, model, criterion):
 
 
 def save_checkpoint(state, is_best, save_path):
-    torch.save(state, save_path + "last_epoch.pth.tar")
+    torch.save(state, os.path.join(save_path, "last_epoch.pth.tar"))
 
     if is_best:
-        torch.save(state, save_path + "best_epoch.pth.tar")
+        torch.save(state, os.path.join(save_path, "best_epoch.pth.tar"))
 
 
 def parse_args(argv):
