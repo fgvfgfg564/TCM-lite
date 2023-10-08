@@ -20,21 +20,22 @@ from ..src.models.MLCodec_rans import RansEncoder, RansDecoder
 from ..src.utils.timer import Timer
 from ..src.tensorrt_support import *
 
-MODELS = {
-    "EVC_LL": 'EVC_LL.pth.tar',
-    "EVC_ML": 'EVC_ML_MD.pth.tar',
-    "EVC_SL": 'EVC_SL_MD.pth.tar',
-    "EVC_LM": 'EVC_LM_MD.pth.tar',
-    "EVC_LS": 'EVC_LS_MD.pth.tar',
-    "EVC_MM": 'EVC_MM_MD.pth.tar',
-    "EVC_SS": 'EVC_SS_MD.pth.tar',
-    # "Scale_EVC_SL": 'Scale_EVC_SL_MDRRL.pth.tar',
-    # "Scale_EVC_SS": 'Scale_EVC_SS_MDRRL.pth.tar',
-}
-
 BLOCK_SIZE = 512
 
 class ModelEngine(nn.Module):
+    MODELS = {
+        "EVC_LL": 'EVC_LL.pth.tar',
+        "EVC_LL_large": 'EVC_LL_large.pth.tar',
+        "EVC_ML": 'EVC_ML_MD.pth.tar',
+        "EVC_SL": 'EVC_SL_MD.pth.tar',
+        "EVC_LM": 'EVC_LM_MD.pth.tar',
+        "EVC_LS": 'EVC_LS_MD.pth.tar',
+        "EVC_MM": 'EVC_MM_MD.pth.tar',
+        "EVC_SS": 'EVC_SS_MD.pth.tar',
+        # "Scale_EVC_SL": 'Scale_EVC_SL_MDRRL.pth.tar',
+        # "Scale_EVC_SS": 'Scale_EVC_SS_MDRRL.pth.tar',
+    }
+
     def __init__(self, model_name) -> None:
         super().__init__()
 
@@ -42,7 +43,7 @@ class ModelEngine(nn.Module):
         model_path, compiled_path = self.get_model_path(model_name)
 
         i_state_dict = get_state_dict(model_path)
-        i_frame_net = build_model(model_name, ec_thread=True)
+        i_frame_net = build_model(model_name[:6], ec_thread=True)
         i_frame_net.load_state_dict(i_state_dict, verbose=False)
         i_frame_net = i_frame_net.cuda()
         i_frame_net.eval()
@@ -75,7 +76,7 @@ class ModelEngine(nn.Module):
     
     @classmethod
     def get_model_path(cls, model_name):
-        model_path = MODELS[model_name]
+        model_path = cls.MODELS[model_name]
         file_folder = os.path.split(__file__)[0]
         model_path = os.path.join(file_folder, "../checkpoints", model_path)
         compiled_path = model_path + ".trt"

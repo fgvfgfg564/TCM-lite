@@ -11,7 +11,11 @@ import math
 import random
 from scipy import interpolate
 
-from EVC.bin.engine import ModelEngine, MODELS
+from EVC.bin.engine import ModelEngine
+
+from .utils import get_bpg_result
+from .fileio import FileIO
+
 np.seterr(all='raise')
 
 def get_padding_size(height, width, p=768):
@@ -25,7 +29,7 @@ def get_padding_size(height, width, p=768):
     padding_bottom = new_h - height - padding_top
     return padding_left, padding_right, padding_top, padding_bottom
 
-class Header:
+class Solution:
     def __init__(self, method_ids, target_bitses) -> None:
         self.method_ids = method_ids
         self.target_bitses = target_bitses
@@ -61,7 +65,7 @@ class Engine:
         idx = 0
 
         # EVC models
-        for model_name in MODELS.keys():
+        for model_name in ModelEngine.MODELS.keys():
             self.methods.append((ModelEngine.from_model_name(model_name), model_name, idx))
             idx += 1
         
@@ -203,12 +207,12 @@ class Engine:
         # Mutate target bitrates
         mutate_target = np.random.choice([0, 1], size)
         new_target = np.select([mutate_target == 0, mutate_target == 1], [header1.target_bitses, header2.target_bitses])
-        new_header = Header(new_method_ids, new_target)
+        new_header = Solution(new_method_ids, new_target)
         new_header.normalize_target_bitses(self._minimal_bits, self._maximal_bits, total_target_bits)
 
         return new_header
     
-    def _mutate(self, header: Header, total_target_bits, method_mutate_p=0.5, bit_mutate_sigma=8192, inplace=True):
+    def _mutate(self, header: Solution, total_target_bits, method_mutate_p=0.5, bit_mutate_sigma=8192, inplace=True):
         n_block_h, n_block_w = header.method_ids.shape
         n_blocks = n_block_h * n_block_w
 
@@ -254,7 +258,7 @@ class Engine:
         
         return max_qs, target_bits
 
-    def _solve_genetic(self, img_blocks, total_target_bits, N=10000, num_generation=10000, survive_rate=0.1):
+    def _solve_genetic(self, img_blocks, total_target_bits, bpg_psnr, num_pixels, N=10000, num_generation=10000, survive_rate=0.01):
         n_block_h, n_block_w, _, c, ctu_h, ctu_w = img_blocks.shape
         n_blocks = n_block_h * n_block_w
 
@@ -269,7 +273,7 @@ class Engine:
         for k in range(N):
             method_ids = np.zeros([n_block_h, n_block_w], dtype=np.int32)
             target_bitses = default_target_bits
-            method = Header(method_ids, target_bitses)
+            method = Solution(method_ids, target_bitses)
             self._mutate(method, total_target_bits)
             solves.append(method)
         
@@ -282,7 +286,7 @@ class Engine:
             if not hasattr(u, 'loss'):
                 u.loss, u.psnr, u.time = self._search(img_blocks, u.method_ids, u.target_bitses, total_target_bits)
                 if max_score is None or max_score < u.loss:
-                    max_score = u.loss
+                    max_score = u.loss - bpg_psnr
                     best_time = u.time
                     best_psnr = u.psnr
         
@@ -292,8 +296,9 @@ class Engine:
             solves.sort(key=lambda x:x.loss, reverse=True)
 
             # show best solution on generation
-            best_solution:Header = solves[0]
-            print(f"best loss on generation {k}: {best_solution.loss}; total_bits={np.sum(best_solution.target_bitses)}", flush=True)
+            best_solution:Solution = solves[0]
+            best_total_bits = np.sum(best_solution.target_bitses)
+            print(f"best loss on generation {k}: {best_solution.loss}; total_bits={best_total_bits}; bpp={best_total_bits/num_pixels:.4f}", flush=True)
             print("method_ids =", best_solution.method_ids.flatten())
             print("target_bits =", best_solution.target_bitses.flatten())
 
@@ -310,7 +315,7 @@ class Engine:
                 newborn.loss, newborn.psnr, newborn.time = self._search(img_blocks, newborn.method_ids, newborn.target_bitses, total_target_bits)
                 solves.append(newborn)
                 if max_score is None or max_score < newborn.loss:
-                    max_score = newborn.loss
+                    max_score = newborn.loss - bpg_psnr
                     best_time = newborn.time
                     best_psnr = newborn.psnr
                     
@@ -346,15 +351,20 @@ class Engine:
         img = np.clip(np.rint(img * 255), 0, 255).astype(np.uint8)
         Image.fromarray(img).save(save_path)
 
-    def encode(self, input_pth, output_pth, target_bpp):
+    def encode(self, input_pth, output_pth):
+        """
+
+        """
         input_img = self.read_img(input_pth)
         h, w, padded_img = self.pad_img(input_img)
-        total_target_bits = np.floor(target_bpp * h * w).astype(np.int32)
 
+        total_target_bits, bpg_psnr = get_bpg_result(input_pth)
+        target_bpp = total_target_bits / h / w
+        print(f"Target bpp={target_bpp:.4f}; bpg_psnr={bpg_psnr:.2f}")
         img_blocks = padded_img.unfold(2, self.ctu_size, self.ctu_size).unfold(3, self.ctu_size, self.ctu_size)
 
         img_blocks = torch.permute(img_blocks, (2, 3, 0, 1, 4, 5))
         n_block_h, n_block_w, _, c, ctu_h, ctu_w = img_blocks.shape
         n_block = n_block_h * n_block_w
 
-        self._solve_genetic(img_blocks, total_target_bits)
+        self._solve_genetic(img_blocks, total_target_bits, bpg_psnr, num_pixels=h*w)
