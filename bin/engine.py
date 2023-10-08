@@ -33,14 +33,14 @@ class Solution:
     def __init__(self, method_ids, target_bitses) -> None:
         self.method_ids = method_ids
         self.target_bitses = target_bitses
+        self.n_ctu_h, self.n_ctu_w = self.method_ids.shape
     
     def normalize_target_bitses(self, min_table, max_table, total_target):
-        n_ctu_h, n_ctu_w = self.method_ids.shape
         min_bits = np.zeros_like(self.target_bitses,dtype=np.int32)
         max_bits = np.zeros_like(self.target_bitses,dtype=np.int32)
 
-        for i in range(n_ctu_h):
-            for j in range(n_ctu_w):
+        for i in range(self.n_ctu_h):
+            for j in range(self.n_ctu_w):
                 min_bits[i, j] = min_table[self.method_ids[i, j]][i][j]
                 max_bits[i, j] = max_table[self.method_ids[i, j]][i][j]
         
@@ -152,8 +152,8 @@ class Engine:
                     for qscale in self.qscale_samples:
                         image_block = img_blocks[i, j]
                         
-                        mse, psnr, dec_time, bits, __, ___ = self._estimate_loss(method, image_block, None, qscale, 5)
-                        num_bit = len(bits) * 8
+                        mse, psnr, dec_time, bitstream, __, ___ = self._estimate_loss(method, image_block, None, qscale, 5)
+                        num_bit = len(bitstream) * 8
                         num_bits.append(num_bit)
                         mses.append(mse)
                         times.append(dec_time)
@@ -163,11 +163,13 @@ class Engine:
                     self._maximal_bits[idx, i, j] = num_bits[-1]
 
                     b_m = interpolate.interp1d(num_bits, mses, kind='cubic')
-                    b_t = interpolate.interp1d(num_bits, times, kind='cubic')
+                    b_t = interpolate.interp1d(num_bits, times, kind='linear')
+                    b_q = interpolate.interp1d(num_bits, self.qscale_samples, kind='cubic')
                     self._precomputed_curve[idx][i][j]['b_m'] = b_m
                     self._precomputed_curve[idx][i][j]['b_t'] = b_t
+                    self._precomputed_curve[idx][i][j]['b_q'] = b_q
     
-    def _search(self, img_blocks, method_ids, target_bitses, total_target):
+    def _search(self, img_blocks, method_ids, target_bitses, total_target, bpg_psnr):
         if np.sum(target_bitses) > total_target:
             return -np.inf, -np.inf, np.inf
         n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
@@ -191,7 +193,7 @@ class Engine:
         
         global_mse = np.mean(global_mse)
         psnr = -10*np.log10(global_mse)
-        return psnr - global_time, psnr, global_time
+        return psnr - global_time - bpg_psnr, psnr, global_time
     
     def _normal_noise_like(self, x, sigma):
         noise = np.random.normal(0, sigma, x.shape).astype(np.int32)
@@ -257,6 +259,24 @@ class Engine:
                 min_qs = mid_qs
         
         return max_qs, target_bits
+    
+    def _show_solution(self, solution: Solution, total_target_bits):
+        total_bits = np.sum(solution.target_bitses)
+        print(f"Loss={solution.loss}; total_bits=[{total_bits}/{total_target_bits}]({100.0*total_bits/total_target_bits:.4f}%)", flush=True)
+        for i in range(solution.n_ctu_h):
+            for j in range(solution.n_ctu_w):
+                method_id = solution.method_ids[i, j]
+                target_bits = solution.target_bitses[i, j]
+
+                valid_target_bits = self._precomputed_curve[method_id][i][j]['b_t'].x
+                min_tb = min(valid_target_bits)
+                max_tb = max(valid_target_bits)
+
+                est_time = self._precomputed_curve[method_id][i][j]['b_t'](target_bits)
+                est_qscale  = self._precomputed_curve[method_id][i][j]['b_q'](target_bits)
+                est_mse  = self._precomputed_curve[method_id][i][j]['b_m'](target_bits)
+
+                print(f"- CTU [{i}, {j}]:\tmethod_id={method_id}\ttarget_bits={target_bits}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\tmse={est_mse:.6f}")
 
     def _solve_genetic(self, img_blocks, total_target_bits, bpg_psnr, N=10000, num_generation=10000, survive_rate=0.01):
         n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
@@ -268,16 +288,16 @@ class Engine:
         print("Precompute all losses")
         self._precompute_loss(img_blocks)
         
-        # Generate initial solves
-        solves = []
+        # Generate initial solutions
+        solutions = []
         for k in range(N):
             method_ids = np.zeros([n_ctu_h, n_ctu_w], dtype=np.int32)
             target_bitses = default_target_bits
             method = Solution(method_ids, target_bitses)
             self._mutate(method, total_target_bits)
-            method.loss, method.psnr, method.time = self._search(img_blocks, method.method_ids, method.target_bitses, total_target_bits)
-            solves.append(method)
-        solves.sort(key=lambda x:x.loss, reverse=True)
+            method.loss, method.psnr, method.time = self._search(img_blocks, method.method_ids, method.target_bitses, total_target_bits, bpg_psnr)
+            solutions.append(method)
+        solutions.sort(key=lambda x:x.loss, reverse=True)
         
         max_score = -1
         best_psnr = -1
@@ -287,31 +307,30 @@ class Engine:
 
         for k in range(num_generation):
             # show best solution on generation
-            best_solution:Solution = solves[0]
-            best_total_bits = np.sum(best_solution.target_bitses)
-            print(f"best loss before generation {k}: {best_solution.loss}; total_bits=[{best_total_bits}/{total_target_bits}]({100.0*best_total_bits/total_target_bits:.4f}%)", flush=True)
-            print("method_ids =", best_solution.method_ids.flatten())
-            print("target_bits =", best_solution.target_bitses.flatten())
+            best_solution:Solution = solutions[0]
+
+            print(f"Best Solution before Gen.{k}:")
+            self._show_solution(best_solution, total_target_bits)
 
             # Kill last solutions
-            solves = solves[:num_alive]
+            solutions = solutions[:num_alive]
 
             # Hybrid
             for i in (pbar := tqdm.tqdm(range(N - num_alive))):
                 pbar.set_description(f"Calculating loss for generation {k+1}; max_score={max_score:.3f}; best_psnr={best_psnr:.3f}; best_time={best_time:.3f}")
                 parent_id1 = random.randint(0, num_alive - 1)
                 parent_id2 = random.randint(0, num_alive - 1)
-                newborn = self._hybrid(solves[parent_id1], solves[parent_id2], total_target_bits)
+                newborn = self._hybrid(solutions[parent_id1], solutions[parent_id2], total_target_bits)
                 self._mutate(newborn, total_target_bits)
-                newborn.loss, newborn.psnr, newborn.time = self._search(img_blocks, newborn.method_ids, newborn.target_bitses, total_target_bits)
-                solves.append(newborn)
-                if max_score is None or max_score < newborn.loss - bpg_psnr:
-                    max_score = newborn.loss - bpg_psnr
+                newborn.loss, newborn.psnr, newborn.time = self._search(img_blocks, newborn.method_ids, newborn.target_bitses, total_target_bits, bpg_psnr)
+                solutions.append(newborn)
+                if max_score is None or max_score < newborn.loss:
+                    max_score = newborn.loss
                     best_time = newborn.time
                     best_psnr = newborn.psnr
-                solves.sort(key=lambda x:x.loss, reverse=True)
+                solutions.sort(key=lambda x:x.loss, reverse=True)
         
-        return solves[0].method_ids, solves[0].target_bitses
+        return solutions[0].method_ids, solutions[0].target_bitses
 
     @staticmethod
     def read_img(img_path):
