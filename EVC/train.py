@@ -129,7 +129,7 @@ def train_one_epoch(
                 f'\tBpp loss: {out_criterion["bpp_loss"].item():.4f}'
             )
 
-def test_epoch(epoch, test_dataloader, lmbdas, model, criterion):
+def test_epoch(epoch, test_dataloader, lmbdas, model, criterion, writer=None):
     model.eval()
     device = next(model.parameters()).device
 
@@ -152,6 +152,8 @@ def test_epoch(epoch, test_dataloader, lmbdas, model, criterion):
             loss_items = []
             for k, meter in loss_dict.items():
                 loss_items.append(f"{k}={meter.avg:.5f}")
+                if writer:
+                    writer.add_scalar(k, meter.avg.cpu().numpy().item(), epoch)
             print(*loss_items, sep=' - ')
             losses.append(loss_dict["loss"].avg.cpu().numpy().item())
 
@@ -159,10 +161,10 @@ def test_epoch(epoch, test_dataloader, lmbdas, model, criterion):
 
 
 def save_checkpoint(state, is_best, save_path):
-    torch.save(state, save_path + "last_epoch.pth.tar")
+    torch.save(state, os.path.join(save_path, "last_epoch.pth.tar"))
 
     if is_best:
-        torch.save(state, save_path + "best_epoch.pth.tar")
+        torch.save(state, os.path.join(save_path, "best_epoch.pth.tar"))
 
 
 def parse_args(argv):
@@ -224,7 +226,7 @@ def parse_args(argv):
     parser.add_argument("--type", type=str, default='mse', help="loss type", choices=['mse', "ms-ssim"])
     parser.add_argument("--save_path", type=str, default='./', help="save_path")
     parser.add_argument(
-        "--lr_epoch", nargs='+', type=int, default=[10]
+        "--lr_epoch", nargs='+', type=int, default=[]
     )
     parser.add_argument(
         "--continue_train", action="store_true", default=False
@@ -276,7 +278,7 @@ def main(argv):
     optimizer = configure_optimizers(net, args)
     milestones = args.lr_epoch
     print("milestones: ", milestones)
-    lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones, gamma=0.1, last_epoch=-1)
+    lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones, gamma=0.2, last_epoch=-1)
 
     criterion = RateDistortionLoss()
 
@@ -309,7 +311,7 @@ def main(argv):
             args.clip_max_norm,
             type
         )
-        loss = test_epoch(epoch, test_dataloader, lmbdas, net, criterion)
+        loss = test_epoch(epoch, test_dataloader, lmbdas, net, criterion, writer)
         writer.add_scalar('test_loss', loss, epoch)
         lr_scheduler.step()
 
