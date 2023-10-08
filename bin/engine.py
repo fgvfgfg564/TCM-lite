@@ -13,7 +13,7 @@ from scipy import interpolate
 
 from EVC.bin.engine import ModelEngine
 
-from .utils import get_bpg_result
+from .utils import get_bpg_result, is_strictly_increasing
 from .fileio import FileIO
 
 np.seterr(all='raise')
@@ -158,13 +158,23 @@ class Engine:
                         mses.append(mse)
                         times.append(dec_time)
                         pbar_iter.__next__()
+                    
+                    if not is_strictly_increasing(num_bits):
+                        raise ValueError(f"bits are not strictly increasing: \nnum_bits={num_bits}\nmses={mses}")
 
                     self._minimal_bits[idx, i, j] = num_bits[0]
                     self._maximal_bits[idx, i, j] = num_bits[-1]
 
-                    b_m = interpolate.interp1d(num_bits, mses, kind='cubic')
-                    b_t = interpolate.interp1d(num_bits, times, kind='linear')
-                    b_q = interpolate.interp1d(num_bits, self.qscale_samples, kind='cubic')
+                    try:
+                        b_m = interpolate.interp1d(num_bits, mses, kind='cubic')
+                        b_t = interpolate.interp1d(num_bits, times, kind='linear')
+                        b_q = interpolate.interp1d(num_bits, self.qscale_samples, kind='cubic')
+                    except ValueError as e:
+                        print(f"Interpolation error!")
+                        print(f"num_bits={num_bits}")
+                        print(f"mses={mses}")
+                        raise e
+
                     self._precomputed_curve[idx][i][j]['b_m'] = b_m
                     self._precomputed_curve[idx][i][j]['b_t'] = b_t
                     self._precomputed_curve[idx][i][j]['b_q'] = b_q

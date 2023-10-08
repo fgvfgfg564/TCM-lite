@@ -28,3 +28,18 @@ def get_bpg_result(img_filename, qp=28):
         psnr = -10*np.log10(mse / (255 ** 2))
     
     return num_bits, psnr
+
+def is_strictly_increasing(arr):
+    """
+    Check if a 1-D NumPy array is strictly increasing.
+
+    Parameters:
+    arr (numpy.ndarray): The input 1-D NumPy array.
+
+    Returns:
+    bool: True if the array is strictly increasing, False otherwise.
+    """
+    for i in range(1, len(arr)):
+        if arr[i] <= arr[i - 1]:
+            return False
+    return True
