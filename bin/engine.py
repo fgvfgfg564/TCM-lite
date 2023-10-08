@@ -35,12 +35,12 @@ class Solution:
         self.target_bitses = target_bitses
     
     def normalize_target_bitses(self, min_table, max_table, total_target):
-        n_block_h, n_block_w = self.method_ids.shape
+        n_ctu_h, n_ctu_w = self.method_ids.shape
         min_bits = np.zeros_like(self.target_bitses,dtype=np.int32)
         max_bits = np.zeros_like(self.target_bitses,dtype=np.int32)
 
-        for i in range(n_block_h):
-            for j in range(n_block_w):
+        for i in range(n_ctu_h):
+            for j in range(n_ctu_w):
                 min_bits[i, j] = min_table[self.method_ids[i, j]][i][j]
                 max_bits[i, j] = max_table[self.method_ids[i, j]][i][j]
         
@@ -130,21 +130,21 @@ class Engine:
         return mse, psnr, np.mean(times), bits, recon_img, q_scale
     
     def _precompute_loss(self, img_blocks):
-        n_block_h, n_block_w, _, c, ctu_h, ctu_w = img_blocks.shape
+        n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
         n_methods = len(self.methods)
 
         self._precomputed_curve = {}
-        self._minimal_bits = np.zeros([n_methods, n_block_h, n_block_w], dtype=np.int32)
-        self._maximal_bits = np.zeros([n_methods, n_block_h, n_block_w], dtype=np.int32)
+        self._minimal_bits = np.zeros([n_methods, n_ctu_h, n_ctu_w], dtype=np.int32)
+        self._maximal_bits = np.zeros([n_methods, n_ctu_h, n_ctu_w], dtype=np.int32)
 
-        pbar = tqdm.trange(n_methods * n_block_h * n_block_w * len(self.qscale_samples))
+        pbar = tqdm.trange(n_methods * n_ctu_h * n_ctu_w * len(self.qscale_samples))
         pbar.set_description("Precomputing loss")
         pbar_iter = pbar.__iter__()
         for method, _, idx in self.methods:
             self._precomputed_curve[idx] = {}
-            for i in range(n_block_h):
+            for i in range(n_ctu_h):
                 self._precomputed_curve[idx][i] = {}
-                for j in range(n_block_w):
+                for j in range(n_ctu_w):
                     self._precomputed_curve[idx][i][j] = {}
                     mses = []
                     num_bits = []
@@ -170,13 +170,13 @@ class Engine:
     def _search(self, img_blocks, method_ids, target_bitses, total_target):
         if np.sum(target_bitses) > total_target:
             return -np.inf, -np.inf, np.inf
-        n_block_h, n_block_w, _, c, ctu_h, ctu_w = img_blocks.shape
+        n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
 
         global_mse = []
         global_time = 0
 
-        for i in range(n_block_h):
-            for j in range(n_block_w):
+        for i in range(n_ctu_h):
+            for j in range(n_ctu_w):
                 img_block = img_blocks[i, j]
                 method_id = method_ids[i][j]
                 target_bits = target_bitses[i][j]
@@ -213,8 +213,8 @@ class Engine:
         return new_header
     
     def _mutate(self, header: Solution, total_target_bits, method_mutate_p=0.5, bit_mutate_sigma=8192, inplace=True):
-        n_block_h, n_block_w = header.method_ids.shape
-        n_blocks = n_block_h * n_block_w
+        n_ctu_h, n_ctu_w = header.method_ids.shape
+        n_ctus = n_ctu_h * n_ctu_w
 
         max_method_id = len(self.methods) - 1
         if not inplace:
@@ -239,14 +239,14 @@ class Engine:
     def _search_init_qscale(self, method, img_blocks, total_target_bits):
         min_qs = 1e-5
         max_qs = 1.
-        n_block_h, n_block_w, _, c, ctu_h, ctu_w = img_blocks.shape
-        target_bits = np.zeros([n_block_h, n_block_w])
+        n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
+        target_bits = np.zeros([n_ctu_h, n_ctu_w])
 
         while min_qs < max_qs - 1e-3:
             mid_qs = (max_qs + min_qs) / 2.
             total_bits = 0
-            for i in range(n_block_h):
-                for j in range(n_block_w):
+            for i in range(n_ctu_h):
+                for j in range(n_ctu_w):
                     bits = method.compress_block(img_blocks[i, j], mid_qs)
                     len_bits = len(bits) * 8
                     target_bits[i, j] = len_bits
@@ -258,9 +258,9 @@ class Engine:
         
         return max_qs, target_bits
 
-    def _solve_genetic(self, img_blocks, total_target_bits, bpg_psnr, num_pixels, N=10000, num_generation=10000, survive_rate=0.01):
-        n_block_h, n_block_w, _, c, ctu_h, ctu_w = img_blocks.shape
-        n_blocks = n_block_h * n_block_w
+    def _solve_genetic(self, img_blocks, total_target_bits, bpg_psnr, N=10000, num_generation=10000, survive_rate=0.01):
+        n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
+        n_ctus = n_ctu_h * n_ctu_w
 
         print("Initializing qscale")
         default_qscale, default_target_bits = self._search_init_qscale(self.methods[0][0], img_blocks, total_target_bits)
@@ -271,34 +271,25 @@ class Engine:
         # Generate initial solves
         solves = []
         for k in range(N):
-            method_ids = np.zeros([n_block_h, n_block_w], dtype=np.int32)
+            method_ids = np.zeros([n_ctu_h, n_ctu_w], dtype=np.int32)
             target_bitses = default_target_bits
             method = Solution(method_ids, target_bitses)
             self._mutate(method, total_target_bits)
+            method.loss, method.psnr, method.time = self._search(img_blocks, method.method_ids, method.target_bitses, total_target_bits)
             solves.append(method)
+        solves.sort(key=lambda x:x.loss, reverse=True)
         
         max_score = -1
         best_psnr = -1
         best_time = -1
-
-        for u in (pbar := tqdm.tqdm(solves)):
-            pbar.set_description(f"Calculating loss for generation 0; max_score={max_score:.3f}; best_psnr={best_psnr:.3f}; best_time={best_time:.3f}")
-            if not hasattr(u, 'loss'):
-                u.loss, u.psnr, u.time = self._search(img_blocks, u.method_ids, u.target_bitses, total_target_bits)
-                if max_score is None or max_score < u.loss:
-                    max_score = u.loss - bpg_psnr
-                    best_time = u.time
-                    best_psnr = u.psnr
         
         num_alive = int(math.floor(N*survive_rate))
 
         for k in range(num_generation):
-            solves.sort(key=lambda x:x.loss, reverse=True)
-
             # show best solution on generation
             best_solution:Solution = solves[0]
             best_total_bits = np.sum(best_solution.target_bitses)
-            print(f"best loss on generation {k}: {best_solution.loss}; total_bits={best_total_bits}; bpp={best_total_bits/num_pixels:.4f}", flush=True)
+            print(f"best loss before generation {k}: {best_solution.loss}; total_bits=[{best_total_bits}/{total_target_bits}]({100.0*best_total_bits/total_target_bits:.4f}%)", flush=True)
             print("method_ids =", best_solution.method_ids.flatten())
             print("target_bits =", best_solution.target_bitses.flatten())
 
@@ -314,11 +305,13 @@ class Engine:
                 self._mutate(newborn, total_target_bits)
                 newborn.loss, newborn.psnr, newborn.time = self._search(img_blocks, newborn.method_ids, newborn.target_bitses, total_target_bits)
                 solves.append(newborn)
-                if max_score is None or max_score < newborn.loss:
+                if max_score is None or max_score < newborn.loss - bpg_psnr:
                     max_score = newborn.loss - bpg_psnr
                     best_time = newborn.time
                     best_psnr = newborn.psnr
-                    
+                solves.sort(key=lambda x:x.loss, reverse=True)
+        
+        return solves[0].method_ids, solves[0].target_bitses
 
     @staticmethod
     def read_img(img_path):
@@ -358,13 +351,18 @@ class Engine:
         input_img = self.read_img(input_pth)
         h, w, padded_img = self.pad_img(input_img)
 
+        file_io = FileIO(h, w, self.ctu_size)
+
         total_target_bits, bpg_psnr = get_bpg_result(input_pth)
         target_bpp = total_target_bits / h / w
-        print(f"Target bpp={target_bpp:.4f}; bpg_psnr={bpg_psnr:.2f}")
+        print(f"Target bits={total_target_bits}; Target bpp={target_bpp:.4f}; bpg_psnr={bpg_psnr:.2f}")
         img_blocks = padded_img.unfold(2, self.ctu_size, self.ctu_size).unfold(3, self.ctu_size, self.ctu_size)
 
         img_blocks = torch.permute(img_blocks, (2, 3, 0, 1, 4, 5))
-        n_block_h, n_block_w, _, c, ctu_h, ctu_w = img_blocks.shape
-        n_block = n_block_h * n_block_w
 
-        self._solve_genetic(img_blocks, total_target_bits, bpg_psnr, num_pixels=h*w)
+        header_bits = file_io.header_size * 8
+        safety_bits = 16 * file_io.num_ctu
+        total_target_bits -= header_bits + safety_bits
+        print(f"Header bits={header_bits}; Safety_bits={safety_bits}; CTU bits={total_target_bits}")
+
+        self._solve_genetic(img_blocks, total_target_bits, bpg_psnr)
