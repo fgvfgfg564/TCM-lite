@@ -42,7 +42,7 @@ class FileIO:
         return struct.calcsize(self.format_str)
     
     def dump(self, filename: str):
-        with open(filename, "rb") as fd:
+        with open(filename, "wb") as fd:
             items = [self.h, self.w]
             for i in range(self.ctu_h):
                 for j in range(self.ctu_w):
@@ -50,7 +50,7 @@ class FileIO:
                     items.append(len(self.bitstreams[i][j]))
                     items.append(self.q_scale[i, j])
 
-            bits = struct.pack(self.format_str, items)
+            bits = struct.pack(self.format_str, *items)
             fd.write(bits)
 
             for i in range(self.ctu_h):
