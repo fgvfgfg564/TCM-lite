@@ -129,7 +129,7 @@ class Engine:
         sqe = np.mean(sqes)
         psnr = -10*np.log10(sqe)
         
-        return sqe, psnr, np.mean(times), bitstream, recon_img, q_scale
+        return sqe, np.mean(times), bitstream, recon_img, q_scale
     
     def _precompute_loss(self, img_blocks):
         n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
@@ -155,7 +155,7 @@ class Engine:
                     for qscale in self.qscale_samples:
                         image_block = img_blocks[i, j]
                         
-                        sqe, psnr, dec_time, bitstream, __, ___ = self._estimate_loss(method, image_block, None, qscale, 1)
+                        sqe, dec_time, bitstream, __, ___ = self._estimate_loss(method, image_block, None, qscale, 1)
                         num_byte = len(bitstream)
                         while len(num_bytes) > 0 and num_byte <= num_bytes[-1]:
                             num_bytes.pop()
