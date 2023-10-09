@@ -10,6 +10,7 @@ import copy
 import math
 import random
 from scipy import interpolate
+import einops
 
 from EVC.bin.engine import ModelEngine
 
@@ -70,11 +71,11 @@ class Engine:
             idx += 1
         
         self.num_qscale_samples = num_qscale_samples
-        self.qscale_samples = np.linspace(0, 1, num_qscale_samples)[::-1]
+        self.qscale_samples = np.linspace(0, 1, num_qscale_samples, dtype=np.float32)[::-1]
     
     def _compress_with_bitrate(self, method, image_block, target_bits):
-        min_qs = 1e-5
-        max_qs = 1.
+        min_qs = float(1e-5)
+        max_qs = float(1.)
 
         while min_qs < max_qs - 1e-3:
             mid_qs = (max_qs + min_qs) / 2.
@@ -231,7 +232,7 @@ class Engine:
 
         return new_header
     
-    def _mutate(self, header: Solution, total_target_bits, method_mutate_p=0.5, bit_mutate_sigma=8192, inplace=True):
+    def _mutate(self, header: Solution, total_target_bits, method_mutate_p=0.01, bit_mutate_sigma=8192, inplace=True):
         n_ctu_h, n_ctu_w = header.method_ids.shape
         n_ctus = n_ctu_h * n_ctu_w
 
@@ -256,8 +257,8 @@ class Engine:
         return header
     
     def _search_init_qscale(self, method, img_blocks, total_target_bits):
-        min_qs = 1e-5
-        max_qs = 1.
+        min_qs = float(1e-5)
+        max_qs = float(1.)
         n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
         target_bits = np.zeros([n_ctu_h, n_ctu_w])
 
@@ -279,7 +280,7 @@ class Engine:
     
     def _show_solution(self, solution: Solution, total_target_bits):
         total_bits = np.sum(solution.target_bitses)
-        print(f"Loss={solution.loss}; total_bits=[{total_bits}/{total_target_bits}]({100.0*total_bits/total_target_bits:.4f}%)", flush=True)
+        print(f"Loss={solution.loss}; total_bits=[{total_bits}/{total_target_bits}]({100.0*total_bits/total_target_bits:.4f}%); PSNR={solution.psnr:.3f}; time={solution.time:.3f}s", flush=True)
         for i in range(solution.n_ctu_h):
             for j in range(solution.n_ctu_w):
                 method_id = solution.method_ids[i, j]
@@ -295,7 +296,7 @@ class Engine:
 
                 print(f"- CTU [{i}, {j}]:\tmethod_id={method_id}\ttarget_bits={target_bits}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\tmse={est_mse:.6f}")
 
-    def _solve_genetic(self, img_blocks, total_target_bits, bpg_psnr, N=10000, num_generation=10000, survive_rate=0.01):
+    def _solve_genetic(self, img_blocks, total_target_bits, bpg_psnr, N=1000, num_generation=10000, survive_rate=0.05):
         n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
         n_ctus = n_ctu_h * n_ctu_w
 
@@ -311,14 +312,14 @@ class Engine:
             method_ids = np.zeros([n_ctu_h, n_ctu_w], dtype=np.int32)
             target_bitses = default_target_bits
             method = Solution(method_ids, target_bitses)
-            self._mutate(method, total_target_bits)
+            self._mutate(method, total_target_bits, method_mutate_p=1.0)
             method.loss, method.psnr, method.time = self._search(img_blocks, method.method_ids, method.target_bitses, total_target_bits, bpg_psnr)
             solutions.append(method)
         solutions.sort(key=lambda x:x.loss, reverse=True)
         
-        max_score = -1
-        best_psnr = -1
-        best_time = -1
+        max_score = solutions[0].loss
+        best_psnr = solutions[0].psnr
+        best_time = solutions[0].time
         
         num_alive = int(math.floor(N*survive_rate))
 
@@ -347,7 +348,19 @@ class Engine:
                     best_psnr = newborn.psnr
                 solutions.sort(key=lambda x:x.loss, reverse=True)
         
-        return solutions[0].method_ids, solutions[0].target_bitses
+        # Calculate q_scale and bitstream for CTUs
+        bitstreams = []
+        q_scales = np.zeros([n_ctu_h, n_ctu_w], dtype=np.float32)
+        best_solution: Solution = solutions[0]
+        for i in range(n_ctu_h):
+            bitstreams_tmp = []
+            for j in range(n_ctu_w):
+                bitstream, q_scale = self._compress_with_bitrate(best_solution.method_ids[i, j], img_blocks[i, j], best_solution.target_bitses[i, j])
+                bitstreams_tmp.append(bitstream)
+                q_scales[i, j] = q_scale
+            bitstreams.append(bitstreams_tmp)
+        
+        return best_solution.method_ids, q_scales, bitstreams
 
     @staticmethod
     def read_img(img_path):
@@ -380,7 +393,7 @@ class Engine:
         img = np.clip(np.rint(img * 255), 0, 255).astype(np.uint8)
         Image.fromarray(img).save(save_path)
 
-    def encode(self, input_pth, output_pth):
+    def encode(self, input_pth, output_pth, num_generation):
         """
 
         """
@@ -393,13 +406,31 @@ class Engine:
         target_bpp = total_target_bits / h / w
         print(f"Image shape: {h}x{w}")
         print(f"Target bits={total_target_bits}; Target bpp={target_bpp:.4f}; bpg_psnr={bpg_psnr:.2f}")
-        img_blocks = padded_img.unfold(2, self.ctu_size, self.ctu_size).unfold(3, self.ctu_size, self.ctu_size)
-
-        img_blocks = torch.permute(img_blocks, (2, 3, 0, 1, 4, 5))
+        img_blocks = einops.rearrange(padded_img, 'b c (n_ctu_h ctu_size_h) (n_ctu_w ctu_size_w) -> n_ctu_h n_ctu_w b c ctu_size_h ctu_size_w', ctu_size_h=self.ctu_size, ctu_size_w=self.ctu_size)
+        print(img_blocks.shape)
 
         header_bits = file_io.header_size * 8
         safety_bits = 16 * file_io.num_ctu
         total_target_bits -= header_bits + safety_bits
         print(f"Header bits={header_bits}; Safety_bits={safety_bits}; CTU bits={total_target_bits}")
 
-        self._solve_genetic(img_blocks, total_target_bits, bpg_psnr)
+        method_ids, q_scales, bitstreams = self._solve_genetic(img_blocks, total_target_bits, bpg_psnr, num_generation=num_generation)
+        file_io.method_id = method_ids
+        file_io.bitstreams = bitstreams
+        file_io.q_scale = q_scales
+        file_io.dump(output_pth)
+    
+    def decode(self, input_pth, output_pth):
+        file_io: FileIO = FileIO.load(input_pth)
+        decoded_ctus = []
+        for i in range(file_io.ctu_h):
+            for j in range(file_io.ctu_w):
+                method_id = file_io.method_id[i, j]
+                q_scale = file_io.q_scale[i, j]
+                bitstream = file_io.bitstreams[i][j]
+                ctu = self.methods[method_id].decompress_block(bitstream, self.ctu_size, self.ctu_size, q_scale)
+                decoded_ctus.append(ctu)
+        recon_img = torch.cat(decoded_ctus, dim=0)
+        recon_img = einops.rearrange(recon_img, '(n_ctu_h, n_ctu_w) c ctu_size_h ctu_size_w -> 1 c (n_ctu_h ctu_size_h) (n_ctu_w ctu_size_w)', n_ctu_h=file_io.ctu_h)
+        recon_img = recon_img[:, :, :file_io.h, :file_io.w]
+        self.save_torch_image(recon_img, output_pth)
