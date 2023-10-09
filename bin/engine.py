@@ -16,6 +16,7 @@ from EVC.bin.engine import ModelEngine
 
 from .utils import get_bpg_result, is_strictly_increasing
 from .fileio import FileIO
+import EVC.src.utils.timer as timer
 
 SAFETY_BYTE_PER_CTU = 2
 
@@ -396,7 +397,8 @@ class Engine:
     def save_torch_image(img, save_path):
         img = img.squeeze(0).permute(1, 2, 0).detach().cpu().numpy()
         img = np.clip(np.rint(img * 255), 0, 255).astype(np.uint8)
-        Image.fromarray(img).save(save_path)
+        with timer.Timer("Save"):
+            Image.fromarray(img).save(save_path)
 
     def encode(self, input_pth, output_pth, num_generation):
         input_img = self.read_img(input_pth)
@@ -424,16 +426,19 @@ class Engine:
     def decode(self, input_pth, output_pth):
         file_io: FileIO = FileIO.load(input_pth, self.ctu_size)
         decoded_ctus = []
-        for i in range(file_io.ctu_h):
-            for j in range(file_io.ctu_w):
-                method_id = file_io.method_id[i, j]
-                q_scale = file_io.q_scale[i, j]
-                bitstream = file_io.bitstreams[i][j]
-                method, method_name, _ = self.methods[method_id]
-                print(f"Decoding CTU[{i}, {j}]: method #{method_id}('{method_name}'); q_scale={q_scale:.6f}")
-                ctu = method.decompress_block(bitstream, self.ctu_size, self.ctu_size, q_scale)
-                decoded_ctus.append(ctu)
-        recon_img = torch.cat(decoded_ctus, dim=0)
-        recon_img = einops.rearrange(recon_img, '(n_ctu_h n_ctu_w) c ctu_size_h ctu_size_w -> 1 c (n_ctu_h ctu_size_h) (n_ctu_w ctu_size_w)', n_ctu_h=file_io.ctu_h)
-        recon_img = recon_img[:, :, :file_io.h, :file_io.w]
-        self.save_torch_image(recon_img, output_pth)
+        with timer.Timer("Decode_CTU"):
+            for i in range(file_io.ctu_h):
+                for j in range(file_io.ctu_w):
+                    method_id = file_io.method_id[i, j]
+                    q_scale = file_io.q_scale[i, j]
+                    bitstream = file_io.bitstreams[i][j]
+                    method, method_name, _ = self.methods[method_id]
+                    print(f"Decoding CTU[{i}, {j}]: method #{method_id}('{method_name}'); q_scale={q_scale:.6f}")
+                    ctu = method.decompress_block(bitstream, self.ctu_size, self.ctu_size, q_scale)
+                    decoded_ctus.append(ctu)
+        with timer.Timer("Reconstruct&save"):
+            recon_img = torch.cat(decoded_ctus, dim=0)
+            recon_img = einops.rearrange(recon_img, '(n_ctu_h n_ctu_w) c ctu_size_h ctu_size_w -> 1 c (n_ctu_h ctu_size_h) (n_ctu_w ctu_size_w)', n_ctu_h=file_io.ctu_h)
+            recon_img = recon_img[:, :, :file_io.h, :file_io.w]
+        with timer.Timer("Write"):
+            self.save_torch_image(recon_img, output_pth)
