@@ -59,7 +59,13 @@ class ModelEngine(nn.Module):
     def _q_scale_mapping(self, q_scale_0_1):
         # 0 -> self.q_scale_min
         # 1 -> self.q_scale_max
-        return self.q_scale_min + q_scale_0_1 * (self.q_scale_max - self.q_scale_min)
+
+        lg_min = np.log(self.q_scale_min)
+        lg_max = np.log(self.q_scale_max)
+        lg_qs = lg_min + q_scale_0_1 * (lg_max - lg_min)
+        qs = np.exp(lg_qs)
+
+        return qs
     
     def compile(self, output_dir):
         compile(self.i_frame_net, output_dir)

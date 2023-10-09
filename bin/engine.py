@@ -148,15 +148,22 @@ class Engine:
                     self._precomputed_curve[idx][i][j] = {}
                     mses = []
                     num_bits = []
+                    qscales = []
                     times = []
                     for qscale in self.qscale_samples:
                         image_block = img_blocks[i, j]
                         
                         mse, psnr, dec_time, bitstream, __, ___ = self._estimate_loss(method, image_block, None, qscale, 5)
                         num_bit = len(bitstream) * 8
+                        while len(num_bits) > 0 and num_bit <= num_bits[-1]:
+                            num_bits.pop()
+                            mses.pop()
+                            times.pop()
+                            qscales.pop()
                         num_bits.append(num_bit)
                         mses.append(mse)
                         times.append(dec_time)
+                        qscales.append(qscale)
                         pbar_iter.__next__()
                     
                     if not is_strictly_increasing(num_bits):
@@ -168,7 +175,7 @@ class Engine:
                     try:
                         b_m = interpolate.interp1d(num_bits, mses, kind='cubic')
                         b_t = interpolate.interp1d(num_bits, times, kind='linear')
-                        b_q = interpolate.interp1d(num_bits, self.qscale_samples, kind='cubic')
+                        b_q = interpolate.interp1d(num_bits, qscales, kind='cubic')
                     except ValueError as e:
                         print(f"Interpolation error!")
                         print(f"num_bits={num_bits}")
@@ -384,6 +391,7 @@ class Engine:
 
         total_target_bits, bpg_psnr = get_bpg_result(input_pth)
         target_bpp = total_target_bits / h / w
+        print(f"Image shape: {h}x{w}")
         print(f"Target bits={total_target_bits}; Target bpp={target_bpp:.4f}; bpg_psnr={bpg_psnr:.2f}")
         img_blocks = padded_img.unfold(2, self.ctu_size, self.ctu_size).unfold(3, self.ctu_size, self.ctu_size)
 
