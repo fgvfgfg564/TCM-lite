@@ -62,7 +62,7 @@ class Solution:
         self.target_byteses = new_target
 
 class Engine:
-    def __init__(self, ctu_size=512, num_qscale_samples=20) -> None:
+    def __init__(self, ctu_size=512, num_qscale_samples=50) -> None:
         self.ctu_size = ctu_size
         self.methods = []
         idx = 0
@@ -106,7 +106,7 @@ class Engine:
 
     def _estimate_loss(self, method, image_block, target_bytes=None, q_scale=None, repeat=1): 
         times = []
-        mses = []
+        sqes = []
         _, c, h, w = image_block.shape
         for i in range(repeat):
             if q_scale is None:
@@ -123,13 +123,13 @@ class Engine:
             image_block = self.torch_pseudo_quantize_to_uint8(image_block)
             recon_img = self.torch_pseudo_quantize_to_uint8(recon_img)
 
-            mse = torch.mean((image_block - recon_img)**2).detach().cpu().numpy()
-            mses.append(mse)
+            sqe = torch.sum((image_block - recon_img)**2).detach().cpu().numpy()
+            sqes.append(sqe)
 
-        mse = np.mean(mses)
-        psnr = -10*np.log10(mse)
+        sqe = np.mean(sqes)
+        psnr = -10*np.log10(sqe)
         
-        return mse, psnr, np.mean(times), bitstream, recon_img, q_scale
+        return sqe, psnr, np.mean(times), bitstream, recon_img, q_scale
     
     def _precompute_loss(self, img_blocks):
         n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
@@ -148,52 +148,52 @@ class Engine:
                 self._precomputed_curve[idx][i] = {}
                 for j in range(n_ctu_w):
                     self._precomputed_curve[idx][i][j] = {}
-                    mses = []
+                    sqes = []
                     num_bytes = []
                     qscales = []
                     times = []
                     for qscale in self.qscale_samples:
                         image_block = img_blocks[i, j]
                         
-                        mse, psnr, dec_time, bitstream, __, ___ = self._estimate_loss(method, image_block, None, qscale, 5)
+                        sqe, psnr, dec_time, bitstream, __, ___ = self._estimate_loss(method, image_block, None, qscale, 1)
                         num_byte = len(bitstream)
                         while len(num_bytes) > 0 and num_byte <= num_bytes[-1]:
                             num_bytes.pop()
-                            mses.pop()
+                            sqes.pop()
                             times.pop()
                             qscales.pop()
                         num_bytes.append(num_byte)
-                        mses.append(mse)
+                        sqes.append(sqe)
                         times.append(dec_time)
                         qscales.append(qscale)
                         pbar_iter.__next__()
                     
                     if not is_strictly_increasing(num_bytes):
-                        raise ValueError(f"num_bytes are not strictly increasing: \nnum_bytes={num_bytes}\nmses={mses}")
+                        raise ValueError(f"num_bytes are not strictly increasing: \nnum_bytes={num_bytes}\nsqes={sqes}")
 
                     self._minimal_bytes[idx, i, j] = num_bytes[0]
                     self._maximal_bytes[idx, i, j] = num_bytes[-1]
 
                     try:
-                        b_m = interpolate.interp1d(num_bytes, mses, kind='cubic')
+                        b_e = interpolate.interp1d(num_bytes, sqes, kind='cubic')
                         b_t = interpolate.interp1d(num_bytes, times, kind='linear')
                         b_q = interpolate.interp1d(num_bytes, qscales, kind='cubic')
                     except ValueError as e:
                         print(f"Interpolation error!")
                         print(f"num_bytes={num_bytes}")
-                        print(f"mses={mses}")
+                        print(f"sqes={sqes}")
                         raise e
 
-                    self._precomputed_curve[idx][i][j]['b_m'] = b_m
+                    self._precomputed_curve[idx][i][j]['b_e'] = b_e
                     self._precomputed_curve[idx][i][j]['b_t'] = b_t
                     self._precomputed_curve[idx][i][j]['b_q'] = b_q
     
-    def _search(self, img_blocks, method_ids, target_byteses, total_target, bpg_psnr):
+    def _search(self, img_blocks, num_pixels, method_ids, target_byteses, total_target, bpg_psnr):
         if np.sum(target_byteses) > total_target:
             return -np.inf, -np.inf, np.inf
         n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
 
-        global_mse = []
+        sqe = 0
         global_time = 0
 
         for i in range(n_ctu_h):
@@ -204,14 +204,14 @@ class Engine:
 
                 precomputed_results = self._precomputed_curve[method_id][i][j]
 
-                mse = precomputed_results['b_m'](target_bytes)
+                ctu_sqe = precomputed_results['b_e'](target_bytes)
                 t = precomputed_results['b_t'](target_bytes)
 
                 global_time += t
-                global_mse.append(mse)
+                sqe += ctu_sqe
         
-        global_mse = np.mean(global_mse)
-        psnr = -10*np.log10(global_mse)
+        sqe /= num_pixels * 3
+        psnr = -10*np.log10(sqe)
         return psnr - global_time - bpg_psnr, psnr, global_time
     
     def _normal_noise_like(self, x, sigma):
@@ -293,11 +293,11 @@ class Engine:
 
                 est_time = self._precomputed_curve[method_id][i][j]['b_t'](target_bytes)
                 est_qscale  = self._precomputed_curve[method_id][i][j]['b_q'](target_bytes)
-                est_mse  = self._precomputed_curve[method_id][i][j]['b_m'](target_bytes)
+                est_sqe  = self._precomputed_curve[method_id][i][j]['b_e'](target_bytes)
 
-                print(f"- CTU [{i}, {j}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\tmse={est_mse:.6f}")
+                print(f"- CTU [{i}, {j}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\squared_error={est_sqe:.6f}")
 
-    def _solve_genetic(self, img_blocks, total_target_bytes, bpg_psnr, N=1000, num_generation=10000, survive_rate=0.05):
+    def _solve_genetic(self, img_blocks, num_pixels, total_target_bytes, bpg_psnr, N=1000, num_generation=10000, survive_rate=0.05):
         n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
         n_ctus = n_ctu_h * n_ctu_w
 
@@ -314,7 +314,7 @@ class Engine:
             target_byteses = default_target_bytes
             method = Solution(method_ids, target_byteses)
             self._mutate(method, total_target_bytes, method_mutate_p=1.0)
-            method.loss, method.psnr, method.time = self._search(img_blocks, method.method_ids, method.target_byteses, total_target_bytes, bpg_psnr)
+            method.loss, method.psnr, method.time = self._search(img_blocks, num_pixels, method.method_ids, method.target_byteses, total_target_bytes, bpg_psnr)
             solutions.append(method)
         solutions.sort(key=lambda x:x.loss, reverse=True)
         
@@ -342,7 +342,7 @@ class Engine:
                 parent_id2 = random.randint(0, num_alive - 1)
                 newborn = self._hybrid(solutions[parent_id1], solutions[parent_id2], total_target_bytes)
                 self._mutate(newborn, total_target_bytes)
-                newborn.loss, newborn.psnr, newborn.time = self._search(img_blocks, newborn.method_ids, newborn.target_byteses, total_target_bytes, bpg_psnr)
+                newborn.loss, newborn.psnr, newborn.time = self._search(img_blocks, num_pixels, newborn.method_ids, newborn.target_byteses, total_target_bytes, bpg_psnr)
                 solutions.append(newborn)
                 if max_score is None or max_score < newborn.loss:
                     max_score = newborn.loss
@@ -415,7 +415,7 @@ class Engine:
         total_target_bytes -= header_bytes + safety_bytes
         print(f"Header bytes={header_bytes}; Safety_bytes={safety_bytes}; CTU bytes={total_target_bytes}")
 
-        method_ids, q_scales, bitstreams = self._solve_genetic(img_blocks, total_target_bytes, bpg_psnr, num_generation=num_generation)
+        method_ids, q_scales, bitstreams = self._solve_genetic(img_blocks, h*w, total_target_bytes, bpg_psnr, num_generation=num_generation)
         file_io.method_id = method_ids
         file_io.bitstreams = bitstreams
         file_io.q_scale = q_scales
