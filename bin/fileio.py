@@ -41,20 +41,21 @@ class FileIO:
     def header_size(self):
         return struct.calcsize(self.format_str)
     
-    def dump(self, fd: BinaryIO):
-        items = [self.h, self.w]
-        for i in range(self.ctu_h):
-            for j in range(self.ctu_w):
-                items.append(self.method_id[i, j])
-                items.append(len(self.bitstreams[i][j]))
-                items.append(self.q_scale[i, j])
+    def dump(self, filename: str):
+        with open(filename, "rb") as fd:
+            items = [self.h, self.w]
+            for i in range(self.ctu_h):
+                for j in range(self.ctu_w):
+                    items.append(self.method_id[i, j])
+                    items.append(len(self.bitstreams[i][j]))
+                    items.append(self.q_scale[i, j])
 
-        bits = struct.pack(self.format_str, items)
-        fd.write(bits)
+            bits = struct.pack(self.format_str, items)
+            fd.write(bits)
 
-        for i in range(self.ctu_h):
-            for j in range(self.ctu_w):
-                fd.write(self.bitstreams[i][j])
+            for i in range(self.ctu_h):
+                for j in range(self.ctu_w):
+                    fd.write(self.bitstreams[i][j])
     
     @classmethod
     def _read_with_format(cls, format_str, fd: BinaryIO):
@@ -63,29 +64,30 @@ class FileIO:
         return struct.unpack(format_str, s)
     
     @classmethod
-    def load(cls, fd: BinaryIO, ctu_size: int):
-        h, w = cls._read_with_format(cls.meta_str, fd)
-        io = cls(h, w, ctu_size)
-        
-        io.method_id = np.array([io.ctu_h, io.ctu_w], dtype=np.uint8)
-        io.q_scale = np.array([io.ctu_h, io.ctu_w], dtype=np.float32)
-        num_bytes = np.array([io.ctu_h, io.ctu_w], dtype=np.uint32)
+    def load(cls, filename: str, ctu_size: int):
+        with open(filename, "rb") as fd:
+            h, w = cls._read_with_format(cls.meta_str, fd)
+            io = cls(h, w, ctu_size)
+            
+            io.method_id = np.array([io.ctu_h, io.ctu_w], dtype=np.uint8)
+            io.q_scale = np.array([io.ctu_h, io.ctu_w], dtype=np.float32)
+            num_bytes = np.array([io.ctu_h, io.ctu_w], dtype=np.uint32)
 
-        # read CTU header
-        for i in range(io.ctu_h):
-            for j in range(io.ctu_w):
-                _method_id, _num_bytes, _q_scale = cls._read_with_format(cls.ctu_str, fd)
-                io.method_id[i, j] = _method_id
-                io.q_scale[i, j] = _q_scale
-                num_bytes[i, j] = _num_bytes
+            # read CTU header
+            for i in range(io.ctu_h):
+                for j in range(io.ctu_w):
+                    _method_id, _num_bytes, _q_scale = cls._read_with_format(cls.ctu_str, fd)
+                    io.method_id[i, j] = _method_id
+                    io.q_scale[i, j] = _q_scale
+                    num_bytes[i, j] = _num_bytes
 
-        # read CTU bytes
-        io.bitstreams = []
-        for i in range(io.ctu_h):
-            bitstream_tmp = []
-            for j in range(io.ctu_w):
-                bits_ctu = fd.read(num_bytes[i, j])
-                bitstream_tmp.append(bits_ctu)
-            io.bitstreams.append(bitstream_tmp)
+            # read CTU bytes
+            io.bitstreams = []
+            for i in range(io.ctu_h):
+                bitstream_tmp = []
+                for j in range(io.ctu_w):
+                    bits_ctu = fd.read(num_bytes[i, j])
+                    bitstream_tmp.append(bits_ctu)
+                io.bitstreams.append(bitstream_tmp)
         
         return io
