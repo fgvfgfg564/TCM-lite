@@ -42,7 +42,7 @@ class FileIO:
         return struct.calcsize(self.format_str)
     
     def dump(self, filename: str):
-        with open(filename, "rb") as fd:
+        with open(filename, "wb") as fd:
             items = [self.h, self.w]
             for i in range(self.ctu_h):
                 for j in range(self.ctu_w):
@@ -50,7 +50,7 @@ class FileIO:
                     items.append(len(self.bitstreams[i][j]))
                     items.append(self.q_scale[i, j])
 
-            bits = struct.pack(self.format_str, items)
+            bits = struct.pack(self.format_str, *items)
             fd.write(bits)
 
             for i in range(self.ctu_h):
@@ -69,9 +69,9 @@ class FileIO:
             h, w = cls._read_with_format(cls.meta_str, fd)
             io = cls(h, w, ctu_size)
             
-            io.method_id = np.array([io.ctu_h, io.ctu_w], dtype=np.uint8)
-            io.q_scale = np.array([io.ctu_h, io.ctu_w], dtype=np.float32)
-            num_bytes = np.array([io.ctu_h, io.ctu_w], dtype=np.uint32)
+            io.method_id = np.zeros([io.ctu_h, io.ctu_w], dtype=np.uint8)
+            io.q_scale = np.zeros([io.ctu_h, io.ctu_w], dtype=np.float32)
+            num_bytes = np.zeros([io.ctu_h, io.ctu_w], dtype=np.uint32)
 
             # read CTU header
             for i in range(io.ctu_h):

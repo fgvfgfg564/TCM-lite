@@ -19,7 +19,7 @@ def get_bpg_result(img_filename, qp=28):
         subprocess.run(dec_cmd.split())
 
         file_size_bytes = os.path.getsize(bin_filename)
-        num_bits = file_size_bytes * 8
+        num_bits = file_size_bytes
 
         img1 = np.array(Image.open(img_filename)).astype(np.int32)
         img2 = np.array(Image.open(recon_filename)).astype(np.int32)
