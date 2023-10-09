@@ -234,7 +234,7 @@ class Engine:
 
         return new_header
     
-    def _mutate(self, header: Solution, total_target_bytes, method_mutate_p=0.01, byte_mutate_sigma=8192, inplace=True):
+    def _mutate(self, header: Solution, total_target_bytes, method_mutate_p=0.02, byte_mutate_sigma=512, inplace=True):
         n_ctu_h, n_ctu_w = header.method_ids.shape
         n_ctus = n_ctu_h * n_ctu_w
 
@@ -298,12 +298,12 @@ class Engine:
 
                 print(f"- CTU [{i}, {j}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\squared_error={est_sqe:.6f}")
 
-    def _solve_genetic(self, img_blocks, num_pixels, total_target_bytes, bpg_psnr, N=1000, num_generation=10000, survive_rate=0.05):
+    def _solve_genetic(self, img_blocks, num_pixels, total_target_bytes, bpg_psnr, N=10000, num_generation=10000, survive_rate=0.05):
         n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
         n_ctus = n_ctu_h * n_ctu_w
 
         print("Initializing qscale")
-        default_qscale, default_target_bytes = self._search_init_qscale(self.methods[0][0], img_blocks, total_target_bytes)
+        default_qscale, default_target_bytes = self._search_init_qscale(self.methods[1][0], img_blocks, total_target_bytes)
 
         print("Precompute all losses")
         self._precompute_loss(img_blocks)
@@ -311,10 +311,10 @@ class Engine:
         # Generate initial solutions
         solutions = []
         for k in range(N):
-            method_ids = np.zeros([n_ctu_h, n_ctu_w], dtype=np.int32)
+            method_ids = np.ones([n_ctu_h, n_ctu_w], dtype=np.int32)
             target_byteses = default_target_bytes
             method = Solution(method_ids, target_byteses)
-            self._mutate(method, total_target_bytes, method_mutate_p=1.0)
+            self._mutate(method, total_target_bytes)
             method.loss, method.psnr, method.time = self._search(img_blocks, num_pixels, method.method_ids, method.target_byteses, total_target_bytes, bpg_psnr)
             solutions.append(method)
         solutions.sort(key=lambda x:x.loss, reverse=True)
