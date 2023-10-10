@@ -302,8 +302,10 @@ class Engine:
         n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
         n_ctus = n_ctu_h * n_ctu_w
 
+        DEFAULT_METHOD = 0
+
         print("Initializing qscale")
-        default_qscale, default_target_bytes = self._search_init_qscale(self.methods[1][0], img_blocks, total_target_bytes)
+        default_qscale, default_target_bytes = self._search_init_qscale(self.methods[DEFAULT_METHOD][0], img_blocks, total_target_bytes)
 
         print("Precompute all losses")
         self._precompute_loss(img_blocks)
@@ -311,7 +313,7 @@ class Engine:
         # Generate initial solutions
         solutions = []
         for k in range(N):
-            method_ids = np.ones([n_ctu_h, n_ctu_w], dtype=np.int32)
+            method_ids = np.zeros([n_ctu_h, n_ctu_w], dtype=np.int32) + DEFAULT_METHOD
             target_byteses = default_target_bytes
             method = Solution(method_ids, target_byteses)
             self._mutate(method, total_target_bytes)
@@ -393,13 +395,6 @@ class Engine:
         )
         return pic_height, pic_width, x_padded
 
-    @staticmethod
-    def save_torch_image(img, save_path):
-        img = img.squeeze(0).permute(1, 2, 0).detach().cpu().numpy()
-        img = np.clip(np.rint(img * 255), 0, 255).astype(np.uint8)
-        with timer.Timer("Save"):
-            Image.fromarray(img).save(save_path)
-
     def encode(self, input_pth, output_pth, num_generation):
         input_img = self.read_img(input_pth)
         h, w, padded_img = self.pad_img(input_img)
@@ -423,8 +418,7 @@ class Engine:
         file_io.q_scale = q_scales
         file_io.dump(output_pth)
     
-    def decode(self, input_pth, output_pth):
-        file_io: FileIO = FileIO.load(input_pth, self.ctu_size)
+    def decode(self, file_io):
         decoded_ctus = []
         with timer.Timer("Decode_CTU"):
             for i in range(file_io.ctu_h):
@@ -439,6 +433,6 @@ class Engine:
         with timer.Timer("Reconstruct&save"):
             recon_img = torch.cat(decoded_ctus, dim=0)
             recon_img = einops.rearrange(recon_img, '(n_ctu_h n_ctu_w) c ctu_size_h ctu_size_w -> 1 c (n_ctu_h ctu_size_h) (n_ctu_w ctu_size_w)', n_ctu_h=file_io.ctu_h)
-            recon_img = recon_img[:, :, :file_io.h, :file_io.w]
-        with timer.Timer("Write"):
-            self.save_torch_image(recon_img, output_pth)
+            recon_img = recon_img[0, :, :file_io.h, :file_io.w]
+        
+        return recon_img
