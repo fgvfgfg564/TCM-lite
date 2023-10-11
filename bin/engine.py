@@ -312,7 +312,8 @@ class Engine:
         
         # Generate initial solutions
         solutions = []
-        for k in range(N):
+        for k in (pbar := tqdm.tqdm(range(N))):
+            pbar.set_description(f"Generate initial solutions")
             method_ids = np.zeros([n_ctu_h, n_ctu_w], dtype=np.int32) + DEFAULT_METHOD
             target_byteses = default_target_bytes
             method = Solution(method_ids, target_byteses)

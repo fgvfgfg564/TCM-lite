@@ -24,11 +24,11 @@ BLOCK_SIZE = 512
 
 class ModelEngine(nn.Module):
     MODELS = {
+        "EVC_LS": 'EVC_LS_MD.pth.tar',
         "EVC_LS_large": 'EVC_LS_large.pth.tar',
+        "EVC_LM": 'EVC_LM_MD.pth.tar',
         "EVC_LL": 'EVC_LL.pth.tar',
         "EVC_LL_large": 'EVC_LL_large.pth.tar',
-        "EVC_LM": 'EVC_LM_MD.pth.tar',
-        "EVC_LS": 'EVC_LS_MD.pth.tar',
         # "EVC_ML": 'EVC_ML_MD.pth.tar',
         # "EVC_SL": 'EVC_SL_MD.pth.tar',
         # "EVC_MM": 'EVC_MM_MD.pth.tar',
