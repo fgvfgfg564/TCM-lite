@@ -105,7 +105,7 @@ class Engine:
         x = x.to(torch.half) / 255.0
         return x
 
-    def _estimate_loss(self, method, image_block, target_bytes=None, q_scale=None, repeat=1): 
+    def _estimate_score(self, method, image_block, target_bytes=None, q_scale=None, repeat=1): 
         times = []
         sqes = []
         _, c, h, w = image_block.shape
@@ -132,7 +132,7 @@ class Engine:
         
         return sqe, np.mean(times), bitstream, recon_img, q_scale
     
-    def _precompute_loss(self, img_blocks):
+    def _precompute_score(self, img_blocks):
         n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
         n_methods = len(self.methods)
 
@@ -141,7 +141,7 @@ class Engine:
         self._maximal_bytes = np.zeros([n_methods, n_ctu_h, n_ctu_w], dtype=np.int32)
 
         pbar = tqdm.trange(n_methods * n_ctu_h * n_ctu_w * len(self.qscale_samples))
-        pbar.set_description("Precomputing loss")
+        pbar.set_description("Precomputing score")
         pbar_iter = pbar.__iter__()
         for method, _, idx in self.methods:
             self._precomputed_curve[idx] = {}
@@ -156,7 +156,7 @@ class Engine:
                     for qscale in self.qscale_samples:
                         image_block = img_blocks[i, j]
                         
-                        sqe, dec_time, bitstream, __, ___ = self._estimate_loss(method, image_block, None, qscale, 1)
+                        sqe, dec_time, bitstream, __, ___ = self._estimate_score(method, image_block, None, qscale, 1)
                         num_byte = len(bitstream)
                         while len(num_bytes) > 0 and num_byte <= num_bytes[-1]:
                             num_bytes.pop()
@@ -286,7 +286,7 @@ class Engine:
     
     def _show_solution(self, solution: Solution, total_target_bytes):
         total_bytes = np.sum(solution.target_byteses)
-        print(f"Loss={solution.loss}; total_bytes=[{total_bytes}/{total_target_bytes}]({100.0*total_bytes/total_target_bytes:.4f}%); PSNR={solution.psnr:.3f}; time={solution.time:.3f}s", flush=True)
+        print(f"score={solution.score}; total_bytes=[{total_bytes}/{total_target_bytes}]({100.0*total_bytes/total_target_bytes:.4f}%); PSNR={solution.psnr:.3f}; time={solution.time:.3f}s", flush=True)
         for i in range(solution.n_ctu_h):
             for j in range(solution.n_ctu_w):
                 method_id = solution.method_ids[i, j]
@@ -310,8 +310,8 @@ class Engine:
         print("Initializing qscale")
         default_qscale, default_target_bytes = self._search_init_qscale(self.methods[DEFAULT_METHOD][0], img_blocks, total_target_bytes)
 
-        print("Precompute all losses")
-        self._precompute_loss(img_blocks)
+        print("Precompute all scorees")
+        self._precompute_score(img_blocks)
         
         # Generate initial solutions
         solutions = []
@@ -321,11 +321,11 @@ class Engine:
             target_byteses = default_target_bytes
             method = Solution(method_ids, target_byteses)
             self._mutate(method, total_target_bytes)
-            method.loss, method.psnr, method.time = self._search(img_blocks, num_pixels, method.method_ids, method.target_byteses, total_target_bytes, bpg_psnr)
+            method.score, method.psnr, method.time = self._search(img_blocks, num_pixels, method.method_ids, method.target_byteses, total_target_bytes, bpg_psnr)
             solutions.append(method)
-        solutions.sort(key=lambda x:x.loss, reverse=True)
+        solutions.sort(key=lambda x:x.score, reverse=True)
         
-        max_score = solutions[0].loss
+        max_score = solutions[0].score
         best_psnr = solutions[0].psnr
         best_time = solutions[0].time
         
@@ -344,18 +344,18 @@ class Engine:
 
             # Hybrid
             for i in (pbar := tqdm.tqdm(range(N - num_alive))):
-                pbar.set_description(f"Calculating loss for generation {k+1}; max_score={max_score:.3f}; best_psnr={best_psnr:.3f}; best_time={best_time:.3f}")
+                pbar.set_description(f"Calculating score for generation {k+1}; max_score={max_score:.3f}; best_psnr={best_psnr:.3f}; best_time={best_time:.3f}")
                 parent_id1 = random.randint(0, num_alive - 1)
                 parent_id2 = random.randint(0, num_alive - 1)
                 newborn = self._hybrid(solutions[parent_id1], solutions[parent_id2], total_target_bytes)
                 self._mutate(newborn, total_target_bytes)
-                newborn.loss, newborn.psnr, newborn.time = self._search(img_blocks, num_pixels, newborn.method_ids, newborn.target_byteses, total_target_bytes, bpg_psnr)
+                newborn.score, newborn.psnr, newborn.time = self._search(img_blocks, num_pixels, newborn.method_ids, newborn.target_byteses, total_target_bytes, bpg_psnr)
                 solutions.append(newborn)
-                if max_score is None or max_score < newborn.loss:
-                    max_score = newborn.loss
+                if max_score is None or max_score < newborn.score:
+                    max_score = newborn.score
                     best_time = newborn.time
                     best_psnr = newborn.psnr
-                solutions.sort(key=lambda x:x.loss, reverse=True)
+                solutions.sort(key=lambda x:x.score, reverse=True)
         
         # Calculate q_scale and bitstream for CTUs
         bitstreams = []
