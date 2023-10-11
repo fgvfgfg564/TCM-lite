@@ -129,5 +129,5 @@ class ModelEngine(nn.Module):
                     decoder_app = cls._load_from_weight(model_name, compiled_path, not ignore_tensorrt)
             else:
                 decoder_app = cls._load_from_weight(model_name, compiled_path, not ignore_tensorrt)
-        decoder_app.preheat()
+            decoder_app.preheat()
         return decoder_app

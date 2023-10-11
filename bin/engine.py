@@ -177,7 +177,9 @@ class Engine:
 
                     try:
                         b_e = interpolate.interp1d(num_bytes, sqes, kind='cubic')
-                        b_t = interpolate.interp1d(num_bytes, times, kind='linear')
+                        # b_t = interpolate.interp1d(num_bytes, times, kind='linear')
+                        b_t_curve = np.polyfit(num_bytes, times, 1)
+                        b_t = lambda x: np.polyval(b_t_curve, x)
                         b_q = interpolate.interp1d(num_bytes, qscales, kind='cubic')
                     except ValueError as e:
                         print(f"Interpolation error!")
@@ -187,6 +189,8 @@ class Engine:
 
                     self._precomputed_curve[idx][i][j]['b_e'] = b_e
                     self._precomputed_curve[idx][i][j]['b_t'] = b_t
+                    self._precomputed_curve[idx][i][j]['min_t'] = min(num_bytes)
+                    self._precomputed_curve[idx][i][j]['max_t'] = max(num_bytes)
                     self._precomputed_curve[idx][i][j]['b_q'] = b_q
     
     def _search(self, img_blocks, num_pixels, method_ids, target_byteses, total_target, bpg_psnr):
@@ -288,15 +292,14 @@ class Engine:
                 method_id = solution.method_ids[i, j]
                 target_bytes = solution.target_byteses[i, j]
 
-                valid_target_bytes = self._precomputed_curve[method_id][i][j]['b_t'].x
-                min_tb = min(valid_target_bytes)
-                max_tb = max(valid_target_bytes)
+                min_tb = self._precomputed_curve[method_id][i][j]['min_t']
+                max_tb = self._precomputed_curve[method_id][i][j]['max_t']
 
                 est_time = self._precomputed_curve[method_id][i][j]['b_t'](target_bytes)
                 est_qscale  = self._precomputed_curve[method_id][i][j]['b_q'](target_bytes)
                 est_sqe  = self._precomputed_curve[method_id][i][j]['b_e'](target_bytes)
 
-                print(f"- CTU [{i}, {j}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\squared_error={est_sqe:.6f}")
+                print(f"- CTU [{i}, {j}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\tsquared_error={est_sqe:.6f}")
 
     def _solve_genetic(self, img_blocks, num_pixels, total_target_bytes, bpg_psnr, N=10000, num_generation=10000, survive_rate=0.05):
         n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
