@@ -2,6 +2,7 @@ import os
 import argparse
 import struct
 import time
+import tempfile
 
 import torch
 import torch.nn as nn
@@ -98,6 +99,13 @@ class ModelEngine(nn.Module):
         if compile:
             decoder_app.compile(compiled_path)
         return decoder_app
+
+    def preheat(self):
+        dummy_input = torch.zeros([1, 3, BLOCK_SIZE, BLOCK_SIZE], device='cuda', dtype=torch.half)
+
+        for q_scale in np.linspace(0, 1, 20):
+            bitstream = self.compress_block(dummy_input, 0.5)
+            _ = self.decompress_block(bitstream, BLOCK_SIZE, BLOCK_SIZE, q_scale)
     
     @classmethod
     def _load_from_compiled(cls, model_name, compiled_path):
@@ -121,4 +129,5 @@ class ModelEngine(nn.Module):
                     decoder_app = cls._load_from_weight(model_name, compiled_path, not ignore_tensorrt)
             else:
                 decoder_app = cls._load_from_weight(model_name, compiled_path, not ignore_tensorrt)
+        decoder_app.preheat()
         return decoder_app
