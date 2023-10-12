@@ -12,12 +12,12 @@ import random
 from scipy import interpolate
 import einops
 
-from EVC.bin.engine import ModelEngine as EVCModelEngine
-from TCM.app.engine import ModelEngine as TCMModelEngine
+from coding_tools.EVC.bin.engine import ModelEngine as EVCModelEngine
+from coding_tools.TCM.app.engine import ModelEngine as TCMModelEngine
+import coding_tools.utils.timer as timer
 
 from .utils import get_bpg_result, is_strictly_increasing
 from .fileio import FileIO
-import EVC.src.utils.timer as timer
 
 SAFETY_BYTE_PER_CTU = 2
 W_TIME = 1
@@ -68,7 +68,6 @@ class Engine:
     def __init__(self, ctu_size=512, num_qscale_samples=50) -> None:
         self.ctu_size = ctu_size
         self.methods = []
-        idx = 0
 
         self._load_models()
         
@@ -76,13 +75,16 @@ class Engine:
         self.qscale_samples = np.linspace(0, 1, num_qscale_samples, dtype=np.float32)[::-1]
     
     def _load_models(self):
+        idx = 0
         # EVC models
         for model_name in EVCModelEngine.MODELS.keys():
+            print("Loading model:", model_name)
             self.methods.append((EVCModelEngine.from_model_name(model_name), model_name, idx))
             idx += 1
         
         # TCM models
         for model_name in TCMModelEngine.MODELS.keys():
+            print("Loading model:", model_name)
             self.methods.append((TCMModelEngine.from_model_name(model_name), model_name, idx))
             idx += 1
 
