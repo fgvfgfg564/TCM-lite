@@ -65,28 +65,30 @@ class Solution:
         self.target_byteses = new_target
 
 class Engine:
-    def __init__(self, ctu_size=512, num_qscale_samples=50) -> None:
+    TOOL_GROUPS = {
+        "EVC": EVCModelEngine,
+        "TCM": TCMModelEngine,
+    }
+
+    def __init__(self, ctu_size=512, num_qscale_samples=50, tool_groups=TOOL_GROUPS.keys()) -> None:
         self.ctu_size = ctu_size
         self.methods = []
 
-        self._load_models()
+        self._load_models(tool_groups)
         
         self.num_qscale_samples = num_qscale_samples
         self.qscale_samples = np.linspace(0, 1, num_qscale_samples, dtype=np.float32)[::-1]
     
-    def _load_models(self):
+    def _load_models(self, valid_groups):
         idx = 0
-        # EVC models
-        for model_name in EVCModelEngine.MODELS.keys():
-            print("Loading model:", model_name)
-            self.methods.append((EVCModelEngine.from_model_name(model_name), model_name, idx))
-            idx += 1
-        
-        # TCM models
-        for model_name in TCMModelEngine.MODELS.keys():
-            print("Loading model:", model_name)
-            self.methods.append((TCMModelEngine.from_model_name(model_name), model_name, idx))
-            idx += 1
+        # Load models
+        for group_name in valid_groups:
+            engine_cls = self.TOOL_GROUPS[group_name]
+            print("Loading tool group:", group_name)
+            for model_name in engine_cls.MODELS.keys():
+                print("Loading model:", model_name)
+                self.methods.append((engine_cls.from_model_name(model_name), model_name, idx))
+                idx += 1
 
     def _compress_with_target(self, method, image_block, target_bytes):
         min_qs = float(1e-5)
