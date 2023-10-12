@@ -12,11 +12,12 @@ import random
 from scipy import interpolate
 import einops
 
-from EVC.bin.engine import ModelEngine
+from coding_tools.EVC.bin.engine import ModelEngine as EVCModelEngine
+from coding_tools.TCM.app.engine import ModelEngine as TCMModelEngine
+import coding_tools.utils.timer as timer
 
 from .utils import get_bpg_result, is_strictly_increasing
 from .fileio import FileIO
-import EVC.src.utils.timer as timer
 
 SAFETY_BYTE_PER_CTU = 2
 W_TIME = 1
@@ -64,19 +65,31 @@ class Solution:
         self.target_byteses = new_target
 
 class Engine:
-    def __init__(self, ctu_size=512, num_qscale_samples=50) -> None:
+    TOOL_GROUPS = {
+        "EVC": EVCModelEngine,
+        "TCM": TCMModelEngine,
+    }
+
+    def __init__(self, ctu_size=512, num_qscale_samples=50, tool_groups=TOOL_GROUPS.keys()) -> None:
         self.ctu_size = ctu_size
         self.methods = []
-        idx = 0
 
-        # EVC models
-        for model_name in ModelEngine.MODELS.keys():
-            self.methods.append((ModelEngine.from_model_name(model_name), model_name, idx))
-            idx += 1
+        self._load_models(tool_groups)
         
         self.num_qscale_samples = num_qscale_samples
         self.qscale_samples = np.linspace(0, 1, num_qscale_samples, dtype=np.float32)[::-1]
     
+    def _load_models(self, valid_groups):
+        idx = 0
+        # Load models
+        for group_name in valid_groups:
+            engine_cls = self.TOOL_GROUPS[group_name]
+            print("Loading tool group:", group_name)
+            for model_name in engine_cls.MODELS.keys():
+                print("Loading model:", model_name)
+                self.methods.append((engine_cls.from_model_name(model_name), model_name, idx))
+                idx += 1
+
     def _compress_with_target(self, method, image_block, target_bytes):
         min_qs = float(1e-5)
         max_qs = float(1.)

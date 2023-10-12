@@ -18,6 +18,7 @@ import torch
 from timm.models.layers import trunc_normal_, DropPath
 import numpy as np
 import math
+from ...utils.tensorrt_support import maybe_tensorrt
 
 SCALES_MIN = 0.11
 SCALES_MAX = 256
@@ -764,7 +765,7 @@ class TCM_vbr(CompressionModel):
 
         self.g_a = nn.Sequential(*[ResidualBlockWithStride(3, 2 * N, 2)] + self.m_down1 + self.m_down2 + self.m_down3)
 
-        self.g_s = nn.Sequential(*[ResidualBlockUpsample(M, 2 * N, 2)] + self.m_up1 + self.m_up2 + self.m_up3)
+        self.g_s = maybe_tensorrt(nn.Sequential(*[ResidualBlockUpsample(M, 2 * N, 2)] + self.m_up1 + self.m_up2 + self.m_up3))
 
         self.ha_down1 = [ConvTransBlock(N, N, 32, 4, 0, 'W' if not i % 2 else 'SW')
                          for i in range(config[0])] + \
@@ -857,7 +858,7 @@ class TCM_vbr(CompressionModel):
             lmd_info = torch.from_numpy(lmd_info).cuda()
             lmd_info = torch.reshape(lmd_info, (b, 1)).cuda()
         else:
-            lmd_info = lmd * torch.ones((b, 1))
+            lmd_info = lmd.expand((b, 1))
             lmd_info = lmd_info.cuda()
 
         y = self.g_a(x)
@@ -934,8 +935,15 @@ class TCM_vbr(CompressionModel):
         net.load_state_dict(state_dict)
         return net
 
-    def compress(self, x):
+    def compress(self, x, lmd):
+        b = x.size()[0]
+
+        lmd_info = lmd.expand((b, 1))
+        lmd_info = lmd_info.cuda()
+
         y = self.g_a(x)
+        y = self.modnet(y, lmd_info)
+
         y_shape = y.shape[2:]
 
         z = self.h_a(y)
@@ -992,7 +1000,7 @@ class TCM_vbr(CompressionModel):
         y_string = encoder.flush()
         y_strings.append(y_string)
 
-        return {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
+        return {"strings": (y_strings, z_strings), "shape": z.size()[-2:]}
 
     def _likelihood(self, inputs, scales, means=None):
         half = float(0.5)
@@ -1016,13 +1024,13 @@ class TCM_vbr(CompressionModel):
 
     def decompress(self, strings, shape):
 
-        z_hat = self.entropy_bottleneck.decompress(strings[2], shape)
+        z_hat = self.entropy_bottleneck.decompress(strings[1], shape)
         latent_scales = self.h_scale_s(z_hat)
         latent_means = self.h_mean_s(z_hat)
 
         y_shape = [z_hat.shape[2] * 4, z_hat.shape[3] * 4]
 
-        y_string = strings[1][0]
+        y_string = strings[0][0]
 
         y_hat_slices = []
         cdf = self.gaussian_conditional.quantized_cdf.tolist()
@@ -1061,3 +1069,14 @@ class TCM_vbr(CompressionModel):
         x_hat = self.g_s(y_hat).clamp_(0, 1)
 
         return {"x_hat": x_hat}
+
+    def load_state_dict(self, state_dict, verbose=True, **kwargs):
+        sd = self.state_dict()
+        for skey in sd:
+            if skey in state_dict and state_dict[skey].shape == sd[skey].shape:
+                sd[skey] = state_dict[skey]
+            elif verbose and skey not in state_dict:
+                print(f"NOT load {skey}, not find it in state_dict")
+            elif verbose:
+                print(f"NOT load {skey}, this {sd[skey].shape}, load {state_dict[skey].shape}")
+        super().load_state_dict(sd)

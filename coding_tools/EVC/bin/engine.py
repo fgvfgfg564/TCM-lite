@@ -18,8 +18,8 @@ from ..src.utils.png_reader import PNGReader
 from ..src.utils.stream_helper import get_padding_size, get_state_dict
 
 from ..src.models.MLCodec_rans import RansEncoder, RansDecoder
-from ..src.utils.timer import Timer
-from ..src.tensorrt_support import *
+from ...utils.timer import Timer
+from ...utils.tensorrt_support import *
 
 BLOCK_SIZE = 512
 
