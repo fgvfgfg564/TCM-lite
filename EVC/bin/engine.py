@@ -19,7 +19,7 @@ from ..src.utils.stream_helper import get_padding_size, get_state_dict
 
 from ..src.models.MLCodec_rans import RansEncoder, RansDecoder
 from ..src.utils.timer import Timer
-from ..src.tensorrt_support import *
+from ...utils.tensorrt_support import *
 
 BLOCK_SIZE = 512
 

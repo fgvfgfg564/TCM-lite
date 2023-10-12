@@ -2,7 +2,7 @@
 # Licensed under the MIT License.
 
 from torch import nn
-from ..tensorrt_support import maybe_tensorrt
+from ....utils.tensorrt_support import maybe_tensorrt
 
 
 class DepthConv(nn.Module):

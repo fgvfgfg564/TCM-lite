@@ -16,8 +16,7 @@ import torch
 from torch import nn
 from torch.autograd import Function
 
-from ..tensorrt_support import maybe_tensorrt
-
+from ....utils.tensorrt_support import maybe_tensorrt
 
 # pylint: disable=W0221
 class LowerBound(Function):
