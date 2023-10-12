@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torchvision import transforms
-from models import TCM
+from coding_tools.TCM.models import TCM, TCM_vbr
 import warnings
 import torch
 import os
@@ -56,17 +56,13 @@ def crop(x, padding):
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Example testing script.")
     parser.add_argument("--cuda", action="store_true", help="Use cuda")
-    parser.add_argument(
-        "--clip_max_norm",
-        default=1.0,
-        type=float,
-        help="gradient clipping max norm (default: %(default)s",
-    )
     parser.add_argument("--checkpoint", type=str, help="Path to a checkpoint")
     parser.add_argument("--data", type=str, help="Path to dataset")
     parser.add_argument(
         "--real", action="store_true", default=True
     )
+    parser.add_argument("--vbr", action='store_true')
+    parser.add_argument('--lmbda', type=float, default=0.05)
     parser.set_defaults(real=False)
     args = parser.parse_args(argv)
     return args
@@ -85,7 +81,10 @@ def main(argv):
     else:
         device = 'cpu'
     load_time_start = time.time()
-    net = TCM(config=[2,2,2,2,2,2], head_dim=[8, 16, 32, 32, 16, 8], drop_path_rate=0.0, N=128, M=320)
+    if args.vbr:
+        net = TCM_vbr()
+    else:
+        net = TCM(config=[2,2,2,2,2,2], head_dim=[8, 16, 32, 32, 16, 8], drop_path_rate=0.0, N=128, M=320)
     net = net.to(device)
     net.eval()
     load_time_end = time.time()
@@ -117,7 +116,10 @@ def main(argv):
                 if args.cuda:
                     torch.cuda.synchronize()
                 s = time.time()
-                out_enc = net.compress(x_padded)
+                if args.vbr:
+                    out_enc = net.compress(x_padded, torch.tensor(args.lmbda, device='cuda'))
+                else:
+                    out_enc = net.compress(x_padded)
                 t = time.time()
                 out_dec = net.decompress(out_enc["strings"], out_enc["shape"])
                 if args.cuda:
