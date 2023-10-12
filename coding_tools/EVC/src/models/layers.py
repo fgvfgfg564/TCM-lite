@@ -16,7 +16,7 @@ import torch
 from torch import nn
 from torch.autograd import Function
 
-from ....utils.tensorrt_support import maybe_tensorrt
+from coding_tools.utils.tensorrt_support import maybe_tensorrt
 
 
 # pylint: disable=W0221

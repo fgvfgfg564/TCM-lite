@@ -18,7 +18,7 @@ import torch
 from timm.models.layers import trunc_normal_, DropPath
 import numpy as np
 import math
-from ...utils.tensorrt_support import maybe_tensorrt
+from coding_tools.utils.tensorrt_support import maybe_tensorrt
 
 SCALES_MIN = 0.11
 SCALES_MAX = 256
@@ -1344,6 +1344,233 @@ class TCM_vbr(CompressionModel):
             y_hat_slices.append(y_hat_slice)
 
         y_hat = torch.cat(y_hat_slices, dim=1)
+        x_hat = self.g_s(y_hat).clamp_(0, 1)
+
+        return {"x_hat": x_hat}
+
+    def load_state_dict(self, state_dict, verbose=True, **kwargs):
+        sd = self.state_dict()
+        for skey in sd:
+            if skey in state_dict and state_dict[skey].shape == sd[skey].shape:
+                sd[skey] = state_dict[skey]
+            elif verbose and skey not in state_dict:
+                print(f"NOT load {skey}, not find it in state_dict")
+            elif verbose:
+                print(
+                    f"NOT load {skey}, this {sd[skey].shape}, load {state_dict[skey].shape}"
+                )
+        super().load_state_dict(sd)
+
+class LowerBound(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, inputs, bound):
+        b = torch.ones_like(inputs) * bound
+        ctx.save_for_backward(inputs, b)
+        return torch.max(inputs, b)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        inputs, b = ctx.saved_tensors
+        pass_through_1 = inputs >= b
+        pass_through_2 = grad_output < 0
+
+        pass_through = pass_through_1 | pass_through_2
+        return pass_through.type(grad_output.dtype) * grad_output, None
+
+class TCM_vbr2(TCM):
+    def __init__(self, config=[2, 2, 2, 2, 2, 2], head_dim=[8, 16, 32, 32, 16, 8], drop_path_rate=0, N=128, M=320, num_slices=5, max_support_slices=5, **kwargs):
+        super().__init__(config, head_dim, drop_path_rate, N, M, num_slices, max_support_slices, **kwargs)
+
+        self.q_basic = nn.Parameter(torch.ones((1, M, 1, 1)))
+        self.q_scale = nn.Parameter(torch.ones((4, 1, 1, 1)))
+
+    @staticmethod
+    def get_curr_q(q_scale, q_basic):
+        q_basic = LowerBound.apply(q_basic, 0.5)
+        return q_basic * q_scale
+    
+    def forward(self, x, q_scale):
+        curr_q = self.get_curr_q(q_scale, self.q_basic)
+        y = self.g_a(x)
+        y = y / curr_q
+        y_shape = y.shape[2:]
+        z = self.h_a(y)
+        _, z_likelihoods = self.entropy_bottleneck(z)
+
+        z_offset = self.entropy_bottleneck._get_medians()
+        z_tmp = z - z_offset
+        z_hat = ste_round(z_tmp) + z_offset
+
+        latent_scales = self.h_scale_s(z_hat)
+        latent_means = self.h_mean_s(z_hat)
+
+        y_slices = y.chunk(self.num_slices, 1)
+        y_hat_slices = []
+        y_likelihood = []
+        mu_list = []
+        scale_list = []
+        for slice_index, y_slice in enumerate(y_slices):
+            support_slices = (
+                y_hat_slices
+                if self.max_support_slices < 0
+                else y_hat_slices[: self.max_support_slices]
+            )
+            mean_support = torch.cat([latent_means] + support_slices, dim=1)
+            mean_support = self.atten_mean[slice_index](mean_support)
+            mu = self.cc_mean_transforms[slice_index](mean_support)
+            mu = mu[:, :, : y_shape[0], : y_shape[1]]
+            mu_list.append(mu)
+            scale_support = torch.cat([latent_scales] + support_slices, dim=1)
+            scale_support = self.atten_scale[slice_index](scale_support)
+            scale = self.cc_scale_transforms[slice_index](scale_support)
+            scale = scale[:, :, : y_shape[0], : y_shape[1]]
+            scale_list.append(scale)
+            _, y_slice_likelihood = self.gaussian_conditional(y_slice, scale, mu)
+            y_likelihood.append(y_slice_likelihood)
+            y_hat_slice = ste_round(y_slice - mu) + mu
+            # if self.training:
+            #     lrp_support = torch.cat([mean_support + torch.randn(mean_support.size()).cuda().mul(scale_support), y_hat_slice], dim=1)
+            # else:
+            lrp_support = torch.cat([mean_support, y_hat_slice], dim=1)
+            lrp = self.lrp_transforms[slice_index](lrp_support)
+            lrp = 0.5 * torch.tanh(lrp)
+            y_hat_slice += lrp
+
+            y_hat_slices.append(y_hat_slice)
+
+        y_hat = torch.cat(y_hat_slices, dim=1)
+        means = torch.cat(mu_list, dim=1)
+        scales = torch.cat(scale_list, dim=1)
+        y_likelihoods = torch.cat(y_likelihood, dim=1)
+        y_hat = y_hat * curr_q
+        x_hat = self.g_s(y_hat)
+
+        return {
+            "x_hat": x_hat,
+            "likelihoods": {"y": y_likelihoods, "z": z_likelihoods},
+            "para": {"means": means, "scales": scales, "y": y},
+        }
+
+    def compress(self, x, q_scale):
+        curr_q = self.get_curr_q(q_scale, self.q_basic)
+        y = self.g_a(x)
+        y = y * curr_q
+        y_shape = y.shape[2:]
+
+        z = self.h_a(y)
+        z_strings = self.entropy_bottleneck.compress(z)
+        z_hat = self.entropy_bottleneck.decompress(z_strings, z.size()[-2:])
+
+        latent_scales = self.h_scale_s(z_hat)
+        latent_means = self.h_mean_s(z_hat)
+
+        y_slices = y.chunk(self.num_slices, 1)
+        y_hat_slices = []
+        y_scales = []
+        y_means = []
+
+        cdf = self.gaussian_conditional.quantized_cdf.tolist()
+        cdf_lengths = self.gaussian_conditional.cdf_length.reshape(-1).int().tolist()
+        offsets = self.gaussian_conditional.offset.reshape(-1).int().tolist()
+
+        encoder = BufferedRansEncoder()
+        symbols_list = []
+        indexes_list = []
+        y_strings = []
+
+        for slice_index, y_slice in enumerate(y_slices):
+            support_slices = (
+                y_hat_slices
+                if self.max_support_slices < 0
+                else y_hat_slices[: self.max_support_slices]
+            )
+
+            mean_support = torch.cat([latent_means] + support_slices, dim=1)
+            mean_support = self.atten_mean[slice_index](mean_support)
+            mu = self.cc_mean_transforms[slice_index](mean_support)
+            mu = mu[:, :, : y_shape[0], : y_shape[1]]
+
+            scale_support = torch.cat([latent_scales] + support_slices, dim=1)
+            scale_support = self.atten_scale[slice_index](scale_support)
+            scale = self.cc_scale_transforms[slice_index](scale_support)
+            scale = scale[:, :, : y_shape[0], : y_shape[1]]
+
+            index = self.gaussian_conditional.build_indexes(scale)
+            y_q_slice = self.gaussian_conditional.quantize(y_slice, "symbols", mu)
+            y_hat_slice = y_q_slice + mu
+
+            symbols_list.extend(y_q_slice.reshape(-1).tolist())
+            indexes_list.extend(index.reshape(-1).tolist())
+
+            lrp_support = torch.cat([mean_support, y_hat_slice], dim=1)
+            lrp = self.lrp_transforms[slice_index](lrp_support)
+            lrp = 0.5 * torch.tanh(lrp)
+            y_hat_slice += lrp
+
+            y_hat_slices.append(y_hat_slice)
+            y_scales.append(scale)
+            y_means.append(mu)
+
+        encoder.encode_with_indexes(
+            symbols_list, indexes_list, cdf, cdf_lengths, offsets
+        )
+        y_string = encoder.flush()
+        y_strings.append(y_string)
+
+        return {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
+
+
+    def decompress(self, strings, shape, q_scale):
+        curr_q = self.get_curr_q(q_scale, self.q_basic)
+        z_hat = self.entropy_bottleneck.decompress(strings[1], shape)
+        latent_scales = self.h_scale_s(z_hat)
+        latent_means = self.h_mean_s(z_hat)
+
+        y_shape = [z_hat.shape[2] * 4, z_hat.shape[3] * 4]
+
+        y_string = strings[0][0]
+
+        y_hat_slices = []
+        cdf = self.gaussian_conditional.quantized_cdf.tolist()
+        cdf_lengths = self.gaussian_conditional.cdf_length.reshape(-1).int().tolist()
+        offsets = self.gaussian_conditional.offset.reshape(-1).int().tolist()
+
+        decoder = RansDecoder()
+        decoder.set_stream(y_string)
+
+        for slice_index in range(self.num_slices):
+            support_slices = (
+                y_hat_slices
+                if self.max_support_slices < 0
+                else y_hat_slices[: self.max_support_slices]
+            )
+            mean_support = torch.cat([latent_means] + support_slices, dim=1)
+            mean_support = self.atten_mean[slice_index](mean_support)
+            mu = self.cc_mean_transforms[slice_index](mean_support)
+            mu = mu[:, :, : y_shape[0], : y_shape[1]]
+
+            scale_support = torch.cat([latent_scales] + support_slices, dim=1)
+            scale_support = self.atten_scale[slice_index](scale_support)
+            scale = self.cc_scale_transforms[slice_index](scale_support)
+            scale = scale[:, :, : y_shape[0], : y_shape[1]]
+
+            index = self.gaussian_conditional.build_indexes(scale)
+
+            rv = decoder.decode_stream(
+                index.reshape(-1).tolist(), cdf, cdf_lengths, offsets
+            )
+            rv = torch.Tensor(rv).reshape(1, -1, y_shape[0], y_shape[1])
+            y_hat_slice = self.gaussian_conditional.dequantize(rv, mu)
+
+            lrp_support = torch.cat([mean_support, y_hat_slice], dim=1)
+            lrp = self.lrp_transforms[slice_index](lrp_support)
+            lrp = 0.5 * torch.tanh(lrp)
+            y_hat_slice += lrp
+
+            y_hat_slices.append(y_hat_slice)
+
+        y_hat = torch.cat(y_hat_slices, dim=1)
+        y_hat = y_hat * curr_q
         x_hat = self.g_s(y_hat).clamp_(0, 1)
 
         return {"x_hat": x_hat}

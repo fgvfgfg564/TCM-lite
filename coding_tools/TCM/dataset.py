@@ -90,6 +90,7 @@ class VCIP_Validation(Dataset):
             cropper = CenterCrop(self.patch_size)
             patch = cropper(img)
             self.buffer.append(patch)
+            del img
 
     def __getitem__(self, idx):
         return self.buffer[idx]
