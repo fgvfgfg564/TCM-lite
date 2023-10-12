@@ -18,6 +18,7 @@ from torch.autograd import Function
 
 from ....utils.tensorrt_support import maybe_tensorrt
 
+
 # pylint: disable=W0221
 class LowerBound(Function):
     @staticmethod
@@ -34,6 +35,8 @@ class LowerBound(Function):
 
         pass_through = pass_through_1 | pass_through_2
         return pass_through.type(grad_output.dtype) * grad_output, None
+
+
 # pylint: enable=W0221
 
 
@@ -45,14 +48,14 @@ def conv3x3(in_ch, out_ch, stride=1):
 def subpel_conv3x3(in_ch, out_ch, r=1):
     """3x3 sub-pixel convolution for up-sampling."""
     return nn.Sequential(
-        nn.Conv2d(in_ch, out_ch * r ** 2, kernel_size=3, padding=1), nn.PixelShuffle(r)
+        nn.Conv2d(in_ch, out_ch * r**2, kernel_size=3, padding=1), nn.PixelShuffle(r)
     )
 
 
 def subpel_conv1x1(in_ch, out_ch, r=1):
     """1x1 sub-pixel convolution for up-sampling."""
     return nn.Sequential(
-        nn.Conv2d(in_ch, out_ch * r ** 2, kernel_size=1, padding=0), nn.PixelShuffle(r)
+        nn.Conv2d(in_ch, out_ch * r**2, kernel_size=1, padding=0), nn.PixelShuffle(r)
     )
 
 
@@ -68,6 +71,7 @@ class ResidualBlockWithStride(nn.Module):
         out_ch (int): number of output channels
         stride (int): stride value (default: 2)
     """
+
     def __init__(self, in_ch1, in_ch2, in_ch3=None, stride=2):
         super().__init__()
         if in_ch3 is None:
@@ -170,7 +174,9 @@ class DepthConv(nn.Module):
             nn.LeakyReLU(),
         )
         self.depth_conv = nn.Sequential(
-            nn.Conv2d(in_ch2, in_ch2, depth_kernel, padding=depth_kernel // 2, groups=in_ch2),
+            nn.Conv2d(
+                in_ch2, in_ch2, depth_kernel, padding=depth_kernel // 2, groups=in_ch2
+            ),
             nn.LeakyReLU(),
         )
         self.conv2 = nn.Sequential(

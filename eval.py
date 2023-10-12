@@ -13,23 +13,29 @@ import warnings
 from pytorch_msssim import ms_ssim
 from PIL import Image
 import torch_tensorrt
+
 warnings.filterwarnings("ignore")
 
 print(torch.cuda.is_available())
 
 
 def compute_psnr(a, b):
-    mse = torch.mean((a - b)**2).item()
+    mse = torch.mean((a - b) ** 2).item()
     return -10 * math.log10(mse)
 
+
 def compute_msssim(a, b):
-    return -10 * math.log10(1-ms_ssim(a, b, data_range=1.).item())
+    return -10 * math.log10(1 - ms_ssim(a, b, data_range=1.0).item())
+
 
 def compute_bpp(out_net):
-    size = out_net['x_hat'].size()
+    size = out_net["x_hat"].size()
     num_pixels = size[0] * size[2] * size[3]
-    return sum(torch.log(likelihoods).sum() / (-math.log(2) * num_pixels)
-              for likelihoods in out_net['likelihoods'].values()).item()
+    return sum(
+        torch.log(likelihoods).sum() / (-math.log(2) * num_pixels)
+        for likelihoods in out_net["likelihoods"].values()
+    ).item()
+
 
 def pad(x, p):
     h, w = x.size(2), x.size(3)
@@ -47,22 +53,22 @@ def pad(x, p):
     )
     return x_padded, (padding_left, padding_right, padding_top, padding_bottom)
 
+
 def crop(x, padding):
     return F.pad(
         x,
         (-padding[0], -padding[1], -padding[2], -padding[3]),
     )
 
+
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Example testing script.")
     parser.add_argument("--cuda", action="store_true", help="Use cuda")
     parser.add_argument("--checkpoint", type=str, help="Path to a checkpoint")
     parser.add_argument("--data", type=str, help="Path to dataset")
-    parser.add_argument(
-        "--real", action="store_true", default=True
-    )
-    parser.add_argument("--vbr", action='store_true')
-    parser.add_argument('--lmbda', type=float, default=0.05)
+    parser.add_argument("--real", action="store_true", default=True)
+    parser.add_argument("--vbr", action="store_true")
+    parser.add_argument("--lmbda", type=float, default=0.05)
     parser.set_defaults(real=False)
     args = parser.parse_args(argv)
     return args
@@ -77,14 +83,20 @@ def main(argv):
         if file[-3:] in ["jpg", "png", "peg"]:
             img_list.append(file)
     if args.cuda:
-        device = 'cuda:0'
+        device = "cuda:0"
     else:
-        device = 'cpu'
+        device = "cpu"
     load_time_start = time.time()
     if args.vbr:
         net = TCM_vbr()
     else:
-        net = TCM(config=[2,2,2,2,2,2], head_dim=[8, 16, 32, 32, 16, 8], drop_path_rate=0.0, N=128, M=320)
+        net = TCM(
+            config=[2, 2, 2, 2, 2, 2],
+            head_dim=[8, 16, 32, 32, 16, 8],
+            drop_path_rate=0.0,
+            N=128,
+            M=320,
+        )
     net = net.to(device)
     net.eval()
     load_time_end = time.time()
@@ -108,7 +120,7 @@ def main(argv):
         net.update()
         for img_name in img_list:
             img_path = os.path.join(path, img_name)
-            img = transforms.ToTensor()(Image.open(img_path).convert('RGB')).to(device)
+            img = transforms.ToTensor()(Image.open(img_path).convert("RGB")).to(device)
             x = img.unsqueeze(0)
             x_padded, padding = pad(x, p)
             count += 1
@@ -117,7 +129,9 @@ def main(argv):
                     torch.cuda.synchronize()
                 s = time.time()
                 if args.vbr:
-                    out_enc = net.compress(x_padded, torch.tensor(args.lmbda, device='cuda'))
+                    out_enc = net.compress(
+                        x_padded, torch.tensor(args.lmbda, device="cuda")
+                    )
                 else:
                     out_enc = net.compress(x_padded)
                 t = time.time()
@@ -125,26 +139,30 @@ def main(argv):
                 if args.cuda:
                     torch.cuda.synchronize()
                 e = time.time()
-                total_time += (e - s)
-                encode_time += (t - s)
-                decode_time += (e - t)
+                total_time += e - s
+                encode_time += t - s
+                decode_time += e - t
                 out_dec["x_hat"] = crop(out_dec["x_hat"], padding)
                 num_pixels = x.size(0) * x.size(2) * x.size(3)
-                print(f'Bitrate: {(sum(len(s[0]) for s in out_enc["strings"]) * 8.0 / num_pixels):.3f}bpp')
-                mse = torch.mean((x - out_dec["x_hat"])**2).item()
-                print(f'MSE: {mse:.2f}dB')
+                print(
+                    f'Bitrate: {(sum(len(s[0]) for s in out_enc["strings"]) * 8.0 / num_pixels):.3f}bpp'
+                )
+                mse = torch.mean((x - out_dec["x_hat"]) ** 2).item()
+                print(f"MSE: {mse:.2f}dB")
                 print(f'MS-SSIM: {compute_msssim(x, out_dec["x_hat"]):.2f}dB')
                 print(f'PSNR: {compute_psnr(x, out_dec["x_hat"]):.2f}dB')
-                print(f'Enc_time: {(t-s) * 1000:.0f}ms')
-                print(f'Dec_time: {(e-t) * 1000:.0f}ms')
-                Bit_rate += sum(len(s[0]) for s in out_enc["strings"]) * 8.0 / num_pixels
+                print(f"Enc_time: {(t-s) * 1000:.0f}ms")
+                print(f"Dec_time: {(e-t) * 1000:.0f}ms")
+                Bit_rate += (
+                    sum(len(s[0]) for s in out_enc["strings"]) * 8.0 / num_pixels
+                )
                 PSNR += compute_psnr(x, out_dec["x_hat"])
                 MS_SSIM += compute_msssim(x, out_dec["x_hat"])
 
     else:
         for img_name in img_list:
             img_path = os.path.join(path, img_name)
-            img = Image.open(img_path).convert('RGB')
+            img = Image.open(img_path).convert("RGB")
             x = transforms.ToTensor()(img).unsqueeze(0).to(device)
             x_padded, padding = pad(x, p)
             count += 1
@@ -156,12 +174,12 @@ def main(argv):
                 if args.cuda:
                     torch.cuda.synchronize()
                 e = time.time()
-                total_time += (e - s)
-                out_net['x_hat'].clamp_(0, 1)
+                total_time += e - s
+                out_net["x_hat"].clamp_(0, 1)
                 out_net["x_hat"] = crop(out_net["x_hat"], padding)
                 print(f'PSNR: {compute_psnr(x, out_net["x_hat"]):.2f}dB')
                 print(f'MS-SSIM: {compute_msssim(x, out_net["x_hat"]):.2f}dB')
-                print(f'Bit-rate: {compute_bpp(out_net):.3f}bpp')
+                print(f"Bit-rate: {compute_bpp(out_net):.3f}bpp")
                 PSNR += compute_psnr(x, out_net["x_hat"])
                 MS_SSIM += compute_msssim(x, out_net["x_hat"])
                 Bit_rate += compute_bpp(out_net)
@@ -171,15 +189,14 @@ def main(argv):
     total_time = total_time / count
     encode_time = encode_time / count
     decode_time = decode_time / count
-    print(f'average_PSNR: {PSNR:.2f}dB')
-    print(f'average_MS-SSIM: {MS_SSIM:.4f}')
-    print(f'average_Bit-rate: {Bit_rate:.3f} bpp')
-    print(f'average_time: {total_time:.3f} ms')
-    print(f'average_time(encode): {encode_time:.3f} ms')
-    print(f'average_time(decode): {decode_time:.3f} ms')
-    
+    print(f"average_PSNR: {PSNR:.2f}dB")
+    print(f"average_MS-SSIM: {MS_SSIM:.4f}")
+    print(f"average_Bit-rate: {Bit_rate:.3f} bpp")
+    print(f"average_time: {total_time:.3f} ms")
+    print(f"average_time(encode): {encode_time:.3f} ms")
+    print(f"average_time(decode): {decode_time:.3f} ms")
+
 
 if __name__ == "__main__":
     print(torch.cuda.is_available())
     main(sys.argv[1:])
-    

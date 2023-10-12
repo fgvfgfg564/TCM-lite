@@ -23,14 +23,15 @@ from ...utils.tensorrt_support import *
 
 BLOCK_SIZE = 512
 
+
 class ModelEngine(nn.Module):
     MODELS = {
-        "EVC_LS": 'EVC_LS_MD.pth.tar',
-        "EVC_LS_large": 'EVC_LS_large.pth.tar',
-        "EVC_LS_mid": 'EVC_LS_mid.pth.tar',
-        "EVC_LM": 'EVC_LM_MD.pth.tar',
-        "EVC_LL": 'EVC_LL.pth.tar',
-        "EVC_LL_large": 'EVC_LL_large.pth.tar',
+        "EVC_LS": "EVC_LS_MD.pth.tar",
+        "EVC_LS_large": "EVC_LS_large.pth.tar",
+        "EVC_LS_mid": "EVC_LS_mid.pth.tar",
+        "EVC_LM": "EVC_LM_MD.pth.tar",
+        "EVC_LL": "EVC_LL.pth.tar",
+        "EVC_LL_large": "EVC_LL_large.pth.tar",
         # "EVC_ML": 'EVC_ML_MD.pth.tar',
         # "EVC_SL": 'EVC_SL_MD.pth.tar',
         # "EVC_MM": 'EVC_MM_MD.pth.tar',
@@ -58,7 +59,7 @@ class ModelEngine(nn.Module):
         self.q_scale_min = self.q_scales[-1]
         self.q_scale_max = self.q_scales[0]
         self.cuda()
-    
+
     def _q_scale_mapping(self, q_scale_0_1):
         # 0 -> self.q_scale_min
         # 1 -> self.q_scale_max
@@ -69,20 +70,20 @@ class ModelEngine(nn.Module):
         qs = np.exp(lg_qs)
 
         return qs
-    
+
     def compile(self, output_dir):
         compile(self.i_frame_net, output_dir)
-    
+
     def compress_block(self, img_block, q_scale):
         q_scale = self._q_scale_mapping(q_scale).to(img_block.device)
-        bit_stream = self.i_frame_net.compress(img_block, q_scale)['bit_stream']
+        bit_stream = self.i_frame_net.compress(img_block, q_scale)["bit_stream"]
         return bit_stream
 
     def decompress_block(self, bit_stream, h, w, q_scale):
         q_scale = self._q_scale_mapping(q_scale).cuda()
-        recon_img = self.i_frame_net.decompress(bit_stream, h, w, q_scale)['x_hat']
+        recon_img = self.i_frame_net.decompress(bit_stream, h, w, q_scale)["x_hat"]
         return recon_img
-    
+
     @classmethod
     def get_model_path(cls, model_name):
         model_path = cls.MODELS[model_name]
@@ -90,24 +91,28 @@ class ModelEngine(nn.Module):
         model_path = os.path.join(file_folder, "../checkpoints", model_path)
         compiled_path = model_path + ".trt"
         return model_path, compiled_path
-    
+
     @classmethod
     def _load_from_weight(cls, model_name, compiled_path, compile=True):
         decoder_app = cls(model_name)
         torch.cuda.synchronize()
-        dummy_input = torch.zeros([1, 3, BLOCK_SIZE, BLOCK_SIZE], device='cuda', dtype=torch.half)
+        dummy_input = torch.zeros(
+            [1, 3, BLOCK_SIZE, BLOCK_SIZE], device="cuda", dtype=torch.half
+        )
         decoder_app.i_frame_net(dummy_input, 0.5)
         if compile:
             decoder_app.compile(compiled_path)
         return decoder_app
 
     def preheat(self):
-        dummy_input = torch.zeros([1, 3, BLOCK_SIZE, BLOCK_SIZE], device='cuda', dtype=torch.half)
+        dummy_input = torch.zeros(
+            [1, 3, BLOCK_SIZE, BLOCK_SIZE], device="cuda", dtype=torch.half
+        )
 
         for q_scale in np.linspace(0, 1, 20):
             bitstream = self.compress_block(dummy_input, 0.5)
             _ = self.decompress_block(bitstream, BLOCK_SIZE, BLOCK_SIZE, q_scale)
-    
+
     @classmethod
     def _load_from_compiled(cls, model_name, compiled_path):
         print("Load from compiled model")
@@ -115,7 +120,9 @@ class ModelEngine(nn.Module):
             decoder_app = cls(model_name)
         load_weights(decoder_app.i_frame_net, compiled_path)
 
-        dummy_input = torch.zeros([1, 3, BLOCK_SIZE, BLOCK_SIZE], device='cuda', dtype=torch.half)
+        dummy_input = torch.zeros(
+            [1, 3, BLOCK_SIZE, BLOCK_SIZE], device="cuda", dtype=torch.half
+        )
         decoder_app.i_frame_net(dummy_input, 0.5)
         return decoder_app
 
@@ -127,8 +134,12 @@ class ModelEngine(nn.Module):
                 try:
                     decoder_app = cls._load_from_compiled(model_name, compiled_path)
                 except FileNotFoundError:
-                    decoder_app = cls._load_from_weight(model_name, compiled_path, not ignore_tensorrt)
+                    decoder_app = cls._load_from_weight(
+                        model_name, compiled_path, not ignore_tensorrt
+                    )
             else:
-                decoder_app = cls._load_from_weight(model_name, compiled_path, not ignore_tensorrt)
+                decoder_app = cls._load_from_weight(
+                    model_name, compiled_path, not ignore_tensorrt
+                )
             decoder_app.preheat()
         return decoder_app

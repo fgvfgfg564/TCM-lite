@@ -1,13 +1,15 @@
 import torch
 
+
 def PSNR(x, y):
-    mse = torch.mean((x-y)**2)
-    return -10*torch.log10(mse)
+    mse = torch.mean((x - y) ** 2)
+    return -10 * torch.log10(mse)
+
 
 class TraditionalCodingToolBase:
     def compress_block(self, img_block: torch.Tensor, q_scale: float) -> bytes:
         """
-        输入: 
+        输入:
         - img_block 图像块，格式为torch.Tensor，值范围为[0, 1]，形状为[1, 3, H, W]
         - q_scale 控制目标码率，对应QP，值范围为[0, 1]
             q_scale=1对应编码工具有效范围内的最低码率，q_scale=0对应最高码率
@@ -16,7 +18,9 @@ class TraditionalCodingToolBase:
         """
         raise NotImplemented
 
-    def decompress_block(self, bit_stream: bytes, h: int, w: int, q_scale: float) -> torch.Tensor:
+    def decompress_block(
+        self, bit_stream: bytes, h: int, w: int, q_scale: float
+    ) -> torch.Tensor:
         """
         输入：
         - bit_stream 即self.compress_block函数的输出，比特流
@@ -26,12 +30,12 @@ class TraditionalCodingToolBase:
         - 解码图像，格式应当转换为值域[0, 1]，格式为torch.float32的torch.Tensor，形状为[1, 3, H, W]，与compress_block一致
         """
         raise NotImplemented
-    
+
     def self_test(self, test_block: torch.Tensor, q_scale: float) -> None:
         _, c, h, w = test_block.shape()
         bits = self.compress_block(test_block, q_scale)
         recon = self.decompress_block(bits, h, w, q_scale)
 
-        bpp = len(bits)*8/h/w
+        bpp = len(bits) * 8 / h / w
         psnr = PSNR(test_block, recon)
         print(f"bpp={bpp:.6f}; psnr={psnr:.6f}")

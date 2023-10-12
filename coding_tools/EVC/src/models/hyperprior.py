@@ -14,8 +14,9 @@ class DepthConv(nn.Module):
             nn.LeakyReLU(negative_slope=slope),
         )
 
-        self.depth_conv = nn.Conv2d(dw_ch, dw_ch, depth_kernel, padding=depth_kernel // 2,
-                                    groups=dw_ch)
+        self.depth_conv = nn.Conv2d(
+            dw_ch, dw_ch, depth_kernel, padding=depth_kernel // 2, groups=dw_ch
+        )
         self.conv2 = nn.Conv2d(dw_ch, out_ch, 1)
 
         self.adaptor = None
@@ -52,8 +53,15 @@ class ConvFFN(nn.Module):
 
 
 class DepthConvBlock(nn.Module):
-    def __init__(self, in_ch, out_ch, depth_kernel=3, stride=1,
-                 slope_depth_conv=0.01, slope_ffn=0.1):
+    def __init__(
+        self,
+        in_ch,
+        out_ch,
+        depth_kernel=3,
+        stride=1,
+        slope_depth_conv=0.01,
+        slope_ffn=0.1,
+    ):
         super().__init__()
         self.block = nn.Sequential(
             DepthConv(in_ch, out_ch, depth_kernel, stride, slope=slope_depth_conv),
@@ -65,7 +73,9 @@ class DepthConvBlock(nn.Module):
 
 
 class DepthConvBlockUpsample(nn.Module):
-    def __init__(self, in_ch, out_ch, depth_kernel=3, slope_depth_conv=0.01, slope_ffn=0.1):
+    def __init__(
+        self, in_ch, out_ch, depth_kernel=3, slope_depth_conv=0.01, slope_ffn=0.1
+    ):
         super().__init__()
         self.block = nn.Sequential(
             DepthConv(in_ch, out_ch, depth_kernel, slope=slope_depth_conv),
@@ -95,7 +105,11 @@ def get_hyperprior(channel=192):
         DepthConvBlock(N, N * 2),
         DepthConvBlock(N * 2, N * 3),
     )
-    return maybe_tensorrt(hyper_enc), maybe_tensorrt(hyper_dec), maybe_tensorrt(y_prior_fusion)
+    return (
+        maybe_tensorrt(hyper_enc),
+        maybe_tensorrt(hyper_dec),
+        maybe_tensorrt(y_prior_fusion),
+    )
 
 
 def get_dualprior(channel=192):

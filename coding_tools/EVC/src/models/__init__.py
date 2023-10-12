@@ -8,18 +8,15 @@ from .scalable_encoder_model import Scale_EVC_SS, Scale_EVC_SL
 
 
 model_architectures = {
-    'EVC_LL': EVC_LL,
-    'EVC_LM': EVC_LM,
-    'EVC_LS': EVC_LS,
-
-    'EVC_ML': EVC_ML,
-    'EVC_SL': EVC_SL,
-
-    'EVC_MM': EVC_MM,
-    'EVC_SS': EVC_SS,
-
-    'Scale_EVC_SS': Scale_EVC_SS,
-    'Scale_EVC_SL': Scale_EVC_SL,
+    "EVC_LL": EVC_LL,
+    "EVC_LM": EVC_LM,
+    "EVC_LS": EVC_LS,
+    "EVC_ML": EVC_ML,
+    "EVC_SL": EVC_SL,
+    "EVC_MM": EVC_MM,
+    "EVC_SS": EVC_SS,
+    "Scale_EVC_SS": Scale_EVC_SS,
+    "Scale_EVC_SL": Scale_EVC_SL,
 }
 
 

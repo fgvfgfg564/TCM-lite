@@ -18,11 +18,13 @@ from models import TCM, TCM_vbr
 from torch.utils.tensorboard import SummaryWriter
 import os
 
-torch.backends.cudnn.deterministic=True
-torch.backends.cudnn.benchmark=False
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+
 
 def compute_msssim(a, b):
-    return ms_ssim(a, b, data_range=1.)
+    return ms_ssim(a, b, data_range=1.0)
+
 
 class RateDistortionLoss(nn.Module):
     """Custom rate distortion loss with a Lagrangian parameter."""
@@ -41,8 +43,10 @@ class RateDistortionLoss(nn.Module):
             for likelihoods in output["likelihoods"].values()
         )
 
-        out["mse_loss"] = torch.mean((output["x_hat"] - target)**2,dim=(1,2,3))
-        out["dloss"] = 255 ** 2 * torch.dot(output["lmd_info"].squeeze(1),out["mse_loss"])
+        out["mse_loss"] = torch.mean((output["x_hat"] - target) ** 2, dim=(1, 2, 3))
+        out["dloss"] = 255**2 * torch.dot(
+            output["lmd_info"].squeeze(1), out["mse_loss"]
+        )
         out["mse_loss"] = torch.mean(out["mse_loss"])
         out["loss"] = out["dloss"] + out["bpp_loss"]
 
@@ -110,7 +114,14 @@ def configure_optimizers(net, args):
 
 
 def train_one_epoch(
-    model, criterion, train_dataloader, optimizer, aux_optimizer, epoch, clip_max_norm, type='mse'
+    model,
+    criterion,
+    train_dataloader,
+    optimizer,
+    aux_optimizer,
+    epoch,
+    clip_max_norm,
+    type="mse",
 ):
     model.train()
     device = next(model.parameters()).device
@@ -133,7 +144,7 @@ def train_one_epoch(
         aux_optimizer.step()
 
         if i % 1000 == 0:
-            if type == 'mse':
+            if type == "mse":
                 print(
                     f"Train epoch {epoch}: ["
                     f"{i*len(d)}/{len(train_dataloader.dataset)}"
@@ -165,17 +176,17 @@ def test_epoch(epoch, test_dataloader, model, criterion):
     aux_loss = AverageMeter()
 
     with torch.no_grad():
-        for lmd in [0.001,0.002,0.003]:
+        for lmd in [0.001, 0.002, 0.003]:
             for d in test_dataloader:
                 d = d.to(device)
-                out_net = model(d,lmd)
+                out_net = model(d, lmd)
                 out_criterion = criterion(out_net, d)
 
                 aux_loss.update(model.aux_loss())
                 bpp_loss.update(out_criterion["bpp_loss"])
                 loss.update(out_criterion["loss"])
                 mse_loss.update(out_criterion["mse_loss"])
-            print(bpp_loss.avg,mse_loss.avg)
+            print(bpp_loss.avg, mse_loss.avg)
 
     print(
         f"Test epoch {epoch}: Average losses:"
@@ -199,7 +210,11 @@ def parse_args(argv):
     parser = argparse.ArgumentParser(description="Example training script.")
 
     parser.add_argument(
-        "-d", "--dataset", type=str, default='/backup3/zqge/flicker', help="Training dataset"
+        "-d",
+        "--dataset",
+        type=str,
+        default="/backup3/zqge/flicker",
+        help="Training dataset",
     )
     parser.add_argument(
         "-e",
@@ -224,7 +239,11 @@ def parse_args(argv):
     )
 
     parser.add_argument(
-        "--batch_size", "-bs", type=int, default=8, help="Batch size (default: %(default)s)"
+        "--batch_size",
+        "-bs",
+        type=int,
+        default=8,
+        help="Batch size (default: %(default)s)",
     )
     parser.add_argument(
         "--test_batch_size",
@@ -258,20 +277,18 @@ def parse_args(argv):
         help="gradient clipping max norm (default: %(default)s",
     )
     parser.add_argument("--checkpoint", type=str, help="Path to a checkpoint")
-    parser.add_argument("--type", type=str, default='mse', help="loss type", choices=['mse', "ms-ssim"])
-    parser.add_argument("--save_path", type=str, default='./', help="save_path")
     parser.add_argument(
-        "--skip_epoch", type=int, default=0
+        "--type", type=str, default="mse", help="loss type", choices=["mse", "ms-ssim"]
     )
+    parser.add_argument("--save_path", type=str, default="./", help="save_path")
+    parser.add_argument("--skip_epoch", type=int, default=0)
     parser.add_argument(
-        "--N", type=int, default=128,
+        "--N",
+        type=int,
+        default=128,
     )
-    parser.add_argument(
-        "--lr_epoch", nargs='+', type=int, default=[45,48]
-    )
-    parser.add_argument(
-        "--continue_train", action="store_true", default=True
-    )
+    parser.add_argument("--lr_epoch", nargs="+", type=int, default=[45, 48])
+    parser.add_argument("--continue_train", action="store_true", default=True)
     args = parser.parse_args(argv)
     return args
 
@@ -303,7 +320,7 @@ def main(argv):
 
     device = "cuda" if args.cuda and torch.cuda.is_available() else "cpu"
     print(device)
-    device = 'cuda'
+    device = "cuda"
 
     train_dataloader = DataLoader(
         train_dataset,
@@ -321,7 +338,13 @@ def main(argv):
         pin_memory=(device == "cuda"),
     )
 
-    net = TCM_vbr(config=[2,2,2,2,2,2], head_dim=[8, 16, 32, 32, 16, 8], drop_path_rate=0.0, N=args.N, M=320)
+    net = TCM_vbr(
+        config=[2, 2, 2, 2, 2, 2],
+        head_dim=[8, 16, 32, 32, 16, 8],
+        drop_path_rate=0.0,
+        N=args.N,
+        M=320,
+    )
     net = net.to(device)
 
     if args.cuda and torch.cuda.device_count() > 1:
@@ -330,7 +353,9 @@ def main(argv):
     optimizer, aux_optimizer = configure_optimizers(net, args)
     milestones = args.lr_epoch
     print("milestones: ", milestones)
-    lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones, gamma=0.1, last_epoch=-1)
+    lr_scheduler = optim.lr_scheduler.MultiStepLR(
+        optimizer, milestones, gamma=0.1, last_epoch=-1
+    )
 
     criterion = RateDistortionLoss()
 
@@ -356,10 +381,10 @@ def main(argv):
             aux_optimizer,
             epoch,
             args.clip_max_norm,
-            type
+            type,
         )
         loss = test_epoch(epoch, test_dataloader, net, criterion)
-        writer.add_scalar('test_loss', loss, epoch)
+        writer.add_scalar("test_loss", loss, epoch)
         lr_scheduler.step()
 
         is_best = loss < best_loss
@@ -369,7 +394,9 @@ def main(argv):
             save_checkpoint(
                 {
                     "epoch": epoch,
-                    "state_dict": net.module.state_dict() if torch.cuda.device_count() > 1 else net.state_dict(),
+                    "state_dict": net.module.state_dict()
+                    if torch.cuda.device_count() > 1
+                    else net.state_dict(),
                     "loss": loss,
                     "optimizer": optimizer.state_dict(),
                     "aux_optimizer": aux_optimizer.state_dict(),

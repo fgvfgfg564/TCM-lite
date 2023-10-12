@@ -3,22 +3,27 @@
 
 import os
 
+
 def test_one_model(i_frame_model, checkpoint):
     root_folder = "output"
-    output_json_path = f"{root_folder}/output_json/arch:{i_frame_model}_ckpt:{checkpoint}.json"
+    output_json_path = (
+        f"{root_folder}/output_json/arch:{i_frame_model}_ckpt:{checkpoint}.json"
+    )
     image_model = f"checkpoints/{checkpoint}"
 
-    test_cfg = 'local_kodak.json'
+    test_cfg = "local_kodak.json"
 
-    command_line = (" python test_image.py "
-                    f" --i_frame_model {i_frame_model}"
-                    f" --i_frame_model_path {image_model}"
-                    f" --test_config ./test_cfg/{test_cfg}"
-                    " --cuda 1 -w 1 --rate_num 4"
-                    " --write_stream 1 --ec_thread 1"
-                    " --verbose 1"
-                    # " --save_decoded_frame True"
-                    f" --output_path {output_json_path}")
+    command_line = (
+        " python test_image.py "
+        f" --i_frame_model {i_frame_model}"
+        f" --i_frame_model_path {image_model}"
+        f" --test_config ./test_cfg/{test_cfg}"
+        " --cuda 1 -w 1 --rate_num 4"
+        " --write_stream 1 --ec_thread 1"
+        " --verbose 1"
+        # " --save_decoded_frame True"
+        f" --output_path {output_json_path}"
+    )
 
     print(command_line)
     os.system(command_line)
@@ -32,7 +37,7 @@ def main():
     # checkpoint = 'EVC_ML_MD.pth.tar'
 
     i_frame_model = "EVC_SL"
-    checkpoint = 'EVC_SL_MD.pth.tar'
+    checkpoint = "EVC_SL_MD.pth.tar"
 
     # i_frame_model = "EVC_LM"
     # checkpoint = 'EVC_LM_MD.pth.tar'

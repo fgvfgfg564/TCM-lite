@@ -14,20 +14,25 @@ from torchvision import transforms
 from compressai.datasets import ImageFolder
 
 from src.models import build_model, model_architectures
-from src.utils.stream_helper import get_padding_size, get_state_dict, consume_prefix_in_state_dict_if_present
+from src.utils.stream_helper import (
+    get_padding_size,
+    get_state_dict,
+    consume_prefix_in_state_dict_if_present,
+)
 from torch.utils.tensorboard import SummaryWriter
 import os
 
 from dataset import VCIP_Training, VCIP_Validation
 
-torch.backends.cudnn.deterministic=True
-torch.backends.cudnn.benchmark=False
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
 
 """
 In each epoch:
     Step 1: Train every parameter except q_scales at highest lambda; fix smallest q_scale at 0.5
     Step 2: Freeze every parameter and train each q_scale (except the smallest) separately; Use SGD
 """
+
 
 class RateDistortionLoss(nn.Module):
     """Custom rate distortion loss with a Lagrangian parameter."""
@@ -44,11 +49,11 @@ class RateDistortionLoss(nn.Module):
         out["bpp_loss"] = torch.mean(output["bpp"])
         out["bpp_y_loss"] = torch.mean(output["bpp_y"])
         out["bpp_z_loss"] = torch.mean(output["bpp_z"])
-        out["mse_loss"] = torch.mean((output["x_hat"] - target)**2,dim=(1,2,3))
-        dloss = 255 ** 2 * torch.mean(torch.mul(lmbda, out["mse_loss"]))
+        out["mse_loss"] = torch.mean((output["x_hat"] - target) ** 2, dim=(1, 2, 3))
+        dloss = 255**2 * torch.mean(torch.mul(lmbda, out["mse_loss"]))
         out["mse_loss"] = torch.mean(out["mse_loss"])
         out["loss"] = dloss + out["bpp_loss"]
-        out["psnr_loss"] = -10*torch.log10(out["mse_loss"])
+        out["psnr_loss"] = -10 * torch.log10(out["mse_loss"])
 
         return out
 
@@ -87,13 +92,20 @@ def configure_optimizers(net: torch.nn.Module, args):
 
     optimizer = optim.Adam(
         net.parameters(),
-        lr=args.learning_rate, 
+        lr=args.learning_rate,
     )
     return optimizer
 
 
 def train_one_epoch(
-    model, lmbdas, criterion, train_dataloader, optimizer, epoch, clip_max_norm, type='mse'
+    model,
+    lmbdas,
+    criterion,
+    train_dataloader,
+    optimizer,
+    epoch,
+    clip_max_norm,
+    type="mse",
 ):
     model.train()
     device = next(model.parameters()).device
@@ -129,13 +141,14 @@ def train_one_epoch(
                 f'\tBpp loss: {out_criterion["bpp_loss"].item():.4f}'
             )
 
+
 def test_epoch(epoch, test_dataloader, lmbdas, model, criterion, writer=None):
     model.eval()
     device = next(model.parameters()).device
 
     with torch.no_grad():
         losses = []
-        for (i, lmd) in enumerate(lmbdas):
+        for i, lmd in enumerate(lmbdas):
             lmd = torch.tensor(np.array(lmd)).to(torch.float32).cuda()
             loss_dict = {}
 
@@ -148,13 +161,16 @@ def test_epoch(epoch, test_dataloader, lmbdas, model, criterion, writer=None):
                     loss_dict.setdefault(key, AverageMeter())
                     loss_dict[key].update(value)
 
-            print(f"Testing results for epoch {epoch} - lmbda={lmd:.6f} - qscale={qscale[0,0,0]:.6f}: ", end="")
+            print(
+                f"Testing results for epoch {epoch} - lmbda={lmd:.6f} - qscale={qscale[0,0,0]:.6f}: ",
+                end="",
+            )
             loss_items = []
             for k, meter in loss_dict.items():
                 loss_items.append(f"{k}={meter.avg:.5f}")
                 if writer:
                     writer.add_scalar(k, meter.avg.cpu().numpy().item(), epoch)
-            print(*loss_items, sep=' - ')
+            print(*loss_items, sep=" - ")
             losses.append(loss_dict["loss"].avg.cpu().numpy().item())
 
     return np.mean(losses)
@@ -171,7 +187,14 @@ def parse_args(argv):
     parser = argparse.ArgumentParser(description="Example training script.")
 
     parser.add_argument("model", type=str, choices=list(model_architectures.keys()))
-    parser.add_argument("-l", "--lmbdas", nargs=4, type=float, help="lambdas for training", required=True)
+    parser.add_argument(
+        "-l",
+        "--lmbdas",
+        nargs=4,
+        type=float,
+        help="lambdas for training",
+        required=True,
+    )
     parser.add_argument(
         "-e",
         "--epochs",
@@ -195,7 +218,11 @@ def parse_args(argv):
     )
 
     parser.add_argument(
-        "--batch_size", "-bs", type=int, default=4, help="Batch size (default: %(default)s)"
+        "--batch_size",
+        "-bs",
+        type=int,
+        default=4,
+        help="Batch size (default: %(default)s)",
     )
     parser.add_argument(
         "--test_batch_size",
@@ -214,7 +241,10 @@ def parse_args(argv):
         "--save", action="store_true", default=True, help="Save model to disk"
     )
     parser.add_argument(
-        "--seed", type=float, default=19260817, help="Set random seed for reproducibility"
+        "--seed",
+        type=float,
+        default=19260817,
+        help="Set random seed for reproducibility",
     )
     parser.add_argument(
         "--clip_max_norm",
@@ -223,14 +253,12 @@ def parse_args(argv):
         help="gradient clipping max norm (default: %(default)s",
     )
     parser.add_argument("--checkpoint", type=str, help="Path to a checkpoint")
-    parser.add_argument("--type", type=str, default='mse', help="loss type", choices=['mse', "ms-ssim"])
-    parser.add_argument("--save_path", type=str, default='./', help="save_path")
     parser.add_argument(
-        "--lr_epoch", nargs='+', type=int, default=[]
+        "--type", type=str, default="mse", help="loss type", choices=["mse", "ms-ssim"]
     )
-    parser.add_argument(
-        "--continue_train", action="store_true", default=False
-    )
+    parser.add_argument("--save_path", type=str, default="./", help="save_path")
+    parser.add_argument("--lr_epoch", nargs="+", type=int, default=[])
+    parser.add_argument("--continue_train", action="store_true", default=False)
     args = parser.parse_args(argv)
     return args
 
@@ -250,11 +278,11 @@ def main(argv):
         np.random.seed(args.seed)
         random.seed(args.seed)
     writer = SummaryWriter(tb_path)
-    
+
     train_dataset = VCIP_Training(patch_size=args.patch_size)
     test_dataset = VCIP_Validation(patch_size=args.patch_size)
 
-    device = 'cuda'
+    device = "cuda"
 
     train_dataloader = DataLoader(
         train_dataset,
@@ -278,7 +306,9 @@ def main(argv):
     optimizer = configure_optimizers(net, args)
     milestones = args.lr_epoch
     print("milestones: ", milestones)
-    lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones, gamma=0.2, last_epoch=-1)
+    lr_scheduler = optim.lr_scheduler.MultiStepLR(
+        optimizer, milestones, gamma=0.2, last_epoch=-1
+    )
 
     criterion = RateDistortionLoss()
 
@@ -286,14 +316,14 @@ def main(argv):
     if args.checkpoint:  # load from previous checkpoint
         print("Loading", args.checkpoint)
         checkpoint = torch.load(args.checkpoint, map_location=device)
-        net_state_dict = checkpoint['state_dict']
+        net_state_dict = checkpoint["state_dict"]
         consume_prefix_in_state_dict_if_present(net_state_dict, prefix="module.")
         net.load_state_dict(net_state_dict)
         if args.continue_train:
             last_epoch = checkpoint["epoch"] + 1
             optimizer.load_state_dict(checkpoint["optimizer"])
             lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
-    
+
     lmbdas = np.array(sorted(args.lmbdas))
 
     _ = test_epoch("INIT", test_dataloader, lmbdas, net, criterion)
@@ -309,10 +339,10 @@ def main(argv):
             optimizer,
             epoch,
             args.clip_max_norm,
-            type
+            type,
         )
         loss = test_epoch(epoch, test_dataloader, lmbdas, net, criterion, writer)
-        writer.add_scalar('test_loss', loss, epoch)
+        writer.add_scalar("test_loss", loss, epoch)
         lr_scheduler.step()
 
         is_best = loss < best_loss
@@ -322,7 +352,9 @@ def main(argv):
             save_checkpoint(
                 {
                     "epoch": epoch,
-                    "state_dict": net.module.state_dict() if torch.cuda.device_count() > 1 else net.state_dict(),
+                    "state_dict": net.module.state_dict()
+                    if torch.cuda.device_count() > 1
+                    else net.state_dict(),
                     "loss": loss,
                     "optimizer": optimizer.state_dict(),
                     "lr_scheduler": lr_scheduler.state_dict(),

@@ -38,7 +38,7 @@ def get_downsampled_shape(height, width, p):
 
 
 def get_rounded_q(q_scale):
-    q_scale = np.clip(q_scale, 0.01, 655.)
+    q_scale = np.clip(q_scale, 0.01, 655.0)
     q_index = int(np.round(q_scale * 100))
     q_scale = q_index / 100
     return q_scale, q_index
@@ -48,7 +48,7 @@ def consume_prefix_in_state_dict_if_present(state_dict, prefix):
     keys = sorted(state_dict.keys())
     for key in keys:
         if key.startswith(prefix):
-            newkey = key[len(prefix):]
+            newkey = key[len(prefix) :]
             state_dict[newkey] = state_dict.pop(key)
 
     # also strip the prefix in metadata if any.
@@ -57,15 +57,15 @@ def consume_prefix_in_state_dict_if_present(state_dict, prefix):
         for key in list(metadata.keys()):
             if len(key) == 0:
                 continue
-            newkey = key[len(prefix):]
+            newkey = key[len(prefix) :]
             metadata[newkey] = metadata.pop(key)
 
 
 def get_state_dict(ckpt_path):
     def get_one_state_dict(path):
-        ckpt = torch.load(path, map_location=torch.device('cpu'))
+        ckpt = torch.load(path, map_location=torch.device("cpu"))
         if "state_dict" in ckpt:
-            ckpt = ckpt['state_dict']
+            ckpt = ckpt["state_dict"]
         if "net" in ckpt:
             ckpt = ckpt["net"]
         consume_prefix_in_state_dict_if_present(ckpt, prefix="module.")

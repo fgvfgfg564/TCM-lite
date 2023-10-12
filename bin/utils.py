@@ -4,17 +4,20 @@ from PIL import Image
 import subprocess
 import numpy as np
 
+
 def get_bpg_result(img_filename, qp=28):
     img_filename = os.path.abspath(img_filename)
-    with tempfile.NamedTemporaryFile('w+b') as f_bin, tempfile.NamedTemporaryFile() as f_recon:
+    with tempfile.NamedTemporaryFile(
+        "w+b"
+    ) as f_bin, tempfile.NamedTemporaryFile() as f_recon:
         bin_filename = f_bin.name
         recon_filename = f_recon.name
-        enc_cmd = f'bpgenc -q {qp} {img_filename} -o {bin_filename}'
-        dec_cmd = f'bpgdec {bin_filename} -o {recon_filename}'
+        enc_cmd = f"bpgenc -q {qp} {img_filename} -o {bin_filename}"
+        dec_cmd = f"bpgdec {bin_filename} -o {recon_filename}"
 
         print("BPG encoding:", enc_cmd)
         print("BPG decoding:", dec_cmd)
-        
+
         subprocess.run(enc_cmd.split())
         subprocess.run(dec_cmd.split())
 
@@ -24,10 +27,11 @@ def get_bpg_result(img_filename, qp=28):
         img1 = np.array(Image.open(img_filename)).astype(np.int32)
         img2 = np.array(Image.open(recon_filename)).astype(np.int32)
 
-        mse = np.mean((img1-img2) ** 2)
-        psnr = -10*np.log10(mse / (255 ** 2))
-    
+        mse = np.mean((img1 - img2) ** 2)
+        psnr = -10 * np.log10(mse / (255**2))
+
     return num_bits, psnr
+
 
 def is_strictly_increasing(arr):
     """

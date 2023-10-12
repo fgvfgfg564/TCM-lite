@@ -9,13 +9,19 @@ from torch import nn
 from .common_model import CompressionModel
 from .layers import get_enc_dec_models
 from .hyperprior import get_hyperprior, get_dualprior
-from ..utils.stream_helper import encode_i, decode_i, get_downsampled_shape, filesize, \
-    get_rounded_q, get_state_dict
+from ..utils.stream_helper import (
+    encode_i,
+    decode_i,
+    get_downsampled_shape,
+    filesize,
+    get_rounded_q,
+    get_state_dict,
+)
 
 
 class EVC(CompressionModel):
     def __init__(self, N=192, anchor_num=4, ec_thread=False):
-        super().__init__(y_distribution='gaussian', z_channel=N, ec_thread=ec_thread)
+        super().__init__(y_distribution="gaussian", z_channel=N, ec_thread=ec_thread)
         channels = [192, 192, 192, 192]
         self.enc, self.dec = get_enc_dec_models(3, 3, channels)
         self.hyper_enc, self.hyper_dec, self.y_prior_fusion = get_hyperprior(N)
@@ -41,7 +47,8 @@ class EVC(CompressionModel):
         params = self.y_prior_fusion(params)
         q_step, scales, means = self.separate_prior(params)
         y_res, y_q, y_hat, scales_hat = self.forward_dual_prior(
-            y, means, scales, q_step, self.y_spatial_prior)
+            y, means, scales, q_step, self.y_spatial_prior
+        )
 
         y_for_bit = y_q
         z_for_bit = z_hat
@@ -80,7 +87,9 @@ class EVC(CompressionModel):
             "bpp_z": bpp_z,
         }
 
-    def encode_decode(self, x, q_scale, output_path=None, pic_width=None, pic_height=None):
+    def encode_decode(
+        self, x, q_scale, output_path=None, pic_width=None, pic_height=None
+    ):
         # pic_width and pic_height may be different from x's size. X here is after padding
         # x_hat has the same size with x
         if output_path is None:
@@ -94,9 +103,9 @@ class EVC(CompressionModel):
             latency = time.time() - start_time
             encoded = self.compute_loss(x, x_hat, bits_y, bits_z)
             result = {
-                'bit': encoded['bit'].item(),
-                'x_hat': encoded['x_hat'],
-                'latency': latency,
+                "bit": encoded["bit"].item(),
+                "x_hat": encoded["x_hat"],
+                "latency": latency,
             }
             return result
 
@@ -109,22 +118,22 @@ class EVC(CompressionModel):
         torch.cuda.synchronize()
         enc_time = time.time() - start_time
 
-        bit_stream = compressed['bit_stream']
+        bit_stream = compressed["bit_stream"]
         encode_i(pic_height, pic_width, q_index, bit_stream, output_path)
         bit = filesize(output_path) * 8
 
         height, width, q_index, bit_stream = decode_i(output_path)
         decompressed = self.decompress(bit_stream, height, width, q_index / 100)
 
-        x_hat = decompressed['x_hat']
-        dec_time = decompressed['dec_time']
+        x_hat = decompressed["x_hat"]
+        dec_time = decompressed["dec_time"]
 
         result = {
-            'bit': bit,
-            'x_hat': x_hat,
-            'enc_time': enc_time,
-            'dec_time': dec_time,
-            'latency': enc_time + dec_time,
+            "bit": bit,
+            "x_hat": x_hat,
+            "enc_time": enc_time,
+            "dec_time": dec_time,
+            "latency": enc_time + dec_time,
         }
         return result
 
@@ -139,7 +148,8 @@ class EVC(CompressionModel):
         params = self.y_prior_fusion(params)
         q_step, scales, means = self.separate_prior(params)
         y_q_w_0, y_q_w_1, scales_w_0, scales_w_1, y_hat = self.compress_dual_prior(
-            y, means, scales, q_step, self.y_spatial_prior)
+            y, means, scales, q_step, self.y_spatial_prior
+        )
         y_hat = y_hat * curr_q
 
         self.entropy_coder.reset()
@@ -178,7 +188,7 @@ class EVC(CompressionModel):
         x_hat = self.dec(y_hat).clamp_(0, 1)
         torch.cuda.synchronize()
         dec_time = time.time() - start_time
-        return {"x_hat": x_hat, 'dec_time': dec_time}
+        return {"x_hat": x_hat, "dec_time": dec_time}
 
     def load_state_dict(self, state_dict, verbose=True, **kwargs):
         sd = self.state_dict()
@@ -186,17 +196,19 @@ class EVC(CompressionModel):
             if skey in state_dict and state_dict[skey].shape == sd[skey].shape:
                 sd[skey] = state_dict[skey]
                 # print(f"load {skey}")
-            elif 'q_scale' in skey and skey in state_dict:
+            elif "q_scale" in skey and skey in state_dict:
                 # TODO: load q_scale according to cuda_id
                 print(f"q_scale: this {sd[skey].shape}, load {state_dict[skey].shape}")
-                cuda_id = int(os.environ.get('CUDA_VISIBLE_DEVICES', 0))
+                cuda_id = int(os.environ.get("CUDA_VISIBLE_DEVICES", 0))
                 sd[skey][0] = state_dict[skey][cuda_id % 4]
                 if verbose:
                     print(f"cuda {cuda_id} load q_scale: {sd[skey]}")
             elif verbose and skey not in state_dict:
                 print(f"NOT load {skey}, not find it in state_dict")
             elif verbose:
-                print(f"NOT load {skey}, this {sd[skey].shape}, load {state_dict[skey].shape}")
+                print(
+                    f"NOT load {skey}, this {sd[skey].shape}, load {state_dict[skey].shape}"
+                )
         super().load_state_dict(sd, **kwargs)
 
 

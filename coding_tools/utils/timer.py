@@ -6,12 +6,15 @@ __all__ = ["timing_decorator", "Timer"]
 LEVEL = 0
 ENABLE = True
 
+
 def timing_decorator(name):
     """
     Decorator to measure the execution time of a function anytime it's invoked if ENABLE=True
     """
+
     def _decorator(func):
         if ENABLE:
+
             def wrapper(*args, **kwargs):
                 global LEVEL
                 torch.cuda.synchronize()
@@ -22,17 +25,23 @@ def timing_decorator(name):
                 torch.cuda.synchronize()
                 end_time = time.time()
                 execution_time = end_time - start_time
-                print("\t"*LEVEL + f"{name} took {execution_time} seconds to execute.")
+                print(
+                    "\t" * LEVEL + f"{name} took {execution_time} seconds to execute."
+                )
                 return result
+
             return wrapper
         else:
             return func
+
     return _decorator
 
-class Timer():
+
+class Timer:
     """
     Context manager to measure the execution time of a piece of code if ENABLE=True
     """
+
     def __init__(self, name) -> None:
         self.time_start = None
         self.name = name
@@ -43,10 +52,13 @@ class Timer():
             self.time_start = time.time()
             global LEVEL
             LEVEL += 1
-    
+
     def __exit__(self, exc_type, exc_value, traceback):
         if ENABLE:
             torch.cuda.synchronize()
             global LEVEL
             LEVEL -= 1
-            print("\t"*LEVEL + f"{self.name} took {time.time() - self.time_start} seconds to execute.")
+            print(
+                "\t" * LEVEL
+                + f"{self.name} took {time.time() - self.time_start} seconds to execute."
+            )

@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image
 
 
-class PNGReader():
+class PNGReader:
     def __init__(self, filepath):
         self.filepath = filepath
         self.eof = False
@@ -21,7 +21,7 @@ class PNGReader():
             self.eof = True
             return None
 
-        rgb = Image.open(png_path).convert('RGB')
-        rgb = np.asarray(rgb).astype('float32').transpose(2, 0, 1)
-        rgb = rgb / 255.
+        rgb = Image.open(png_path).convert("RGB")
+        rgb = np.asarray(rgb).astype("float32").transpose(2, 0, 1)
+        rgb = rgb / 255.0
         return rgb

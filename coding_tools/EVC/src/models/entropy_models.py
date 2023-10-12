@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from .MLCodec_rans import RansEncoder, RansDecoder
 
 
-class EntropyCoder():
+class EntropyCoder:
     def __init__(self, ec_thread=False):
         super().__init__()
 
@@ -18,6 +18,7 @@ class EntropyCoder():
     @staticmethod
     def pmf_to_quantized_cdf(pmf, precision=16):
         from .MLCodec_CXX import pmf_to_quantized_cdf as _pmf_to_quantized_cdf
+
         cdf = _pmf_to_quantized_cdf(pmf.tolist(), precision)
         cdf = torch.IntTensor(cdf)
         return cdf
@@ -36,9 +37,13 @@ class EntropyCoder():
         self.encoder.reset()
 
     def encode_with_indexes(self, symbols, indexes, cdf, cdf_length, offset):
-        self.encoder.encode_with_indexes(symbols.clamp(-30000, 30000).to(torch.int16).cpu().numpy(),
-                                         indexes.to(torch.int16).cpu().numpy(),
-                                         cdf, cdf_length, offset)
+        self.encoder.encode_with_indexes(
+            symbols.clamp(-30000, 30000).to(torch.int16).cpu().numpy(),
+            indexes.to(torch.int16).cpu().numpy(),
+            cdf,
+            cdf_length,
+            offset,
+        )
 
     def flush(self):
         self.encoder.flush()
@@ -50,8 +55,9 @@ class EntropyCoder():
         self.decoder.set_stream((np.frombuffer(stream, dtype=np.uint8)))
 
     def decode_stream(self, indexes, cdf, cdf_length, offset):
-        rv = self.decoder.decode_stream(indexes.to(torch.int16).cpu().numpy(),
-                                        cdf, cdf_length, offset)
+        rv = self.decoder.decode_stream(
+            indexes.to(torch.int16).cpu().numpy(), cdf, cdf_length, offset
+        )
         rv = torch.Tensor(rv)
         return rv
 
@@ -60,13 +66,16 @@ class Bitparm(nn.Module):
     def __init__(self, channel, final=False):
         super().__init__()
         self.final = final
-        self.h = nn.Parameter(torch.nn.init.normal_(
-            torch.empty(channel).view(1, -1, 1, 1), 0, 0.01))
-        self.b = nn.Parameter(torch.nn.init.normal_(
-            torch.empty(channel).view(1, -1, 1, 1), 0, 0.01))
+        self.h = nn.Parameter(
+            torch.nn.init.normal_(torch.empty(channel).view(1, -1, 1, 1), 0, 0.01)
+        )
+        self.b = nn.Parameter(
+            torch.nn.init.normal_(torch.empty(channel).view(1, -1, 1, 1), 0, 0.01)
+        )
         if not final:
-            self.a = nn.Parameter(torch.nn.init.normal_(
-                torch.empty(channel).view(1, -1, 1, 1), 0, 0.01))
+            self.a = nn.Parameter(
+                torch.nn.init.normal_(torch.empty(channel).view(1, -1, 1, 1), 0, 0.01)
+            )
         else:
             self.a = None
 
@@ -78,7 +87,7 @@ class Bitparm(nn.Module):
         return x + torch.tanh(x) * torch.tanh(self.a)
 
 
-class AEHelper():
+class AEHelper:
     def __init__(self):
         super().__init__()
         self.entropy_coder = None
@@ -95,14 +104,14 @@ class AEHelper():
         self._offset = offset.reshape(-1).int().cpu().numpy()
 
     def get_cdf_info(self):
-        return self._quantized_cdf, \
-            self._cdf_length, \
-            self._offset
+        return self._quantized_cdf, self._cdf_length, self._offset
 
     def get_cdf_info_tensor(self):
-        return torch.tensor(self._quantized_cdf), \
-            torch.tensor(self._cdf_length), \
-            torch.tensor(self._offset)
+        return (
+            torch.tensor(self._quantized_cdf),
+            torch.tensor(self._cdf_length),
+            torch.tensor(self._offset),
+        )
 
 
 class BitEstimator(AEHelper, nn.Module):
@@ -144,8 +153,11 @@ class BitEstimator(AEHelper, nn.Module):
                 samples = samples[None, :, None, None]
                 probs = self.forward(samples)
                 probs = torch.squeeze(probs)
-                minima = torch.where(probs < torch.zeros_like(medians) + 0.0001,
-                                     torch.zeros_like(medians) + i, minima)
+                minima = torch.where(
+                    probs < torch.zeros_like(medians) + 0.0001,
+                    torch.zeros_like(medians) + i,
+                    minima,
+                )
 
             maxima = medians + 50
             for i in range(50, 1, -1):
@@ -153,8 +165,11 @@ class BitEstimator(AEHelper, nn.Module):
                 samples = samples[None, :, None, None]
                 probs = self.forward(samples)
                 probs = torch.squeeze(probs)
-                maxima = torch.where(probs > torch.zeros_like(medians) + 0.9999,
-                                     torch.zeros_like(medians) + i, maxima)
+                maxima = torch.where(
+                    probs > torch.zeros_like(medians) + 0.9999,
+                    torch.zeros_like(medians) + i,
+                    maxima,
+                )
 
             minima = minima.int()
             maxima = maxima.int()
@@ -179,7 +194,9 @@ class BitEstimator(AEHelper, nn.Module):
             pmf = pmf[:, 0, :]
             tail_mass = lower[:, 0, :1] + (1.0 - upper[:, 0, -1:])
 
-            quantized_cdf = EntropyCoder.pmf_to_cdf(pmf, tail_mass, pmf_length, max_length)
+            quantized_cdf = EntropyCoder.pmf_to_cdf(
+                pmf, tail_mass, pmf_length, max_length
+            )
             cdf_length = pmf_length + 2
             self.set_cdf_info(quantized_cdf, cdf_length, offset)
 
@@ -191,37 +208,44 @@ class BitEstimator(AEHelper, nn.Module):
 
     def encode(self, x):
         indexes = self.build_indexes(x.size())
-        return self.entropy_coder.encode_with_indexes(x.reshape(-1), indexes.reshape(-1),
-                                                      *self.get_cdf_info())
+        return self.entropy_coder.encode_with_indexes(
+            x.reshape(-1), indexes.reshape(-1), *self.get_cdf_info()
+        )
 
     def decode_stream(self, size, dtype, device):
         output_size = (1, self.channel, size[0], size[1])
         indexes = self.build_indexes(output_size)
-        val = self.entropy_coder.decode_stream(indexes.reshape(-1), *self.get_cdf_info())
+        val = self.entropy_coder.decode_stream(
+            indexes.reshape(-1), *self.get_cdf_info()
+        )
         val = val.reshape(indexes.shape)
         return val.to(dtype).to(device)
 
 
 class GaussianEncoder(AEHelper):
-    def __init__(self, distribution='laplace'):
+    def __init__(self, distribution="laplace"):
         super().__init__()
-        assert distribution in ['laplace', 'gaussian']
+        assert distribution in ["laplace", "gaussian"]
         self.distribution = distribution
-        if distribution == 'laplace':
+        if distribution == "laplace":
             self.cdf_distribution = torch.distributions.laplace.Laplace
             self.scale_min = 0.01
             self.scale_max = 64.0
             self.scale_level = 256
-        elif distribution == 'gaussian':
+        elif distribution == "gaussian":
             self.cdf_distribution = torch.distributions.normal.Normal
             self.scale_min = 0.11
             self.scale_max = 64.0
             self.scale_level = 256
-        self.scale_table = self.get_scale_table(self.scale_min, self.scale_max, self.scale_level)
+        self.scale_table = self.get_scale_table(
+            self.scale_min, self.scale_max, self.scale_level
+        )
 
         self.log_scale_min = math.log(self.scale_min)
         self.log_scale_max = math.log(self.scale_max)
-        self.log_scale_step = (self.log_scale_max - self.log_scale_min) / (self.scale_level - 1)
+        self.log_scale_step = (self.log_scale_max - self.log_scale_min) / (
+            self.scale_level - 1
+        )
 
     @staticmethod
     def get_scale_table(min_val, max_val, levels):
@@ -242,8 +266,11 @@ class GaussianEncoder(AEHelper):
             samples = torch.zeros_like(pmf_center) + i
             probs = cdf_distribution.cdf(samples)
             probs = torch.squeeze(probs)
-            pmf_center = torch.where(probs > torch.zeros_like(pmf_center) + 0.9999,
-                                     torch.zeros_like(pmf_center) + i, pmf_center)
+            pmf_center = torch.where(
+                probs > torch.zeros_like(pmf_center) + 0.9999,
+                torch.zeros_like(pmf_center) + i,
+                pmf_center,
+            )
 
         pmf_center = pmf_center.int()
         pmf_length = 2 * pmf_center + 1
@@ -266,7 +293,7 @@ class GaussianEncoder(AEHelper):
         quantized_cdf = torch.Tensor(len(pmf_length), max_length + 2)
         quantized_cdf = EntropyCoder.pmf_to_cdf(pmf, tail_mass, pmf_length, max_length)
 
-        self.set_cdf_info(quantized_cdf, pmf_length+2, -pmf_center)
+        self.set_cdf_info(quantized_cdf, pmf_length + 2, -pmf_center)
 
     def build_indexes(self, scales):
         scales = torch.maximum(scales, torch.zeros_like(scales) + 1e-5)
@@ -276,12 +303,14 @@ class GaussianEncoder(AEHelper):
 
     def encode(self, x, scales):
         indexes = self.build_indexes(scales)
-        return self.entropy_coder.encode_with_indexes(x.reshape(-1), indexes.reshape(-1),
-                                                      *self.get_cdf_info())
+        return self.entropy_coder.encode_with_indexes(
+            x.reshape(-1), indexes.reshape(-1), *self.get_cdf_info()
+        )
 
     def decode_stream(self, scales, dtype, device):
         indexes = self.build_indexes(scales)
-        val = self.entropy_coder.decode_stream(indexes.reshape(-1),
-                                               *self.get_cdf_info())
+        val = self.entropy_coder.decode_stream(
+            indexes.reshape(-1), *self.get_cdf_info()
+        )
         val = val.reshape(scales.shape)
         return val.to(device).to(dtype)

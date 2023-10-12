@@ -24,9 +24,9 @@ def interpolate_log(min_val, max_val, num, decending=True):
 
 
 def scale_list_to_str(scales):
-    s = ''
+    s = ""
     for scale in scales:
-        s += f'{scale:.2f} '
+        s += f"{scale:.2f} "
 
     return s
 
@@ -34,10 +34,10 @@ def scale_list_to_str(scales):
 def generate_str(x):
     # print(x)
     if x.numel() == 1:
-        return f'{x.item():.5f}  '
-    s = ''
+        return f"{x.item():.5f}  "
+    s = ""
     for a in x:
-        s += f'{a.item():.5f}  '
+        s += f"{a.item():.5f}  "
     return s
 
 
@@ -48,15 +48,15 @@ def create_folder(path, print_if_create=False):
             print(f"created folder: {path}")
 
 
-@patch('json.encoder.c_make_encoder', None)
+@patch("json.encoder.c_make_encoder", None)
 def dump_json(obj, fid, float_digits=-1, **kwargs):
     of = json.encoder._make_iterencode  # pylint: disable=W0212
 
     def inner(*args, **kwargs):
         args = list(args)
         # fifth argument is float formater which we will replace
-        args[4] = lambda o: format(o, '.%df' % float_digits)
+        args[4] = lambda o: format(o, ".%df" % float_digits)
         return of(*args, **kwargs)
 
-    with patch('json.encoder._make_iterencode', wraps=inner):
+    with patch("json.encoder._make_iterencode", wraps=inner):
         json.dump(obj, fid, **kwargs)

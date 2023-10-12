@@ -2,6 +2,7 @@ from PIL import Image
 import numpy as np
 import argparse
 
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("img1", type=str)
@@ -9,6 +10,7 @@ def parse_args():
     args = parser.parse_args()
 
     return args
+
 
 def main():
     args = parse_args()
@@ -20,9 +22,10 @@ def main():
 
     print(img1.shape)
 
-    mse = np.mean((img1-img2) ** 2)
+    mse = np.mean((img1 - img2) ** 2)
 
-    print(mse / (255**2), -10*np.log10(mse / (255 ** 2)))
+    print(mse / (255**2), -10 * np.log10(mse / (255**2)))
+
 
 if __name__ == "__main__":
     main()

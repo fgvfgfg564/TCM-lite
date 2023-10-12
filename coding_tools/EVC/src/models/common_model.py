@@ -18,14 +18,14 @@ class CompressionModel(nn.Module):
         self.bit_estimator_z = BitEstimator(z_channel)
         self.gaussian_encoder = GaussianEncoder(distribution=y_distribution)
         self.ec_thread = ec_thread
-        self.mse = nn.MSELoss(reduction='none')
+        self.mse = nn.MSELoss(reduction="none")
 
     def quant(self, x):
         if self.training:
             # Universal quant
-            u = torch.rand([1,1,1,1], device=x.device) - 0.5
-            tmp = torch.round(x-u)+u
-            return torch.detach(tmp-x)+x
+            u = torch.rand([1, 1, 1, 1], device=x.device) - 0.5
+            tmp = torch.round(x - u) + u
+            return torch.detach(tmp - x) + x
         else:
             return torch.round(x)
 
@@ -79,13 +79,15 @@ class CompressionModel(nn.Module):
 
         return y_res, y_q, y_hat, scales_hat
 
-    def forward_dual_prior(self, y, means, scales, quant_step, y_spatial_prior, write=False):
-        '''
+    def forward_dual_prior(
+        self, y, means, scales, quant_step, y_spatial_prior, write=False
+    ):
+        """
         y_0 means split in channel, the first half
         y_1 means split in channel, the second half
         y_?_0, means multiply with mask_0
         y_?_1, means multiply with mask_1
-        '''
+        """
         dtype = y.dtype
         device = y.device
         _, _, H, W = y.size()
@@ -98,18 +100,22 @@ class CompressionModel(nn.Module):
         scales_0, scales_1 = scales.chunk(2, 1)
         means_0, means_1 = means.chunk(2, 1)
 
-        y_res_0_0, y_q_0_0, y_hat_0_0, scales_hat_0_0 = \
-            self.process_with_mask(y_0, scales_0, means_0, mask_0)
-        y_res_1_1, y_q_1_1, y_hat_1_1, scales_hat_1_1 = \
-            self.process_with_mask(y_1, scales_1, means_1, mask_1)
+        y_res_0_0, y_q_0_0, y_hat_0_0, scales_hat_0_0 = self.process_with_mask(
+            y_0, scales_0, means_0, mask_0
+        )
+        y_res_1_1, y_q_1_1, y_hat_1_1, scales_hat_1_1 = self.process_with_mask(
+            y_1, scales_1, means_1, mask_1
+        )
 
         params = torch.cat((y_hat_0_0, y_hat_1_1, means, scales, quant_step), dim=1)
         scales_0, means_0, scales_1, means_1 = y_spatial_prior(params).chunk(4, 1)
 
-        y_res_0_1, y_q_0_1, y_hat_0_1, scales_hat_0_1 = \
-            self.process_with_mask(y_0, scales_0, means_0, mask_1)
-        y_res_1_0, y_q_1_0, y_hat_1_0, scales_hat_1_0 = \
-            self.process_with_mask(y_1, scales_1, means_1, mask_0)
+        y_res_0_1, y_q_0_1, y_hat_0_1, scales_hat_0_1 = self.process_with_mask(
+            y_0, scales_0, means_0, mask_1
+        )
+        y_res_1_0, y_q_1_0, y_hat_1_0, scales_hat_1_0 = self.process_with_mask(
+            y_1, scales_1, means_1, mask_0
+        )
 
         y_res_0 = y_res_0_0 + y_res_0_1
         y_q_0 = y_q_0_0 + y_q_0_1
@@ -137,7 +143,9 @@ class CompressionModel(nn.Module):
         return y_res, y_q, y_hat, scales_hat
 
     def compress_dual_prior(self, y, means, scales, quant_step, y_spatial_prior):
-        return self.forward_dual_prior(y, means, scales, quant_step, y_spatial_prior, write=True)
+        return self.forward_dual_prior(
+            y, means, scales, quant_step, y_spatial_prior, write=True
+        )
 
     def decompress_dual_prior(self, means, scales, quant_step, y_spatial_prior):
         dtype = means.dtype

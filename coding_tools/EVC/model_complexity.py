@@ -24,10 +24,11 @@ def print_model():
     model = Codec(net)
     img_size = (3, 1920, 1088)
 
-    macs, params = get_model_complexity_info(model, img_size, as_strings=True,
-                                             print_per_layer_stat=True, verbose=True)
-    print('{:<30}  {:<8}'.format('Computational complexity: ', macs))
-    print('{:<30}  {:<8}'.format('Number of parameters: ', params))
+    macs, params = get_model_complexity_info(
+        model, img_size, as_strings=True, print_per_layer_stat=True, verbose=True
+    )
+    print("{:<30}  {:<8}".format("Computational complexity: ", macs))
+    print("{:<30}  {:<8}".format("Number of parameters: ", params))
 
     print(f" macs {macs}  params {params}")
 

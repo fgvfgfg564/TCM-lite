@@ -8,8 +8,7 @@ from torch import nn
 
 from .image_model import EVC
 from .layers import get_enc_dec_models
-from ..utils.stream_helper import encode_i, decode_i, filesize, \
-    get_rounded_q
+from ..utils.stream_helper import encode_i, decode_i, filesize, get_rounded_q
 
 
 def scalable_add(inputs):
@@ -25,7 +24,9 @@ def scalable_add(inputs):
 
 
 class ScalableEnc(EVC):
-    def __init__(self, N=192, anchor_num=4, ec_thread=False, enc_num=4, forward_enc_id=None):
+    def __init__(
+        self, N=192, anchor_num=4, ec_thread=False, enc_num=4, forward_enc_id=None
+    ):
         super().__init__(N, anchor_num, ec_thread)
         self.enc = None
         channels = [64, 64, 128, 192]
@@ -48,16 +49,16 @@ class ScalableEnc(EVC):
             if skey in state_dict and state_dict[skey].shape == sd[skey].shape:
                 sd[skey] = state_dict[skey]
                 # print(f"load {skey}")
-            elif 'q_scale' in skey and skey in state_dict:
+            elif "q_scale" in skey and skey in state_dict:
                 # TODO: load q_scale according to cuda_id
                 print(f"q_scale: this {sd[skey].shape}, load {state_dict[skey].shape}")
-                cuda_id = int(os.environ.get('CUDA_VISIBLE_DEVICES', 0))
+                cuda_id = int(os.environ.get("CUDA_VISIBLE_DEVICES", 0))
                 sd[skey][0] = state_dict[skey][cuda_id % 4]
                 if verbose:
                     print(f"cuda {cuda_id} load q_scale: {sd[skey]}")
-            elif 'enc' in skey:
-                tmp = ['enc'] + skey.split('.')[2:]
-                tkey = '.'.join(tmp)
+            elif "enc" in skey:
+                tmp = ["enc"] + skey.split(".")[2:]
+                tkey = ".".join(tmp)
                 if tkey in state_dict and state_dict[tkey].shape == sd[skey].shape:
                     sd[skey] = state_dict[tkey]
                 elif verbose:
@@ -65,7 +66,9 @@ class ScalableEnc(EVC):
             elif verbose and skey not in state_dict:
                 print(f"NOT load {skey}, not find it in state_dict")
             elif verbose:
-                print(f"NOT load {skey}, this {sd[skey].shape}, load {state_dict[skey].shape}")
+                print(
+                    f"NOT load {skey}, this {sd[skey].shape}, load {state_dict[skey].shape}"
+                )
         super().load_state_dict(sd, **kwargs)
 
     def multi_encode(self, x, q_scale=None):
@@ -103,7 +106,8 @@ class ScalableEnc(EVC):
         params = self.y_prior_fusion(params)
         q_step, scales, means = self.separate_prior(params)
         y_res, y_q, y_hat, scales_hat = self.forward_dual_prior(
-            y, means, scales, q_step, self.y_spatial_prior)
+            y, means, scales, q_step, self.y_spatial_prior
+        )
 
         y_hat = y_hat * curr_q
         x_hat = self.dec(y_hat)
@@ -140,23 +144,25 @@ class ScalableEnc(EVC):
     def set_rate(self, rate):
         self.rate = rate
 
-    def encode_decode(self, x, q_scale, output_path=None, pic_width=None, pic_height=None):
+    def encode_decode(
+        self, x, q_scale, output_path=None, pic_width=None, pic_height=None
+    ):
         if output_path is None:
             result = {
-                'bit': None,
-                'x_hat': None,
+                "bit": None,
+                "x_hat": None,
             }
             chose_id = 0
             lmbda = self.lmbdas[self.rate]
             encoded = self.forward(x, q_scale)
-            mse, bpp = encoded['mse'], encoded['bpp']
+            mse, bpp = encoded["mse"], encoded["bpp"]
             cost = (lmbda * 255 * 255 * mse + bpp).flatten()
             if len(cost) == 1:
                 chose_id = 0
             else:
                 chose_id = cost.argmin()
-            result['bit'] = encoded['bit'][chose_id].item()
-            result['x_hat'] = encoded['x_hat'][chose_id].unsqueeze(0)
+            result["bit"] = encoded["bit"][chose_id].item()
+            result["x_hat"] = encoded["x_hat"][chose_id].unsqueeze(0)
             return result
         assert pic_height is not None
         assert pic_width is not None
@@ -167,22 +173,22 @@ class ScalableEnc(EVC):
         torch.cuda.synchronize()
         enc_time = time.time() - start_time
 
-        bit_stream = compressed['bit_stream']
+        bit_stream = compressed["bit_stream"]
         encode_i(pic_height, pic_width, q_index, bit_stream, output_path)
         bit = filesize(output_path) * 8
 
         height, width, q_index, bit_stream = decode_i(output_path)
         decompressed = self.decompress(bit_stream, height, width, q_index / 100)
 
-        x_hat = decompressed['x_hat']
-        dec_time = decompressed['dec_time']
+        x_hat = decompressed["x_hat"]
+        dec_time = decompressed["dec_time"]
 
         result = {
-            'bit': bit,
-            'x_hat': x_hat,
-            'enc_time': enc_time,
-            'dec_time': dec_time,
-            'latency': enc_time + dec_time,
+            "bit": bit,
+            "x_hat": x_hat,
+            "enc_time": enc_time,
+            "dec_time": dec_time,
+            "latency": enc_time + dec_time,
         }
         return result
 
@@ -219,7 +225,8 @@ class ScalableEnc(EVC):
         q_step, scales, means = self.separate_prior(params)
 
         y_res, y_q, y_hat, scales_hat = self.forward_dual_prior(
-            y, means, scales, q_step, self.y_spatial_prior)
+            y, means, scales, q_step, self.y_spatial_prior
+        )
 
         y_hat = y_hat * curr_q
         x_hat = self.dec(y_hat)
@@ -253,7 +260,8 @@ class ScalableEnc(EVC):
         q_step = q_step[chose_id].unsqueeze(0)
         z_hat = z_hat[chose_id].unsqueeze(0)
         y_q_w_0, y_q_w_1, scales_w_0, scales_w_1, y_hat = self.compress_dual_prior(
-            y, means, scales, q_step, self.y_spatial_prior)
+            y, means, scales, q_step, self.y_spatial_prior
+        )
 
         self.entropy_coder.reset()
         self.bit_estimator_z.encode(z_hat)
@@ -271,14 +279,18 @@ class ScalableEnc(EVC):
 
 
 class Scale_EVC_SS(ScalableEnc):
-    def __init__(self, N=192, anchor_num=4, ec_thread=False, enc_num=4, forward_enc_id=None):
+    def __init__(
+        self, N=192, anchor_num=4, ec_thread=False, enc_num=4, forward_enc_id=None
+    ):
         super().__init__(N, anchor_num, ec_thread, enc_num, forward_enc_id)
         channels = [64, 64, 128, 192]
         _, self.dec = get_enc_dec_models(3, 3, channels)
 
 
 class Scale_EVC_SL(ScalableEnc):
-    def __init__(self, N=192, anchor_num=4, ec_thread=False, enc_num=4, forward_enc_id=None):
+    def __init__(
+        self, N=192, anchor_num=4, ec_thread=False, enc_num=4, forward_enc_id=None
+    ):
         super().__init__(N, anchor_num, ec_thread, enc_num, forward_enc_id)
         channels = [192, 192, 192, 192]
         _, self.dec = get_enc_dec_models(3, 3, channels)

@@ -31,6 +31,7 @@ YCBCR_WEIGHTS = {
     "ITU-R_BT.709": (0.2126, 0.7152, 0.0722)
 }
 
+
 def rgb2yuv(rgb):
     r, g, b = np.split(rgb, 3, -3)
     Kr, Kg, Kb = YCBCR_WEIGHTS["ITU-R_BT.709"]
@@ -40,6 +41,7 @@ def rgb2yuv(rgb):
     ycbcr = np.concatenate([y, cb, cr], axis=-3)
     return ycbcr
 
+
 def yuv2rgb(yuv):
     y, cb, cr = np.split(yuv, 3, -3)
     Kr, Kg, Kb = YCBCR_WEIGHTS["ITU-R_BT.709"]
@@ -48,6 +50,7 @@ def yuv2rgb(yuv):
     g = (y - Kr * r - Kb * b) / Kg
     rgb = np.concatenate([r, g, b], axis=-3)
     return rgb
+
 
 def filesize(filepath: str) -> int:
     """Return file size in bits of `filepath`."""
@@ -68,6 +71,7 @@ def _compute_psnr(a, b, max_val: float = 255.0) -> float:
     psnr = 20 * np.log10(max_val) - 10 * np.log10(mse)
     return psnr
 
+
 def compute_metrics(
     a: Union[np.array, Image.Image],
     b: Union[np.array, Image.Image],
@@ -80,6 +84,7 @@ def compute_metrics(
     out["psnr"] = _compute_psnr(a, b, max_val)
     return out
 
+
 def run_command(cmd, ignore_returncodes=None):
     cmd = [str(c) for c in cmd]
     try:
@@ -91,9 +96,11 @@ def run_command(cmd, ignore_returncodes=None):
         print(err.output.decode("utf-8"))
         sys.exit(1)
 
+
 def _get_bpg_version(encoder_path):
     rv = run_command([encoder_path, "-h"], ignore_returncodes=[1])
     return rv.split()[4]
+
 
 class Codec(abc.ABC):
     """Abstract base class"""
@@ -140,6 +147,7 @@ class Codec(abc.ABC):
             return info, rec
         return info
 
+
 class BinaryCodec(Codec):
     """Call an external binary."""
 
@@ -185,6 +193,7 @@ class BinaryCodec(Codec):
 
     def _get_decode_cmd(self, out_filepath, rec_filepath):
         raise NotImplementedError()
+
 
 class BPG(BinaryCodec):
     """BPG from Fabrice Bellard."""
@@ -293,6 +302,7 @@ class BPG(BinaryCodec):
 
         return rec
 
+
 def get_vtm_encoder_path(build_dir):
     system = platform.system()
     try:
@@ -309,6 +319,7 @@ def get_vtm_decoder_path(build_dir):
         return os.path.join(build_dir, elfnames[system])
     except KeyError as err:
         raise RuntimeError(f'Unsupported platform "{system}"') from err
+
 
 class VTM(Codec):
     """VTM: VVC reference software"""
@@ -367,9 +378,9 @@ class VTM(Codec):
 
         if not self.rgb:
             # convert rgb content to YCbCr
-            rgb = arr.astype(np.float32) / (2 ** bitdepth - 1)
+            rgb = arr.astype(np.float32) / (2**bitdepth - 1)
             arr = np.clip(rgb2yuv(rgb), 0, 1)
-            arr = (arr * (2 ** bitdepth - 1)).astype(np.uint8)
+            arr = (arr * (2**bitdepth - 1)).astype(np.uint8)
 
         with open(yuv_path, "wb") as f:
             f.write(arr.tobytes())
@@ -463,9 +474,9 @@ class VTM(Codec):
 
         if not self.rgb:
             # convert rgb content to YCbCr
-            rgb = arr.astype(np.float32) / (2 ** bitdepth - 1)
+            rgb = arr.astype(np.float32) / (2**bitdepth - 1)
             arr = np.clip(rgb2yuv(rgb), 0, 1)
-            arr = (arr * (2 ** bitdepth - 1)).astype(np.uint8)
+            arr = (arr * (2**bitdepth - 1)).astype(np.uint8)
 
         with open(yuv_path, "wb") as f:
             f.write(arr.tobytes())
@@ -528,7 +539,7 @@ class VTM(Codec):
         rec_arr = np.fromfile(yuv_path, dtype=np.uint8)
         rec_arr = rec_arr.reshape(arr.shape)
 
-        rec_arr = rec_arr.astype(np.float32) / (2 ** bitdepth - 1)
+        rec_arr = rec_arr.astype(np.float32) / (2**bitdepth - 1)
         if not self.rgb:
             rec_arr = yuv2rgb(rec_arr)
         os.unlink(yuv_path)
