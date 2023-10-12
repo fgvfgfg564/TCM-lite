@@ -858,7 +858,7 @@ class TCM_vbr(CompressionModel):
             lmd_info = torch.from_numpy(lmd_info).cuda()
             lmd_info = torch.reshape(lmd_info, (b, 1)).cuda()
         else:
-            lmd_info = lmd * torch.ones((b, 1))
+            lmd_info = lmd.expand((b, 1))
             lmd_info = lmd_info.cuda()
 
         y = self.g_a(x)
@@ -938,7 +938,7 @@ class TCM_vbr(CompressionModel):
     def compress(self, x, lmd):
         b = x.size()[0]
 
-        lmd_info = lmd * torch.ones((b, 1))
+        lmd_info = lmd.expand((b, 1))
         lmd_info = lmd_info.cuda()
 
         y = self.g_a(x)
@@ -1069,3 +1069,14 @@ class TCM_vbr(CompressionModel):
         x_hat = self.g_s(y_hat).clamp_(0, 1)
 
         return {"x_hat": x_hat}
+
+    def load_state_dict(self, state_dict, verbose=True, **kwargs):
+        sd = self.state_dict()
+        for skey in sd:
+            if skey in state_dict and state_dict[skey].shape == sd[skey].shape:
+                sd[skey] = state_dict[skey]
+            elif verbose and skey not in state_dict:
+                print(f"NOT load {skey}, not find it in state_dict")
+            elif verbose:
+                print(f"NOT load {skey}, this {sd[skey].shape}, load {state_dict[skey].shape}")
+        super().load_state_dict(sd)

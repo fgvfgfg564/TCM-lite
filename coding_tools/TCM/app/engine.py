@@ -24,6 +24,7 @@ def get_state_dict(model_path, device):
     checkpoint = torch.load(model_path, map_location=device)
     for k, v in checkpoint["state_dict"].items():
         dictory[k.replace("module.", "")] = v
+    return dictory
 
 class ModelEngine(nn.Module):
     MODELS = {f"TCM_VBR_{i}": f"vcip_vbr{i}_best.pth.tar" for i in range(3)}
@@ -35,7 +36,7 @@ class ModelEngine(nn.Module):
         model_path, compiled_path = self.get_model_path(model_name)
 
         i_state_dict = get_state_dict(model_path, device='cuda')
-        i_frame_net = TCM_vbr(model_name[:6], ec_thread=True)
+        i_frame_net = TCM_vbr()
         i_frame_net.load_state_dict(i_state_dict, verbose=False)
         i_frame_net = i_frame_net.cuda()
         i_frame_net.eval()
@@ -59,13 +60,13 @@ class ModelEngine(nn.Module):
     
     def compress_block(self, img_block, q_scale):
         lmbda = self._q_scale_mapping(q_scale).to(img_block.device)
-        bit_stream_y, bit_stream_z = self.i_frame_net.compress(img_block, lmbda)['strings']
-        bit_stream = combine_bytes(bit_stream_y, bit_stream_z)
+        bit_stream_y, bit_stream_z = self.i_frame_net.compress(img_block, lmbda.half())['strings']
+        bit_stream = combine_bytes(bit_stream_y[0], bit_stream_z[0])
         return bit_stream
 
     def decompress_block(self, bit_stream, h, w, _):
         bit_stream_y, bit_stream_z = separate_bytes(bit_stream)
-        bit_stream = (bit_stream_y, bit_stream_z)
+        bit_stream = ([bit_stream_y], [bit_stream_z])
         recon_img = self.i_frame_net.decompress(bit_stream, [h // 64, w // 64])['x_hat']
         return recon_img
     
@@ -82,7 +83,7 @@ class ModelEngine(nn.Module):
         decoder_app = cls(model_name)
         torch.cuda.synchronize()
         dummy_input = torch.zeros([1, 3, BLOCK_SIZE, BLOCK_SIZE], device='cuda', dtype=torch.half)
-        decoder_app.i_frame_net(dummy_input, 0.5)
+        decoder_app.i_frame_net(dummy_input, decoder_app.lmbda_max)
         if compile:
             decoder_app.compile(compiled_path)
         return decoder_app
@@ -102,7 +103,7 @@ class ModelEngine(nn.Module):
         load_weights(decoder_app.i_frame_net, compiled_path)
 
         dummy_input = torch.zeros([1, 3, BLOCK_SIZE, BLOCK_SIZE], device='cuda', dtype=torch.half)
-        decoder_app.i_frame_net(dummy_input, 0.5)
+        decoder_app.i_frame_net(dummy_input, decoder_app.lmbda_max)
         return decoder_app
 
     @classmethod

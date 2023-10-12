@@ -12,7 +12,6 @@ def compile(model: torch.nn.Module, output_folder):
     model.eval()
     new_state_dict = {}
     for name, child in model.named_children():
-        print(name, hasattr(child, "tensorrt_compilable"), hasattr(child, "input_shape"), id(child))
         if hasattr(child, "tensorrt_compilable") and child.tensorrt_compilable and hasattr(child, "input_shape"):
             input_shape = child.input_shape
             print(f"Compiling module: {name} into TensorRT TorchScript; input_shape={input_shape}")
