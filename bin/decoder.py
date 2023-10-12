@@ -27,10 +27,13 @@ def main():
     engine = Engine()
 
     # Load bitstream
-    file_io: FileIO = FileIO.load(args.input, engine.ctu_size)
+    fd = open(args.input, 'rb')
+    bitstream = fd.read()
+    fd.close()
 
     # Decoding process; generate recon image
     time_start = time.time()
+    file_io: FileIO = FileIO.load(bitstream, engine.ctu_size)
     out_img = engine.decode(file_io) # Decoded image; shape=[3, H, W]
     torch.cuda.synchronize()
     time_end = time.time()

@@ -27,6 +27,7 @@ class ModelEngine(nn.Module):
     MODELS = {
         "EVC_LS": 'EVC_LS_MD.pth.tar',
         "EVC_LS_large": 'EVC_LS_large.pth.tar',
+        "EVC_LS_mid": 'EVC_LS_mid.pth.tar',
         "EVC_LM": 'EVC_LM_MD.pth.tar',
         "EVC_LL": 'EVC_LL.pth.tar',
         "EVC_LL_large": 'EVC_LL_large.pth.tar',

@@ -19,6 +19,7 @@ from .fileio import FileIO
 import EVC.src.utils.timer as timer
 
 SAFETY_BYTE_PER_CTU = 2
+W_TIME = 1
 
 np.seterr(all='raise')
 
@@ -176,11 +177,10 @@ class Engine:
                     self._maximal_bytes[idx, i, j] = num_bytes[-1]
 
                     try:
-                        b_e = interpolate.interp1d(num_bytes, sqes, kind='cubic')
+                        b_e = interpolate.interp1d(num_bytes, sqes, kind='linear')
                         # b_t = interpolate.interp1d(num_bytes, times, kind='linear')
-                        b_t_curve = np.polyfit(num_bytes, times, 1)
-                        b_t = lambda x: np.polyval(b_t_curve, x)
-                        b_q = interpolate.interp1d(num_bytes, qscales, kind='cubic')
+                        b_t = np.polyfit(num_bytes, times, 1)
+                        b_q = interpolate.interp1d(num_bytes, qscales, kind='linear')
                     except ValueError as e:
                         print(f"Interpolation error!")
                         print(f"num_bytes={num_bytes}")
@@ -210,14 +210,14 @@ class Engine:
                 precomputed_results = self._precomputed_curve[method_id][i][j]
 
                 ctu_sqe = precomputed_results['b_e'](target_bytes)
-                t = precomputed_results['b_t'](target_bytes)
+                t = np.polyval(precomputed_results['b_t'], target_bytes)
 
                 global_time += t
                 sqe += ctu_sqe
         
         sqe /= num_pixels * 3
         psnr = -10*np.log10(sqe)
-        return psnr - global_time - bpg_psnr, psnr, global_time
+        return psnr - W_TIME * global_time - bpg_psnr, psnr, global_time
     
     def _normal_noise_like(self, x, sigma):
         noise = np.random.normal(0, sigma, x.shape).astype(np.int32)
@@ -292,12 +292,14 @@ class Engine:
                 method_id = solution.method_ids[i, j]
                 target_bytes = solution.target_byteses[i, j]
 
-                min_tb = self._precomputed_curve[method_id][i][j]['min_t']
-                max_tb = self._precomputed_curve[method_id][i][j]['max_t']
+                curves = self._precomputed_curve[method_id][i][j]
 
-                est_time = self._precomputed_curve[method_id][i][j]['b_t'](target_bytes)
-                est_qscale  = self._precomputed_curve[method_id][i][j]['b_q'](target_bytes)
-                est_sqe  = self._precomputed_curve[method_id][i][j]['b_e'](target_bytes)
+                min_tb = curves['min_t']
+                max_tb = curves['max_t']
+
+                est_time = np.polyval(curves['b_t'], target_bytes)
+                est_qscale  = curves['b_q'](target_bytes)
+                est_sqe  = curves['b_e'](target_bytes)
 
                 print(f"- CTU [{i}, {j}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\tsquared_error={est_sqe:.6f}")
 
@@ -320,7 +322,10 @@ class Engine:
             method_ids = np.zeros([n_ctu_h, n_ctu_w], dtype=np.int32) + DEFAULT_METHOD
             target_byteses = default_target_bytes
             method = Solution(method_ids, target_byteses)
-            self._mutate(method, total_target_bytes)
+            self._mutate(method, 
+                         total_target_bytes, 
+                         method_mutate_p=0. if k==0 else 1.0,
+                         byte_mutate_sigma=0. if k==0 else 4096)
             method.score, method.psnr, method.time = self._search(img_blocks, num_pixels, method.method_ids, method.target_byteses, total_target_bytes, bpg_psnr)
             solutions.append(method)
         solutions.sort(key=lambda x:x.score, reverse=True)

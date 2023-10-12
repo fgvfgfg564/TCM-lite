@@ -15,6 +15,7 @@ total: (2 + 10*num_ctu) bytes
 import struct
 from typing import BinaryIO
 import numpy as np
+import io
 
 class FileIO:
     meta_str = 'HH'
@@ -64,30 +65,35 @@ class FileIO:
         return struct.unpack(format_str, s)
     
     @classmethod
-    def load(cls, filename: str, ctu_size: int):
-        with open(filename, "rb") as fd:
-            h, w = cls._read_with_format(cls.meta_str, fd)
-            io = cls(h, w, ctu_size)
-            
-            io.method_id = np.zeros([io.ctu_h, io.ctu_w], dtype=np.uint8)
-            io.q_scale = np.zeros([io.ctu_h, io.ctu_w], dtype=np.float32)
-            num_bytes = np.zeros([io.ctu_h, io.ctu_w], dtype=np.uint32)
-
-            # read CTU header
-            for i in range(io.ctu_h):
-                for j in range(io.ctu_w):
-                    _method_id, _num_bytes, _q_scale = cls._read_with_format(cls.ctu_str, fd)
-                    io.method_id[i, j] = _method_id
-                    io.q_scale[i, j] = _q_scale
-                    num_bytes[i, j] = _num_bytes
-
-            # read CTU bytes
-            io.bitstreams = []
-            for i in range(io.ctu_h):
-                bitstream_tmp = []
-                for j in range(io.ctu_w):
-                    bits_ctu = fd.read(num_bytes[i, j])
-                    bitstream_tmp.append(bits_ctu)
-                io.bitstreams.append(bitstream_tmp)
+    def load(cls, source: str, ctu_size: int):
+        if isinstance(source, bytes):
+            fd = io.BytesIO(source)
+        else:
+            fd = open(source, "rb")
         
-        return io
+        h, w = cls._read_with_format(cls.meta_str, fd)
+        file_io = cls(h, w, ctu_size)
+        
+        file_io.method_id = np.zeros([file_io.ctu_h, file_io.ctu_w], dtype=np.uint8)
+        file_io.q_scale = np.zeros([file_io.ctu_h, file_io.ctu_w], dtype=np.float32)
+        num_bytes = np.zeros([file_io.ctu_h, file_io.ctu_w], dtype=np.uint32)
+
+        # read CTU header
+        for i in range(file_io.ctu_h):
+            for j in range(file_io.ctu_w):
+                _method_id, _num_bytes, _q_scale = cls._read_with_format(cls.ctu_str, fd)
+                file_io.method_id[i, j] = _method_id
+                file_io.q_scale[i, j] = _q_scale
+                num_bytes[i, j] = _num_bytes
+
+        # read CTU bytes
+        file_io.bitstreams = []
+        for i in range(file_io.ctu_h):
+            bitstream_tmp = []
+            for j in range(file_io.ctu_w):
+                bits_ctu = fd.read(num_bytes[i, j])
+                bitstream_tmp.append(bits_ctu)
+            file_io.bitstreams.append(bitstream_tmp)
+        
+        fd.close()
+        return file_io
