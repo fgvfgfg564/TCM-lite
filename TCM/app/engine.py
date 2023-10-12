@@ -12,32 +12,21 @@ import numpy as np
 from PIL import Image
 
 from ..models.tcm import TCM_vbr
-from ..src.utils.common import str2bool, interpolate_log, create_folder, dump_json
-from ..src.utils.stream_helper import get_padding_size, get_state_dict
-from ..src.utils.png_reader import PNGReader
-from ..src.utils.stream_helper import get_padding_size, get_state_dict
 
-from ..src.models.MLCodec_rans import RansEncoder, RansDecoder
-from ..src.utils.timer import Timer
-from ..src.tensorrt_support import *
+from .utils import *
+from ...utils.tensorrt_support import *
 
 BLOCK_SIZE = 512
 
+def get_state_dict(model_path, device):
+    dictory = {}
+    print("Loading", model_path)
+    checkpoint = torch.load(model_path, map_location=device)
+    for k, v in checkpoint["state_dict"].items():
+        dictory[k.replace("module.", "")] = v
+
 class ModelEngine(nn.Module):
-    MODELS = {
-        "EVC_LS": 'EVC_LS_MD.pth.tar',
-        "EVC_LS_large": 'EVC_LS_large.pth.tar',
-        "EVC_LS_mid": 'EVC_LS_mid.pth.tar',
-        "EVC_LM": 'EVC_LM_MD.pth.tar',
-        "EVC_LL": 'EVC_LL.pth.tar',
-        "EVC_LL_large": 'EVC_LL_large.pth.tar',
-        # "EVC_ML": 'EVC_ML_MD.pth.tar',
-        # "EVC_SL": 'EVC_SL_MD.pth.tar',
-        # "EVC_MM": 'EVC_MM_MD.pth.tar',
-        # "EVC_SS": 'EVC_SS_MD.pth.tar',
-        # "Scale_EVC_SL": 'Scale_EVC_SL_MDRRL.pth.tar',
-        # "Scale_EVC_SS": 'Scale_EVC_SS_MDRRL.pth.tar',
-    }
+    MODELS = {f"TCM_VBR_{i}": f"vcip_vbr{i}_best.pth.tar" for i in range(3)}
 
     def __init__(self, model_name) -> None:
         super().__init__()
@@ -45,42 +34,39 @@ class ModelEngine(nn.Module):
         # load model
         model_path, compiled_path = self.get_model_path(model_name)
 
-        i_state_dict = get_state_dict(model_path)
-        i_frame_net = build_model(model_name[:6], ec_thread=True)
+        i_state_dict = get_state_dict(model_path, device='cuda')
+        i_frame_net = TCM_vbr(model_name[:6], ec_thread=True)
         i_frame_net.load_state_dict(i_state_dict, verbose=False)
         i_frame_net = i_frame_net.cuda()
         i_frame_net.eval()
 
         i_frame_net.update(force=True)
         self.model_name = model_name
-        self.i_frame_net: image_model.EVC = i_frame_net.half()
-        self.q_scales = i_state_dict["q_scale"].half()
-        self.q_scale_min = self.q_scales[-1]
-        self.q_scale_max = self.q_scales[0]
+        self.i_frame_net = i_frame_net.half()
+        self.lmbda_min = torch.tensor(0.0025*np.exp(int(model_name[8])), dtype=torch.half, device='cuda')
+        self.lmbda_max = torch.tensor(0.0025*np.exp(int(model_name[8]) + 1), dtype=torch.half, device='cuda')
         self.cuda()
     
     def _q_scale_mapping(self, q_scale_0_1):
-        # 0 -> self.q_scale_min
-        # 1 -> self.q_scale_max
+        # 0 -> self.lmbda_max
+        # 1 -> self.lmbda_min
 
-        lg_min = np.log(self.q_scale_min)
-        lg_max = np.log(self.q_scale_max)
-        lg_qs = lg_min + q_scale_0_1 * (lg_max - lg_min)
-        qs = np.exp(lg_qs)
-
+        qs = self.lmbda_max + q_scale_0_1 * (self.lmbda_min - self.lmbda_max)
         return qs
     
     def compile(self, output_dir):
         compile(self.i_frame_net, output_dir)
     
     def compress_block(self, img_block, q_scale):
-        q_scale = self._q_scale_mapping(q_scale).to(img_block.device)
-        bit_stream = self.i_frame_net.compress(img_block, q_scale)['bit_stream']
+        lmbda = self._q_scale_mapping(q_scale).to(img_block.device)
+        bit_stream_y, bit_stream_z = self.i_frame_net.compress(img_block, lmbda)['strings']
+        bit_stream = combine_bytes(bit_stream_y, bit_stream_z)
         return bit_stream
 
-    def decompress_block(self, bit_stream, h, w, q_scale):
-        q_scale = self._q_scale_mapping(q_scale).cuda()
-        recon_img = self.i_frame_net.decompress(bit_stream, h, w, q_scale)['x_hat']
+    def decompress_block(self, bit_stream, h, w, _):
+        bit_stream_y, bit_stream_z = separate_bytes(bit_stream)
+        bit_stream = (bit_stream_y, bit_stream_z)
+        recon_img = self.i_frame_net.decompress(bit_stream, [h // 64, w // 64])['x_hat']
         return recon_img
     
     @classmethod
@@ -121,14 +107,13 @@ class ModelEngine(nn.Module):
 
     @classmethod
     def from_model_name(cls, model_name, ignore_tensorrt=False):
-        with Timer("Loading"):
-            model_path, compiled_path = cls.get_model_path(model_name)
-            if not ignore_tensorrt and os.path.isdir(compiled_path):
-                try:
-                    decoder_app = cls._load_from_compiled(model_name, compiled_path)
-                except FileNotFoundError:
-                    decoder_app = cls._load_from_weight(model_name, compiled_path, not ignore_tensorrt)
-            else:
+        model_path, compiled_path = cls.get_model_path(model_name)
+        if not ignore_tensorrt and os.path.isdir(compiled_path):
+            try:
+                decoder_app = cls._load_from_compiled(model_name, compiled_path)
+            except FileNotFoundError:
                 decoder_app = cls._load_from_weight(model_name, compiled_path, not ignore_tensorrt)
-            decoder_app.preheat()
+        else:
+            decoder_app = cls._load_from_weight(model_name, compiled_path, not ignore_tensorrt)
+        decoder_app.preheat()
         return decoder_app

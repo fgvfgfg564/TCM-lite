@@ -12,7 +12,8 @@ import random
 from scipy import interpolate
 import einops
 
-from EVC.bin.engine import ModelEngine
+from EVC.bin.engine import ModelEngine as EVCModelEngine
+from TCM.app.engine import ModelEngine as TCMModelEngine
 
 from .utils import get_bpg_result, is_strictly_increasing
 from .fileio import FileIO
@@ -69,14 +70,22 @@ class Engine:
         self.methods = []
         idx = 0
 
-        # EVC models
-        for model_name in ModelEngine.MODELS.keys():
-            self.methods.append((ModelEngine.from_model_name(model_name), model_name, idx))
-            idx += 1
+        self._load_models()
         
         self.num_qscale_samples = num_qscale_samples
         self.qscale_samples = np.linspace(0, 1, num_qscale_samples, dtype=np.float32)[::-1]
     
+    def _load_models(self):
+        # EVC models
+        for model_name in EVCModelEngine.MODELS.keys():
+            self.methods.append((EVCModelEngine.from_model_name(model_name), model_name, idx))
+            idx += 1
+        
+        # TCM models
+        for model_name in TCMModelEngine.MODELS.keys():
+            self.methods.append((TCMModelEngine.from_model_name(model_name), model_name, idx))
+            idx += 1
+
     def _compress_with_target(self, method, image_block, target_bytes):
         min_qs = float(1e-5)
         max_qs = float(1.)
