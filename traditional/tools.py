@@ -1,6 +1,7 @@
 from traditional.tool_base import TraditionalCodingToolBase, PSNR
 import os
 import io
+import math
 import torch
 import numpy as np
 from tempfile import mkstemp
@@ -19,9 +20,9 @@ class VTMTool(TraditionalCodingToolBase):
         self.config_path = "../third_party/VVCSoftware_VTM/cfg/encoder_intra_vtm.cfg"
 
     def compress_block(self, img_block: torch.Tensor, q_scale: float) -> bytes:
-        if not 0 <= q_scale <= 63:
+        q_scale = math.ceil(q_scale * 63)
+        if not 0. <= q_scale <= 63.:
             raise ValueError(f"Invalid quality value: {q_scale} (0,63)")
-
         bitdepth = 8
         arr = np.asarray(transforms.ToPILImage()(img_block.squeeze(0)))
         fd, yuv_path = mkstemp(suffix=".yuv")
@@ -96,6 +97,9 @@ class WebPTool(TraditionalCodingToolBase):
         self.fmt = "webp"
 
     def compress_block(self, img_block: torch.Tensor, q_scale: float) -> bytes:
+        q_scale = 100 * (1 - q_scale)
+        if not 0. <= q_scale <= 100.:
+            raise ValueError(f"Invalid quality value: {q_scale} (0,100)")
         img = transforms.ToPILImage()(img_block.squeeze(0))
         # Encode
         tmp = io.BytesIO()
@@ -119,14 +123,15 @@ class WebPTool(TraditionalCodingToolBase):
         return rec
 
 if __name__ == "__main__":
+    quality = 0.95
     img_block = Image.open('/home/ubuntu/PycharmProjects/DataSet/temp/ZR0_0613_0721363630_582EBY_N0301172ZCAM03485_1100LMJ01.png').convert('RGB')
     img_block = transforms.ToTensor()(img_block)
     img_block = img_block.unsqueeze(0)
     h, w = img_block.size(2), img_block.size(3)
-    codec = WebPTool()
-    bit_stream = codec.compress_block(img_block, 35)
+    codec = VTMTool()
+    bit_stream = codec.compress_block(img_block, quality)
     bpp = len(bit_stream) * 8 / (h * w)
     print(bpp)
-    rec = codec.decompress_block(bit_stream, h, w, 35)
+    rec = codec.decompress_block(bit_stream, h, w, quality)
     psnr = PSNR(img_block, rec)
     print(psnr)
