@@ -146,3 +146,5 @@ launch.json
 images/
 
 *tfevents*
+plt.ipynb
+output/
