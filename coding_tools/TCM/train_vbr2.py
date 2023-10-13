@@ -217,7 +217,7 @@ def parse_args(argv):
         "--batch_size",
         "-bs",
         type=int,
-        default=1,
+        default=4,
         help="Batch size (default: %(default)s)",
     )
     parser.add_argument(
@@ -230,7 +230,7 @@ def parse_args(argv):
         "--patch_size",
         type=int,
         nargs=2,
-        default=(512, 512),
+        default=(256, 256),
         help="Size of the patches to be cropped (default: %(default)s)",
     )
     parser.add_argument(

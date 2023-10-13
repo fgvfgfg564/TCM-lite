@@ -9,6 +9,7 @@ import tqdm
 import copy
 import math
 import random
+import json
 from scipy import interpolate
 import einops
 
@@ -38,8 +39,9 @@ def get_padding_size(height, width, p=768):
 
 
 class Solution:
-    def __init__(self, method_ids, target_byteses) -> None:
-        self.method_ids = method_ids
+    def __init__(self, method_weight, target_byteses) -> None:
+        self.method_weight = method_weight  # ctu_h, ctu_w, n_method
+        self.method_ids = np.argmax(method_weight, 2)
         self.target_byteses = target_byteses
         self.n_ctu_h, self.n_ctu_w = self.method_ids.shape
 
@@ -74,30 +76,33 @@ class Engine:
     }
 
     def __init__(
-        self, ctu_size=512, num_qscale_samples=50, tool_groups=TOOL_GROUPS.keys()
+        self, ctu_size=512, num_qscale_samples=20, tool_groups=TOOL_GROUPS.keys(), tool_filter=None, save_statistic=False,
     ) -> None:
         self.ctu_size = ctu_size
         self.methods = []
 
-        self._load_models(tool_groups)
+        self._load_models(tool_groups, tool_filter)
 
         self.num_qscale_samples = num_qscale_samples
         self.qscale_samples = np.linspace(0, 1, num_qscale_samples, dtype=np.float32)[
             ::-1
         ]
 
-    def _load_models(self, valid_groups):
+        self.save_statistic = save_statistic
+
+    def _load_models(self, valid_groups, tool_filter):
         idx = 0
         # Load models
         for group_name in valid_groups:
             engine_cls = self.TOOL_GROUPS[group_name]
             print("Loading tool group:", group_name)
             for model_name in engine_cls.MODELS.keys():
-                print("Loading model:", model_name)
-                self.methods.append(
-                    (engine_cls.from_model_name(model_name), model_name, idx)
-                )
-                idx += 1
+                if not tool_filter or model_name in tool_filter:
+                    print("Loading model:", model_name)
+                    self.methods.append(
+                        (engine_cls.from_model_name(model_name), model_name, idx)
+                    )
+                    idx += 1
 
     def _compress_with_target(self, method, image_block, target_bytes):
         min_qs = float(1e-5)
@@ -255,23 +260,21 @@ class Engine:
         noise = np.random.normal(0, sigma, x.shape).astype(np.int32)
         return noise
 
-    def _hybrid(self, header1, header2, total_target_bytes):
-        size = header1.method_ids.shape
-
+    def _hybrid(self, header1: Solution, header2: Solution, total_target_bytes):
         # Mutate methods used
-        mutate_method = np.random.choice([0, 1], size)
-        new_method_ids = np.select(
+        mutate_method = np.random.choice([0, 1], header1.method_weight.shape)
+        new_method_weight = np.select(
             [mutate_method == 0, mutate_method == 1],
-            [header1.method_ids, header2.method_ids],
+            [header1.method_weight, header2.method_weight],
         )
 
         # Mutate target byterates
-        mutate_target = np.random.choice([0, 1], size)
+        mutate_target = np.random.choice([0, 1], header1.target_byteses.shape)
         new_target = np.select(
             [mutate_target == 0, mutate_target == 1],
             [header1.target_byteses, header2.target_byteses],
         )
-        new_header = Solution(new_method_ids, new_target)
+        new_header = Solution(new_method_weight, new_target)
         new_header.normalize_target_byteses(
             self._minimal_bytes, self._maximal_bytes, total_target_bytes
         )
@@ -282,32 +285,24 @@ class Engine:
         self,
         header: Solution,
         total_target_bytes,
-        method_mutate_p=0.02,
+        method_mutate_sigma=0.25,
         byte_mutate_sigma=512,
         inplace=True,
     ):
-        n_ctu_h, n_ctu_w = header.method_ids.shape
-        n_ctus = n_ctu_h * n_ctu_w
-
-        max_method_id = len(self.methods) - 1
         if not inplace:
             header = copy.copy(header)
 
         # Mutate methods used
-        size = header.method_ids.shape
-        mutate_method = np.random.choice(
-            [0, 1], size, True, [1 - method_mutate_p, method_mutate_p]
-        )
-        random_header = np.random.random_integers(0, max_method_id, size)
-        header.method_ids = np.select(
-            [mutate_method == 0, mutate_method == 1], [header.method_ids, random_header]
-        )
+        old_weight = header.method_weight
+        mutate_method = self._normal_noise_like(old_weight, method_mutate_sigma)
+        new_weight = old_weight + mutate_method
 
         # Mutate target byterates
         old_target = header.target_byteses
         byterate_noise = self._normal_noise_like(old_target, byte_mutate_sigma)
         new_target = old_target + byterate_noise
-        header.target_byteses = new_target
+
+        header.__init__(new_weight, new_target)
 
         header.normalize_target_byteses(
             self._minimal_bytes, self._maximal_bytes, total_target_bytes
@@ -368,10 +363,12 @@ class Engine:
         total_target_bytes,
         bpg_psnr,
         N=10000,
-        num_generation=10000,
-        survive_rate=0.05,
+        num_generation=1000,
+        survive_rate=0.02,
+        breed_rate=0.1,
     ):
         n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
+        n_method = len(self.methods)
         n_ctus = n_ctu_h * n_ctu_w
 
         DEFAULT_METHOD = 0
@@ -388,15 +385,10 @@ class Engine:
         solutions = []
         for k in (pbar := tqdm.tqdm(range(N))):
             pbar.set_description(f"Generate initial solutions")
-            method_ids = np.zeros([n_ctu_h, n_ctu_w], dtype=np.int32) + DEFAULT_METHOD
+            method_weights = np.random.normal(0, 1, [n_ctu_h, n_ctu_w, n_method])
             target_byteses = default_target_bytes
-            method = Solution(method_ids, target_byteses)
-            self._mutate(
-                method,
-                total_target_bytes,
-                method_mutate_p=0.0 if k == 0 else 1.0,
-                byte_mutate_sigma=0.0 if k == 0 else 4096,
-            )
+            method = Solution(method_weights, target_byteses)
+            method.normalize_target_byteses(self._minimal_bytes, self._maximal_bytes, total_target_bytes)
             method.score, method.psnr, method.time = self._search(
                 img_blocks,
                 num_pixels,
@@ -412,17 +404,25 @@ class Engine:
         best_psnr = solutions[0].psnr
         best_time = solutions[0].time
 
-        num_alive = int(math.floor(N * survive_rate))
-
         for k in range(num_generation):
             # show best solution on generation
             best_solution: Solution = solutions[0]
+            self.gen_psnr.append(best_psnr)
+            self.gen_score.append(max_score)
+            self.gen_time.append(best_time)
 
             print(f"Best Solution before Gen.{k}:")
             self._show_solution(best_solution, total_target_bytes)
             print(flush=True)
 
-            # Kill last solutions
+            G = num_generation
+            R = (G + 2*np.sqrt(k)) / (3*G)
+
+            num_alive = int(math.floor(N * R * survive_rate))
+            num_breed = int(math.floor(N * R * breed_rate))
+
+            # Elitism strategy
+            breedable = solutions[:num_breed]
             solutions = solutions[:num_alive]
 
             # Hybrid
@@ -430,10 +430,10 @@ class Engine:
                 pbar.set_description(
                     f"Calculating score for generation {k+1}; max_score={max_score:.3f}; best_psnr={best_psnr:.3f}; best_time={best_time:.3f}"
                 )
-                parent_id1 = random.randint(0, num_alive - 1)
-                parent_id2 = random.randint(0, num_alive - 1)
+                parent_id1 = random.randint(0, num_breed - 1)
+                parent_id2 = random.randint(0, num_breed - 1)
                 newborn = self._hybrid(
-                    solutions[parent_id1], solutions[parent_id2], total_target_bytes
+                    breedable[parent_id1], breedable[parent_id2], total_target_bytes
                 )
                 self._mutate(newborn, total_target_bytes)
                 newborn.score, newborn.psnr, newborn.time = self._search(
@@ -449,7 +449,8 @@ class Engine:
                     max_score = newborn.score
                     best_time = newborn.time
                     best_psnr = newborn.psnr
-                solutions.sort(key=lambda x: x.score, reverse=True)
+
+            solutions.sort(key=lambda x: x.score, reverse=True)
 
         # Calculate q_scale and bitstream for CTUs
         bitstreams = []
@@ -501,11 +502,16 @@ class Engine:
         )
         return pic_height, pic_width, x_padded
 
-    def encode(self, input_pth, output_pth, num_generation):
+    def encode(self, input_pth, output_pth, N, num_generation):
         input_img = self.read_img(input_pth)
         h, w, padded_img = self.pad_img(input_img)
 
         file_io = FileIO(h, w, self.ctu_size)
+
+        # statistics
+        self.gen_score = []
+        self.gen_psnr = []
+        self.gen_time = []
 
         total_target_bytes, bpg_psnr = get_bpg_result(input_pth)
         target_bpp = total_target_bytes * 8 / h / w
@@ -533,11 +539,24 @@ class Engine:
             total_target_bytes,
             bpg_psnr,
             num_generation=num_generation,
+            N=N,
         )
         file_io.method_id = method_ids
         file_io.bitstreams = bitstreams
         file_io.q_scale = q_scales
         file_io.dump(output_pth)
+
+        if self.save_statistic:
+            output_folder = os.path.split(output_pth)[0]
+            statistics_f = os.path.join(output_folder, "data.json")
+            data = {
+                "gen_score": self.gen_score,
+                "gen_psnr": self.gen_psnr,
+                "gen_time": self.gen_time,
+            }
+            with open(statistics_f, "w") as fd:
+                json.dump(data, fd)
+
 
     def decode(self, file_io):
         decoded_ctus = []

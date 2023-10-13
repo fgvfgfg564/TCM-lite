@@ -18,6 +18,15 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--input", type=str, required=True)
     parser.add_argument("-o", "--output", type=str, required=True)
+    parser.add_argument(
+        "--tools", nargs="+", type=str, default=Engine.TOOL_GROUPS.keys()
+    )
+    parser.add_argument(
+        "--tool_filter", nargs="+", type=str, default=None
+    )
+    parser.add_argument(
+        "--save_statistic", action='store_true'
+    )
 
     args = parser.parse_args()
     return args
@@ -27,7 +36,7 @@ def main():
     torch.backends.cudnn.enabled = True
     args = parse_args()
 
-    engine = Engine()
+    engine = Engine(tool_groups=args.tools, tool_filter=args.tool_filter, save_statistic=args.save_statistic)
 
     # Load bitstream
     fd = open(args.input, "rb")
