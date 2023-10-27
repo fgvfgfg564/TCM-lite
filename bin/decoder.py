@@ -16,9 +16,7 @@ def parse_args():
     parser.add_argument(
         "--tools", nargs="+", type=str, default=Engine.TOOL_GROUPS.keys()
     )
-    parser.add_argument(
-        "--tool_filter", nargs="+", type=str, default=None
-    )
+    parser.add_argument("--tool_filter", nargs="+", type=str, default=None)
 
     args = parser.parse_args()
     return args

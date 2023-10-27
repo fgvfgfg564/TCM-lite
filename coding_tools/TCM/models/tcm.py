@@ -295,7 +295,7 @@ class Block(nn.Module):
         return x
 
 
-class ConvTransBlock(nn.Module): 
+class ConvTransBlock(nn.Module):
     def __init__(self, conv_dim, trans_dim, head_dim, window_size, drop_path, type="W"):
         """SwinTransformer and Conv Block"""
         super(ConvTransBlock, self).__init__()
@@ -1361,6 +1361,7 @@ class TCM_vbr(CompressionModel):
                 )
         super().load_state_dict(sd)
 
+
 class LowerBound(torch.autograd.Function):
     @staticmethod
     def forward(ctx, inputs, bound):
@@ -1377,9 +1378,29 @@ class LowerBound(torch.autograd.Function):
         pass_through = pass_through_1 | pass_through_2
         return pass_through.type(grad_output.dtype) * grad_output, None
 
+
 class TCM_vbr2(TCM):
-    def __init__(self, config=[2, 2, 2, 2, 2, 2], head_dim=[8, 16, 32, 32, 16, 8], drop_path_rate=0, N=128, M=320, num_slices=5, max_support_slices=5, **kwargs):
-        super().__init__(config, head_dim, drop_path_rate, N, M, num_slices, max_support_slices, **kwargs)
+    def __init__(
+        self,
+        config=[2, 2, 2, 2, 2, 2],
+        head_dim=[8, 16, 32, 32, 16, 8],
+        drop_path_rate=0,
+        N=128,
+        M=320,
+        num_slices=5,
+        max_support_slices=5,
+        **kwargs,
+    ):
+        super().__init__(
+            config,
+            head_dim,
+            drop_path_rate,
+            N,
+            M,
+            num_slices,
+            max_support_slices,
+            **kwargs,
+        )
 
         self.q_basic = nn.Parameter(torch.ones((1, M, 1, 1)))
         self.q_scale = nn.Parameter(torch.ones((4, 1, 1, 1)))
@@ -1388,7 +1409,7 @@ class TCM_vbr2(TCM):
     def get_curr_q(q_scale, q_basic):
         q_basic = LowerBound.apply(q_basic, 0.5)
         return q_basic * q_scale
-    
+
     def forward(self, x, q_scale):
         curr_q = self.get_curr_q(q_scale, self.q_basic)
         y = self.g_a(x)
@@ -1518,7 +1539,6 @@ class TCM_vbr2(TCM):
         y_strings.append(y_string)
 
         return {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
-
 
     def decompress(self, strings, shape, q_scale):
         curr_q = self.get_curr_q(q_scale, self.q_basic)

@@ -54,7 +54,7 @@ class ModelEngine(CodingToolBase):
 
         i_frame_net.update(force=True)
         self.i_frame_net = i_frame_net.to(dtype)
-        
+
         if model_name in self.MODELS1:
             self.q_scale_min = torch.tensor(
                 0.0025 * np.exp(int(model_name[10]) + 1), dtype=dtype, device="cuda"
@@ -67,12 +67,12 @@ class ModelEngine(CodingToolBase):
             self.q_scale_min = self.q_scales[-1]
             self.q_scale_max = self.q_scales[0]
         self.cuda()
-    
+
     def compress_block(self, img_block, q_scale):
         q_scale = self._q_scale_mapping(q_scale).to(img_block.device)
-        bit_stream_y, bit_stream_z = self.i_frame_net.compress(img_block, q_scale.to(self.dtype))[
-            "strings"
-        ]
+        bit_stream_y, bit_stream_z = self.i_frame_net.compress(
+            img_block, q_scale.to(self.dtype)
+        )["strings"]
         bit_stream = combine_bytes(bit_stream_y[0], bit_stream_z[0])
         return bit_stream
 
@@ -80,7 +80,9 @@ class ModelEngine(CodingToolBase):
         q_scale = self._q_scale_mapping(q_scale).cuda()
         bit_stream_y, bit_stream_z = separate_bytes(bit_stream)
         bit_stream = ([bit_stream_y], [bit_stream_z])
-        recon_img = self.i_frame_net.decompress(bit_stream, [h // 64, w // 64], q_scale)["x_hat"]
+        recon_img = self.i_frame_net.decompress(
+            bit_stream, [h // 64, w // 64], q_scale
+        )["x_hat"]
         return recon_img
 
     @classmethod

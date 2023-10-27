@@ -6,6 +6,7 @@ from ...coding_tool import CodingToolBase
 from ..src.models import build_model, image_model
 from ..src.utils.stream_helper import get_state_dict
 
+
 class ModelEngine(CodingToolBase):
     MODELS = {
         "EVC_LS": "EVC_LS_MD.pth.tar",

@@ -4,14 +4,14 @@ import numpy as np
 import json
 
 folder = os.path.split(__file__)[0]
-fdata = os.path.join(folder, 'results.json')
+fdata = os.path.join(folder, "results.json")
 
-with open(fdata, 'r') as f:
+with open(fdata, "r") as f:
     data = json.load(f)
 
-score = data['gen_score']
-psnr = data['gen_psnr']
-time = data['gen_time']
+score = data["gen_score"]
+psnr = data["gen_psnr"]
+time = data["gen_time"]
 n_gen = len(score)
 
 plt.plot(np.arange(n_gen), score)

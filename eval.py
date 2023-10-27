@@ -137,7 +137,11 @@ def main(argv):
                     out_enc = net.compress(x_padded)
                 t = time.time()
                 if args.vbr:
-                    out_dec = net.decompress(out_enc["strings"], out_enc["shape"], torch.tensor(args.lmbda, device="cuda"))
+                    out_dec = net.decompress(
+                        out_enc["strings"],
+                        out_enc["shape"],
+                        torch.tensor(args.lmbda, device="cuda"),
+                    )
                 else:
                     out_dec = net.decompress(out_enc["strings"], out_enc["shape"])
                 if args.cuda:

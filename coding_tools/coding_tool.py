@@ -85,7 +85,9 @@ class CodingToolBase(nn.Module):
             model_path, compiled_path = cls.get_model_path(model_name)
             if not ignore_tensorrt and os.path.isdir(compiled_path):
                 try:
-                    decoder_app = cls._load_from_compiled(model_name, compiled_path, dtype)
+                    decoder_app = cls._load_from_compiled(
+                        model_name, compiled_path, dtype
+                    )
                 except FileNotFoundError:
                     decoder_app = cls._load_from_weight(
                         model_name, compiled_path, dtype, not ignore_tensorrt
