@@ -16,6 +16,7 @@ from compressai.datasets import ImageFolder
 from models import TCM_vbr2
 from torch.utils.tensorboard import SummaryWriter
 import os
+from datetime import datetime
 
 from dataset import VCIP_Training, VCIP_Validation
 
@@ -266,6 +267,7 @@ def main(argv):
     type = args.type
     save_path = os.path.join(args.save_path)
     tb_path = os.path.join(save_path, "tensorboard/")
+    cmd_path = os.path.join(save_path, "cmd.log")
     if not os.path.exists(save_path):
         os.makedirs(save_path)
         os.makedirs(tb_path)
@@ -274,6 +276,12 @@ def main(argv):
         np.random.seed(args.seed)
         random.seed(args.seed)
     writer = SummaryWriter(tb_path)
+
+    # Save execution command
+    with open(cmd_path, "a") as f:
+        dd = datetime.now()
+        dd.strftime(r"%Y/%M/%d %H:%M:%S")
+        print(f"[{dd}]", " ".join(sys.argv), file=f)
 
     train_dataset = VCIP_Training(patch_size=args.patch_size)
     test_dataset = VCIP_Validation(patch_size=args.patch_size)

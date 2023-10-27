@@ -1,4 +1,4 @@
-from traditional.tool_base import TraditionalCodingToolBase, PSNR
+from coding_tools.traditional.tool_base import TraditionalCodingToolBase, PSNR
 import os
 import io
 import math
@@ -6,7 +6,9 @@ import torch
 import numpy as np
 from tempfile import mkstemp
 from torchvision import transforms
-from TCM.models import rgb2yuv, yuv2rgb, run_command
+from coding_tools.TCM.models import rgb2yuv, yuv2rgb, run_command
+from coding_tools.utils.timer import Timer
+import time
 
 from PIL import Image
 
@@ -114,31 +116,36 @@ class WebPTool(TraditionalCodingToolBase):
     def decompress_block(
         self, bit_stream: bytes, h: int, w: int, q_scale: float
     ) -> torch.Tensor:
-        fd, webp_path = mkstemp("." + self.fmt)
-        with open(webp_path, "wb") as f:
-            f.write(bit_stream)
+        with Timer("bytesio"):
+            image_bytes = io.BytesIO(bit_stream)
         # Decode
-        rec_img = Image.open(webp_path)
-        rec_img.load()
-        rec = transforms.ToTensor()(rec_img).unsqueeze(0)
-        os.close(fd)
-        os.unlink(webp_path)
+        with Timer("open"):
+            rec_img = Image.open(image_bytes, formats=(self.fmt,))
+        with Timer("load"):
+            rec_img.load()
+        with Timer("totensor"):
+            rec = transforms.ToTensor()(rec_img).unsqueeze(0)
 
         return rec
 
 
 if __name__ == "__main__":
-    quality = 0.95
+    quality = 0.5
     img_block = Image.open(
-        "/home/ubuntu/PycharmProjects/DataSet/temp/ZR0_0613_0721363630_582EBY_N0301172ZCAM03485_1100LMJ01.png"
+        "/backup1/xyhang/dataset/NIC_Dataset/test/ClassA_6K/DOG_4507.png"
     ).convert("RGB")
     img_block = transforms.ToTensor()(img_block)
     img_block = img_block.unsqueeze(0)
     h, w = img_block.size(2), img_block.size(3)
-    codec = VTMTool()
+    codec = WebPTool()
     bit_stream = codec.compress_block(img_block, quality)
     bpp = len(bit_stream) * 8 / (h * w)
     print(bpp)
+
+    time0 = time.time()
     rec = codec.decompress_block(bit_stream, h, w, quality)
+    time1 = time.time()
     psnr = PSNR(img_block, rec)
-    print(psnr)
+    print("PSNR", psnr)
+    dec_time = time1 - time0
+    print("Dec time:", dec_time)

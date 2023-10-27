@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torchvision import transforms
-from coding_tools.TCM.models import TCM, TCM_vbr
+from coding_tools.TCM.models import TCM, TCM_vbr, TCM_vbr2
 import warnings
 import torch
 import os
@@ -82,13 +82,14 @@ def main(argv):
     for file in os.listdir(path):
         if file[-3:] in ["jpg", "png", "peg"]:
             img_list.append(file)
+    img_list.sort()
     if args.cuda:
         device = "cuda:0"
     else:
         device = "cpu"
     load_time_start = time.time()
     if args.vbr:
-        net = TCM_vbr()
+        net = TCM_vbr2()
     else:
         net = TCM(
             config=[2, 2, 2, 2, 2, 2],
@@ -135,7 +136,10 @@ def main(argv):
                 else:
                     out_enc = net.compress(x_padded)
                 t = time.time()
-                out_dec = net.decompress(out_enc["strings"], out_enc["shape"])
+                if args.vbr:
+                    out_dec = net.decompress(out_enc["strings"], out_enc["shape"], torch.tensor(args.lmbda, device="cuda"))
+                else:
+                    out_dec = net.decompress(out_enc["strings"], out_enc["shape"])
                 if args.cuda:
                     torch.cuda.synchronize()
                 e = time.time()
@@ -148,6 +152,7 @@ def main(argv):
                     f'Bitrate: {(sum(len(s[0]) for s in out_enc["strings"]) * 8.0 / num_pixels):.3f}bpp'
                 )
                 mse = torch.mean((x - out_dec["x_hat"]) ** 2).item()
+                print(f"Filename: {img_name}")
                 print(f"MSE: {mse:.2f}dB")
                 print(f'MS-SSIM: {compute_msssim(x, out_dec["x_hat"]):.2f}dB')
                 print(f'PSNR: {compute_psnr(x, out_dec["x_hat"]):.2f}dB')

@@ -295,7 +295,7 @@ class Block(nn.Module):
         return x
 
 
-class ConvTransBlock(nn.Module):
+class ConvTransBlock(nn.Module): 
     def __init__(self, conv_dim, trans_dim, head_dim, window_size, drop_path, type="W"):
         """SwinTransformer and Conv Block"""
         super(ConvTransBlock, self).__init__()
@@ -1295,7 +1295,7 @@ class TCM_vbr(CompressionModel):
         # Using the complementary error function maximizes numerical precision.
         return half * torch.erfc(const * inputs)
 
-    def decompress(self, strings, shape):
+    def decompress(self, strings, shape, _):
         z_hat = self.entropy_bottleneck.decompress(strings[1], shape)
         latent_scales = self.h_scale_s(z_hat)
         latent_means = self.h_mean_s(z_hat)
@@ -1454,7 +1454,7 @@ class TCM_vbr2(TCM):
     def compress(self, x, q_scale):
         curr_q = self.get_curr_q(q_scale, self.q_basic)
         y = self.g_a(x)
-        y = y * curr_q
+        y = y / curr_q
         y_shape = y.shape[2:]
 
         z = self.h_a(y)

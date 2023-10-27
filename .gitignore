@@ -2,8 +2,6 @@
 __pycache__/
 *.py[cod]
 *$py.class
-run.sh
-
 # C extensions
 *.so
 
@@ -132,7 +130,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
-./run.sh
 
 testcode/
 *.pth.tar
@@ -148,3 +145,6 @@ images/
 *tfevents*
 plt.ipynb
 output/
+
+*.bin
+*.png

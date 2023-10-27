@@ -4,7 +4,7 @@ import numpy as np
 import json
 
 folder = os.path.split(__file__)[0]
-fdata = os.path.join(folder, 'data.json')
+fdata = os.path.join(folder, 'results.json')
 
 with open(fdata, 'r') as f:
     data = json.load(f)

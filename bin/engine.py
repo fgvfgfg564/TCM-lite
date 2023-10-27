@@ -13,15 +13,15 @@ import json
 from scipy import interpolate
 import einops
 
+from coding_tools.coding_tool import CodingToolBase
 from coding_tools.EVC.bin.engine import ModelEngine as EVCModelEngine
 from coding_tools.TCM.app.engine import ModelEngine as TCMModelEngine
 import coding_tools.utils.timer as timer
 
-from .utils import get_bpg_result, is_strictly_increasing
+from .utils import *
 from .fileio import FileIO
 
 SAFETY_BYTE_PER_CTU = 2
-W_TIME = 1
 
 np.seterr(all="raise")
 
@@ -39,9 +39,9 @@ def get_padding_size(height, width, p=768):
 
 
 class Solution:
-    def __init__(self, method_weight, target_byteses) -> None:
-        self.method_weight = method_weight  # ctu_h, ctu_w, n_method
-        self.method_ids = np.argmax(method_weight, 2)
+    def __init__(self, method_score: np.ndarray, target_byteses: np.ndarray) -> None:
+        self.method_score = method_score  # ctu_h, ctu_w, n_method
+        self.method_ids = np.argmax(method_score, axis=0)
         self.target_byteses = target_byteses
         self.n_ctu_h, self.n_ctu_w = self.method_ids.shape
 
@@ -76,10 +76,22 @@ class Engine:
     }
 
     def __init__(
-        self, ctu_size=512, num_qscale_samples=20, tool_groups=TOOL_GROUPS.keys(), tool_filter=None, save_statistic=False,
+        self, ctu_size=512, num_qscale_samples=20, tool_groups=TOOL_GROUPS.keys(), tool_filter=None, save_statistic=False, ignore_tensorrt=False, survive_rate=0.1, breed_rate=0.5, boltzmann_k=0.05, no_allocation=False, method_sigma=0.2, bytes_sigma=32, dtype=torch.half
     ) -> None:
         self.ctu_size = ctu_size
         self.methods = []
+        self.ignore_tensorrt = ignore_tensorrt
+        self.save_statistic = save_statistic
+        self.survive_rate = survive_rate
+        self.breed_rate = breed_rate
+        self.boltzmann_k = boltzmann_k
+        self.no_allocation = no_allocation
+        self.methods_sigma = method_sigma
+        self.bytes_sigma = bytes_sigma
+
+        if not ignore_tensorrt and dtype is torch.float32:
+            raise ValueError("TensorRT supports float16 only.")
+        self.dtype = dtype
 
         self._load_models(tool_groups, tool_filter)
 
@@ -88,7 +100,7 @@ class Engine:
             ::-1
         ]
 
-        self.save_statistic = save_statistic
+        self.cached_blocks = None
 
     def _load_models(self, valid_groups, tool_filter):
         idx = 0
@@ -100,14 +112,16 @@ class Engine:
                 if not tool_filter or model_name in tool_filter:
                     print("Loading model:", model_name)
                     self.methods.append(
-                        (engine_cls.from_model_name(model_name), model_name, idx)
+                        (engine_cls.from_model_name(model_name, self.ignore_tensorrt, self.dtype), model_name, idx)
                     )
                     idx += 1
+        if len(self.methods) == 0:
+            raise RuntimeError("No valid coding tool is loaded!")
 
     def _compress_with_target(self, method, image_block, target_bytes):
         min_qs = float(1e-5)
         max_qs = float(1.0)
-        while min_qs < max_qs - 1e-3:
+        while min_qs < max_qs - 1e-6:
             mid_qs = (max_qs + min_qs) / 2.0
             bitstream = method.compress_block(image_block, mid_qs)
             len_bytes = len(bitstream)
@@ -127,14 +141,13 @@ class Engine:
         x = x.to(torch.uint8)
         return x
 
-    @classmethod
-    def torch_pseudo_quantize_to_uint8(cls, x):
-        x = cls.torch_to_uint8(x)
-        x = x.to(torch.half) / 255.0
+    def torch_pseudo_quantize_to_uint8(self, x):
+        x = self.torch_to_uint8(x)
+        x = x.to(self.dtype) / 255.0
         return x
 
     def _estimate_score(
-        self, method, image_block, target_bytes=None, q_scale=None, repeat=1
+        self, method, image_block, clip_h, clip_w, target_bytes=None, q_scale=None, repeat=1
     ):
         times = []
         sqes = []
@@ -156,6 +169,9 @@ class Engine:
             image_block = self.torch_pseudo_quantize_to_uint8(image_block)
             recon_img = self.torch_pseudo_quantize_to_uint8(recon_img)
 
+            image_block = image_block[:, :clip_h, :clip_w, :]
+            recon_img = recon_img[:, :clip_h, :clip_w, :]
+
             sqe = torch.sum((image_block - recon_img) ** 2).detach().cpu().numpy()
             sqes.append(sqe)
 
@@ -164,7 +180,15 @@ class Engine:
 
         return sqe, np.mean(times), bitstream, recon_img, q_scale
 
-    def _precompute_score(self, img_blocks):
+    def _precompute_score(self, img_blocks: torch.Tensor, img_size):
+        if self.cached_blocks is not None and self.cached_blocks.shape == img_blocks.shape:
+            err = torch.max(torch.abs(img_blocks.cpu() - self.cached_blocks))
+            if err < 1e-3:
+                print("Using cached precompute scores ...")
+                return
+        self.cached_blocks = img_blocks.cpu()
+
+        h, w = img_size
         n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
         n_methods = len(self.methods)
 
@@ -185,27 +209,28 @@ class Engine:
                     num_bytes = []
                     qscales = []
                     times = []
+
+                    clip_h = min(h - i * ctu_h, ctu_h)
+                    clip_w = min(w - i * ctu_w, ctu_w)
+
                     for qscale in self.qscale_samples:
                         image_block = img_blocks[i, j]
 
                         sqe, dec_time, bitstream, __, ___ = self._estimate_score(
-                            method, image_block, None, qscale, 1
+                            method, image_block, clip_h, clip_w, target_bytes=None, q_scale=qscale, repeat=1
                         )
                         num_byte = len(bitstream)
-                        while len(num_bytes) > 0 and num_byte <= num_bytes[-1]:
-                            num_bytes.pop()
-                            sqes.pop()
-                            times.pop()
-                            qscales.pop()
                         num_bytes.append(num_byte)
                         sqes.append(sqe)
                         times.append(dec_time)
                         qscales.append(qscale)
                         pbar_iter.__next__()
+                    
+                    make_strictly_increasing(num_bytes)
 
-                    if not is_strictly_increasing(num_bytes):
+                    if len(num_bytes) <= 3 or not is_strictly_increasing(num_bytes):
                         raise ValueError(
-                            f"num_bytes are not strictly increasing: \nnum_bytes={num_bytes}\nsqes={sqes}"
+                            f"num_bytes are too few or not strictly increasing: \nnum_bytes={num_bytes}\nsqes={sqes}\nqscales={qscales}"
                         )
 
                     self._minimal_bytes[idx, i, j] = num_bytes[0]
@@ -254,27 +279,24 @@ class Engine:
 
         sqe /= num_pixels * 3
         psnr = -10 * np.log10(sqe)
-        return psnr - W_TIME * global_time - bpg_psnr, psnr, global_time
+        return psnr - self.w_time * global_time - bpg_psnr, psnr, global_time
 
     def _normal_noise_like(self, x, sigma):
-        noise = np.random.normal(0, sigma, x.shape).astype(np.int32)
+        noise = np.random.normal(0, sigma, x.shape).astype(x.dtype)
         return noise
+    
+    @classmethod
+    def arithmetic_crossover(cls, a: np.ndarray, b: np.ndarray):
+        assert(a.shape == b.shape)
+        u = np.random.uniform(0, 1, a.shape)
+        result = a*u+b*(1-u)
+        result.astype(a.dtype)
+        return result
 
-    def _hybrid(self, header1: Solution, header2: Solution, total_target_bytes):
-        # Mutate methods used
-        mutate_method = np.random.choice([0, 1], header1.method_weight.shape)
-        new_method_weight = np.select(
-            [mutate_method == 0, mutate_method == 1],
-            [header1.method_weight, header2.method_weight],
-        )
-
-        # Mutate target byterates
-        mutate_target = np.random.choice([0, 1], header1.target_byteses.shape)
-        new_target = np.select(
-            [mutate_target == 0, mutate_target == 1],
-            [header1.target_byteses, header2.target_byteses],
-        )
-        new_header = Solution(new_method_weight, new_target)
+    def _hybrid(self, header1: Solution, header2: Solution, total_target_bytes, p):
+        new_method_score = self.arithmetic_crossover(header1.method_score, header2.method_score)
+        new_target = self.arithmetic_crossover(header1.target_byteses, header2.target_byteses)
+        new_header = Solution(new_method_score, new_target)
         new_header.normalize_target_byteses(
             self._minimal_bytes, self._maximal_bytes, total_target_bytes
         )
@@ -285,24 +307,25 @@ class Engine:
         self,
         header: Solution,
         total_target_bytes,
-        method_mutate_sigma=0.25,
-        byte_mutate_sigma=512,
+        method_mutate_sigma,
+        byte_mutate_sigma,
         inplace=True,
     ):
         if not inplace:
             header = copy.copy(header)
-
-        # Mutate methods used
-        old_weight = header.method_weight
-        mutate_method = self._normal_noise_like(old_weight, method_mutate_sigma)
-        new_weight = old_weight + mutate_method
+ 
+        # Mutate methods used; random swap adjacent methods
+        score = header.method_score.copy()
+        score_noise = self._normal_noise_like(score, method_mutate_sigma)
+        new_score = score + score_noise
+        new_score = np.clip(new_score, 0., 1.)
 
         # Mutate target byterates
-        old_target = header.target_byteses
+        old_target = header.target_byteses.copy()
         byterate_noise = self._normal_noise_like(old_target, byte_mutate_sigma)
         new_target = old_target + byterate_noise
 
-        header.__init__(new_weight, new_target)
+        header.__init__(new_score, new_target)
 
         header.normalize_target_byteses(
             self._minimal_bytes, self._maximal_bytes, total_target_bytes
@@ -355,21 +378,49 @@ class Engine:
                 print(
                     f"- CTU [{i}, {j}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\tsquared_error={est_sqe:.6f}"
                 )
+    
+    def _compress_blocks(self, img_blocks, solution):
+        # Calculate q_scale and bitstream for CTUs
+        n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
+        bitstreams = []
+        q_scales = np.zeros([n_ctu_h, n_ctu_w], dtype=np.float32)
+        for i in range(n_ctu_h):
+            bitstreams_tmp = []
+            for j in range(n_ctu_w):
+                method, method_name, method_id = self.methods[
+                    solution.method_ids[i, j]
+                ]
+                target = solution.target_byteses[i, j]
+                print(
+                    f"Encoding CTU[{i}, {j}]: method #{method_id}('{method_name}'); Target = {target} B"
+                )
+                bitstream, q_scale = self._compress_with_target(
+                    method, img_blocks[i, j], target
+                )
+                bitstreams_tmp.append(bitstream)
+                q_scales[i, j] = q_scale
+            bitstreams.append(bitstreams_tmp)
 
+        return solution.method_ids, q_scales, bitstreams
+
+    def _initial_method_score(self, n_ctu_h, n_ctu_w, n_method):
+        result = np.random.uniform(0., 1., [n_method, n_ctu_h, n_ctu_w])
+        return result
+    
     def _solve_genetic(
         self,
         img_blocks,
-        num_pixels,
+        img_size,
         total_target_bytes,
         bpg_psnr,
-        N=10000,
-        num_generation=1000,
-        survive_rate=0.02,
-        breed_rate=0.1,
+        N,
+        num_generation,
     ):
         n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
         n_method = len(self.methods)
         n_ctus = n_ctu_h * n_ctu_w
+        h, w = img_size
+        num_pixels = h * w
 
         DEFAULT_METHOD = 0
 
@@ -378,16 +429,21 @@ class Engine:
             self.methods[DEFAULT_METHOD][0], img_blocks, total_target_bytes
         )
 
+        if self.no_allocation:
+            method_scores = self._initial_method_score(n_ctu_h,n_ctu_w, n_method)
+            solution = Solution(method_scores, default_target_bytes)
+            return self._compress_blocks(img_blocks, solution)
+
         print("Precompute all scorees")
-        self._precompute_score(img_blocks)
+        self._precompute_score(img_blocks, img_size)
 
         # Generate initial solutions
         solutions = []
         for k in (pbar := tqdm.tqdm(range(N))):
             pbar.set_description(f"Generate initial solutions")
-            method_weights = np.random.normal(0, 1, [n_ctu_h, n_ctu_w, n_method])
-            target_byteses = default_target_bytes
-            method = Solution(method_weights, target_byteses)
+            method_scores = self._initial_method_score(n_ctu_h,n_ctu_w, n_method)
+            target_byteses = default_target_bytes.copy()
+            method = Solution(method_scores, target_byteses)
             method.normalize_target_byteses(self._minimal_bytes, self._maximal_bytes, total_target_bytes)
             method.score, method.psnr, method.time = self._search(
                 img_blocks,
@@ -398,11 +454,13 @@ class Engine:
                 bpg_psnr,
             )
             solutions.append(method)
+
         solutions.sort(key=lambda x: x.score, reverse=True)
 
         max_score = solutions[0].score
         best_psnr = solutions[0].psnr
         best_time = solutions[0].time
+        initial_score = abs(max_score)
 
         for k in range(num_generation):
             # show best solution on generation
@@ -417,25 +475,38 @@ class Engine:
 
             G = num_generation
             R = (G + 2*np.sqrt(k)) / (3*G)
+            T = 0.75 * (1 - (k / num_generation)) ** 2 + 0.25
 
-            num_alive = int(math.floor(N * R * survive_rate))
-            num_breed = int(math.floor(N * R * breed_rate))
+            # num_alive = int(math.ceil(N * R * self.survive_rate))
+            # Elitism, but only keep the best alive
+            num_alive = 1
+            num_breed = N
 
             # Elitism strategy
             breedable = solutions[:num_breed]
             solutions = solutions[:num_alive]
 
+            # Calculate probability; Boltzmann selection
+            probs = []
+            for i in range(num_breed):
+                beta = T / self.boltzmann_k
+                t = breedable[i].score * beta / initial_score
+                probs.append(t)
+            probs = np.array(probs, dtype=np.float32)
+            probs = stable_softmax(probs)
+
             # Hybrid
+            idxes = np.arange(num_breed)
             for i in (pbar := tqdm.tqdm(range(N - num_alive))):
                 pbar.set_description(
                     f"Calculating score for generation {k+1}; max_score={max_score:.3f}; best_psnr={best_psnr:.3f}; best_time={best_time:.3f}"
                 )
-                parent_id1 = random.randint(0, num_breed - 1)
-                parent_id2 = random.randint(0, num_breed - 1)
+                parent_id1 = np.random.choice(idxes, p=probs)
+                parent_id2 = np.random.choice(idxes, p=probs)
                 newborn = self._hybrid(
-                    breedable[parent_id1], breedable[parent_id2], total_target_bytes
+                    breedable[parent_id1], breedable[parent_id2], total_target_bytes, T*0.5
                 )
-                self._mutate(newborn, total_target_bytes)
+                self._mutate(newborn, total_target_bytes, T*self.methods_sigma, T*self.bytes_sigma)
                 newborn.score, newborn.psnr, newborn.time = self._search(
                     img_blocks,
                     num_pixels,
@@ -451,39 +522,17 @@ class Engine:
                     best_psnr = newborn.psnr
 
             solutions.sort(key=lambda x: x.score, reverse=True)
+        
+        return self._compress_blocks(img_blocks, solutions[0])
 
-        # Calculate q_scale and bitstream for CTUs
-        bitstreams = []
-        q_scales = np.zeros([n_ctu_h, n_ctu_w], dtype=np.float32)
-        best_solution: Solution = solutions[0]
-        for i in range(n_ctu_h):
-            bitstreams_tmp = []
-            for j in range(n_ctu_w):
-                method, method_name, method_id = self.methods[
-                    best_solution.method_ids[i, j]
-                ]
-                target = best_solution.target_byteses[i, j]
-                print(
-                    f"Encoding CTU[{i}, {j}]: method #{method_id}('{method_name}'); Target = {target} B"
-                )
-                bitstream, q_scale = self._compress_with_target(
-                    method, img_blocks[i, j], target
-                )
-                bitstreams_tmp.append(bitstream)
-                q_scales[i, j] = q_scale
-            bitstreams.append(bitstreams_tmp)
-
-        return best_solution.method_ids, q_scales, bitstreams
-
-    @staticmethod
-    def read_img(img_path):
+    def read_img(self, img_path):
         if not os.path.exists(img_path):
             raise FileNotFoundError(img_path)
 
         rgb = Image.open(img_path).convert("RGB")
         rgb = np.asarray(rgb).astype("float32").transpose(2, 0, 1)
         rgb = rgb / 255.0
-        rgb = torch.from_numpy(rgb).type(torch.half)
+        rgb = torch.from_numpy(rgb).type(self.dtype)
         rgb = rgb.unsqueeze(0)
         rgb = rgb.cuda()
         return rgb
@@ -502,18 +551,22 @@ class Engine:
         )
         return pic_height, pic_width, x_padded
 
-    def encode(self, input_pth, output_pth, N, num_generation):
+    def encode(self, input_pth, output_pth, N, num_generation, bpg_qp=28, w_time=1.0):
         input_img = self.read_img(input_pth)
         h, w, padded_img = self.pad_img(input_img)
+        img_size = (h, w)
 
         file_io = FileIO(h, w, self.ctu_size)
+
+        # Set loss
+        self.w_time = w_time
 
         # statistics
         self.gen_score = []
         self.gen_psnr = []
         self.gen_time = []
 
-        total_target_bytes, bpg_psnr = get_bpg_result(input_pth)
+        total_target_bytes, bpg_psnr = get_bpg_result(input_pth, qp=bpg_qp)
         target_bpp = total_target_bytes * 8 / h / w
         print(f"Image shape: {h}x{w}")
         print(
@@ -535,7 +588,7 @@ class Engine:
 
         method_ids, q_scales, bitstreams = self._solve_genetic(
             img_blocks,
-            h * w,
+            img_size,
             total_target_bytes,
             bpg_psnr,
             num_generation=num_generation,
@@ -547,40 +600,38 @@ class Engine:
         file_io.dump(output_pth)
 
         if self.save_statistic:
-            output_folder = os.path.split(output_pth)[0]
-            statistics_f = os.path.join(output_folder, "data.json")
             data = {
                 "gen_score": self.gen_score,
                 "gen_psnr": self.gen_psnr,
                 "gen_time": self.gen_time,
             }
-            with open(statistics_f, "w") as fd:
-                json.dump(data, fd)
+            return data
 
 
     def decode(self, file_io):
-        decoded_ctus = []
-        with timer.Timer("Decode_CTU"):
-            for i in range(file_io.ctu_h):
-                for j in range(file_io.ctu_w):
-                    method_id = file_io.method_id[i, j]
-                    q_scale = file_io.q_scale[i, j]
-                    bitstream = file_io.bitstreams[i][j]
-                    method, method_name, _ = self.methods[method_id]
-                    print(
-                        f"Decoding CTU[{i}, {j}]: method #{method_id}('{method_name}'); q_scale={q_scale:.6f}"
-                    )
-                    ctu = method.decompress_block(
-                        bitstream, self.ctu_size, self.ctu_size, q_scale
-                    )
-                    decoded_ctus.append(ctu)
-        with timer.Timer("Reconstruct&save"):
-            recon_img = torch.cat(decoded_ctus, dim=0)
-            recon_img = einops.rearrange(
-                recon_img,
-                "(n_ctu_h n_ctu_w) c ctu_size_h ctu_size_w -> 1 c (n_ctu_h ctu_size_h) (n_ctu_w ctu_size_w)",
-                n_ctu_h=file_io.ctu_h,
-            )
-            recon_img = recon_img[0, :, : file_io.h, : file_io.w]
+        with torch.no_grad():
+            decoded_ctus = []
+            with timer.Timer("Decode_CTU"):
+                for i in range(file_io.ctu_h):
+                    for j in range(file_io.ctu_w):
+                        method_id = file_io.method_id[i, j]
+                        q_scale = file_io.q_scale[i, j]
+                        bitstream = file_io.bitstreams[i][j]
+                        method, method_name, _ = self.methods[method_id]
+                        print(
+                            f"Decoding CTU[{i}, {j}]: method #{method_id}('{method_name}'); q_scale={q_scale:.6f}"
+                        )
+                        ctu = method.decompress_block(
+                            bitstream, self.ctu_size, self.ctu_size, q_scale
+                        )
+                        decoded_ctus.append(ctu)
+            with timer.Timer("Reconstruct&save"):
+                recon_img = torch.cat(decoded_ctus, dim=0)
+                recon_img = einops.rearrange(
+                    recon_img,
+                    "(n_ctu_h n_ctu_w) c ctu_size_h ctu_size_w -> 1 c (n_ctu_h ctu_size_h) (n_ctu_w ctu_size_w)",
+                    n_ctu_h=file_io.ctu_h,
+                )
+                recon_img = recon_img[0, :, : file_io.h, : file_io.w]
 
-        return recon_img
+            return recon_img

@@ -242,7 +242,7 @@ def parse_args(argv):
         "--batch_size",
         "-bs",
         type=int,
-        default=,
+        default=4,
         help="Batch size (default: %(default)s)",
     )
     parser.add_argument(
