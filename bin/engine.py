@@ -456,7 +456,7 @@ class Engine:
             self.methods[DEFAULT_METHOD][0], img_blocks, total_target_bytes
         )
 
-        if self.no_allocation:
+        if no_allocation:
             method_scores = self._initial_method_score(n_ctu_h, n_ctu_w, n_method)
             solution = Solution(method_scores, default_target_bytes)
             return self._compress_blocks(img_blocks, solution)
@@ -506,7 +506,6 @@ class Engine:
             R = (G + 2 * np.sqrt(k)) / (3 * G)
             T = 0.75 * (1 - (k / num_generation)) ** 2 + 0.25
 
-            # num_alive = int(math.ceil(N * R * self.survive_rate))
             # Elitism, but only keep the best alive
             num_alive = 1
             num_breed = N
@@ -518,7 +517,7 @@ class Engine:
             # Calculate probability; Boltzmann selection
             probs = []
             for i in range(num_breed):
-                beta = T / self.boltzmann_k
+                beta = T / boltzmann_k
                 t = breedable[i].score * beta / initial_score
                 probs.append(t)
             probs = np.array(probs, dtype=np.float32)
@@ -541,8 +540,8 @@ class Engine:
                 self._mutate(
                     newborn,
                     total_target_bytes,
-                    T * self.methods_sigma,
-                    T * self.bytes_sigma,
+                    T * method_sigma,
+                    T * bytes_sigma,
                 )
                 newborn.score, newborn.psnr, newborn.time = self._search(
                     img_blocks,

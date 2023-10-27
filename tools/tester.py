@@ -21,23 +21,50 @@ def parse_args():
     parser.add_argument("-i", "--input", type=str, required=True, help="input glob")
 
     # Engine args
-    parser.add_argument("-N", type=int, default=1000)
-    parser.add_argument("--num-gen", type=int, default=1000)
     parser.add_argument(
         "--tools", nargs="+", type=str, default=Engine.TOOL_GROUPS.keys()
     )
     parser.add_argument("--tool_filter", nargs="+", type=str, default=None)
+
+    # Encoder config args
+    parser.add_argument("-N", nargs="+", type=int, default=[1000])
+    parser.add_argument("--num-gen", nargs="+", type=int, default=[1000])
     parser.add_argument("--w_time", nargs="+", type=float, default=[1.0])
-    parser.add_argument("--bpg_qp", type=int, default=32)
-    parser.add_argument("--no_allocation", action="store_true")
+    parser.add_argument("--bpg_qp", nargs="+", type=int, default=[32])
+    parser.add_argument("--boltzmann_k", nargs="+", type=float, default=[0.05])
+    parser.add_argument("--method_sigma", nargs="+", type=float, default=[0.2])
+    parser.add_argument("--bytes_sigma", nargs="+", type=float, default=[32])
+    parser.add_argument("--no_allocation", nargs="+", type=bool, default=[False])
 
     args = parser.parse_args()
     return args
 
 
 def test_single_image(
-    engine: Engine, input_filename, N, num_gen, output_dir, save_image, bpg_qp, w_time
+    engine: Engine,
+    input_filename,
+    output_dir,
+    save_image,
+    N,
+    num_gen,
+    bpg_qp,
+    w_time,
+    no_allocation,
+    boltzmann_k,
+    method_sigma,
+    bytes_sigma,
 ):
+    output_dir = os.path.join(
+        output_dir,
+        str(N),
+        str(num_gen),
+        str(bpg_qp),
+        str(w_time),
+        str(boltzmann_k),
+        str(no_allocation),
+        str(method_sigma),
+        str(bytes_sigma),
+    )
     if save_image:
         os.makedirs(output_dir, exist_ok=True)
         realname = pathlib.Path(input_filename).stem
@@ -50,7 +77,16 @@ def test_single_image(
     ## Encode
     time0 = time.time()
     genetic_statistic = engine.encode(
-        input_filename, obin, N, num_gen, bpg_qp=bpg_qp, w_time=w_time
+        input_filename,
+        obin,
+        N,
+        num_gen,
+        bpg_qp=bpg_qp,
+        w_time=w_time,
+        no_allocation=no_allocation,
+        boltzmann_k=boltzmann_k,
+        method_sigma=method_sigma,
+        bytes_sigma=bytes_sigma,
     )
     torch.cuda.synchronize()
     time_enc = time.time() - time0
@@ -61,12 +97,15 @@ def test_single_image(
     fd.close()
 
     # Decoding process; generate recon image
-    time_start = time.time()
-    file_io: FileIO = FileIO.load(bitstream, engine.ctu_size)
-    out_img = engine.decode(file_io)  # Decoded image; shape=[3, H, W]
-    torch.cuda.synchronize()
-    time_end = time.time()
-    time_dec = time_end - time_start
+    time_dec_meter = AverageMeter()
+    for i in range(10):
+        time_start = time.time()
+        file_io: FileIO = FileIO.load(bitstream, engine.ctu_size)
+        out_img = engine.decode(file_io)  # Decoded image; shape=[3, H, W]
+        torch.cuda.synchronize()
+        time_end = time.time()
+        time_dec = time_end - time_start
+        time_dec_meter.update(time_dec)
 
     # Save image
     out_img = dump_torch_image(out_img)
@@ -81,7 +120,7 @@ def test_single_image(
         "bpp": bpp,
         "PSNR": psnr,
         "t_enc": time_enc,
-        "t_dec": time_dec,
+        "t_dec": time_dec_meter.avg,
         "genetic_statistic": genetic_statistic,
     }
 
@@ -93,7 +132,18 @@ def test_single_image(
 
 
 def test_glob(
-    engine, input_pattern, N, num_gen, output_dir, save_image, bpg_qp, w_time
+    engine,
+    input_pattern,
+    output_dir,
+    save_image,
+    N,
+    num_gen,
+    bpg_qp,
+    w_time,
+    no_allocation,
+    boltzmann_k,
+    method_sigma,
+    bytes_sigma,
 ):
     input_glob = glob.glob(input_pattern)
 
@@ -108,12 +158,16 @@ def test_glob(
         img_result = test_single_image(
             engine,
             filename,
-            N,
-            num_gen,
             output_dir,
             save_image,
+            N=N,
+            num_gen=num_gen,
             bpg_qp=bpg_qp,
             w_time=w_time,
+            no_allocation=no_allocation,
+            boltzmann_k=boltzmann_k,
+            method_sigma=method_sigma,
+            bytes_sigma=bytes_sigma,
         )
         avg_bpp.update(img_result["bpp"])
         avg_psnr.update(img_result["PSNR"])
@@ -130,24 +184,79 @@ def test_glob(
     return results
 
 
-def test_multiple_w_time(
-    engine, input_pattern, N, num_gen, output_dir, save_image, bpg_qp, w_time
+def _config_mapper(config_list, f):
+    if len(config_list) == 0:
+        return f()
+
+    config_name, configs = config_list[0]
+    config_list = config_list[1:]
+    result = {}
+    for config in configs:
+
+        def fnew(**kwargs):
+            kwargs[config_name] = config
+            return f(**kwargs)
+
+        result_single = _config_mapper(config_list, fnew)
+        if len(configs) == 1:
+            result = result_single
+        else:
+            result[f"{config_name}={config}"] = result_single
+    return result
+
+
+def test_multiple_configs(
+    engine,
+    input_pattern,
+    output_dir,
+    save_image,
+    N,
+    num_gen,
+    bpg_qp,
+    w_time,
+    no_allocation,
+    boltzmann_k,
+    method_sigma,
+    bytes_sigma,
 ):
     output_dir = os.path.join(output_dir, "results")
-    results = {}
-    for w_time_sample in w_time:
-        output_dir_w = os.path.join(output_dir, str(w_time_sample))
-        result = test_glob(
+
+    def _test_glob(
+        N,
+        num_gen,
+        bpg_qp,
+        w_time,
+        no_allocation,
+        boltzmann_k,
+        method_sigma,
+        bytes_sigma,
+    ):
+        return test_glob(
             engine,
             input_pattern,
-            N,
-            num_gen,
-            output_dir_w,
+            output_dir,
             save_image,
-            bpg_qp,
-            w_time_sample,
+            N=N,
+            num_gen=num_gen,
+            bpg_qp=bpg_qp,
+            w_time=w_time,
+            no_allocation=no_allocation,
+            boltzmann_k=boltzmann_k,
+            method_sigma=method_sigma,
+            bytes_sigma=bytes_sigma,
         )
-        results[w_time_sample] = result
+
+    configs = [
+        ("N", N),
+        ("num_gen", num_gen),
+        ("bpg_qp", bpg_qp),
+        ("w_time", w_time),
+        ("no_allocation", no_allocation),
+        ("boltzmann_k", boltzmann_k),
+        ("method_sigma", method_sigma),
+        ("bytes_sigma", bytes_sigma),
+    ]
+    results = _config_mapper(configs, _test_glob)
     return results
 
 
@@ -163,32 +272,23 @@ if __name__ == "__main__":
         tool_groups=args.tools,
         tool_filter=args.tool_filter,
         ignore_tensorrt=True,
-        no_allocation=args.no_allocation,
         dtype=torch.float32,
     )
 
-    if len(args.w_time) == 1:
-        results = test_glob(
-            engine,
-            args.input,
-            args.N,
-            args.num_gen,
-            os.path.join(args.output_dir, "results"),
-            args.save_image,
-            args.bpg_qp,
-            args.w_time[0],
-        )
-    else:
-        results = test_multiple_w_time(
-            engine,
-            args.input,
-            args.N,
-            args.num_gen,
-            args.output_dir,
-            args.save_image,
-            args.bpg_qp,
-            args.w_time,
-        )
+    results = test_multiple_configs(
+        engine,
+        args.input,
+        args.output_dir,
+        args.save_image,
+        args.N,
+        args.num_gen,
+        args.bpg_qp,
+        args.w_time,
+        args.no_allocation,
+        args.boltzmann_k,
+        args.method_sigma,
+        args.bytes_sigma,
+    )
 
     os.makedirs(args.output_dir, exist_ok=True)
     result_filename = os.path.join(args.output_dir, "results.json")
