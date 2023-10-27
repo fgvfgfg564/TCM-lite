@@ -31,9 +31,6 @@ def parse_args():
     parser.add_argument("--w_time", nargs='+', type=float, default=[1.0])
     parser.add_argument("--bpg_qp", type=int, default=32)
     parser.add_argument(
-        "--save_statistics", action='store_true'
-    )
-    parser.add_argument(
         "--no_allocation", action='store_true'
     )
 
@@ -135,7 +132,7 @@ if __name__ == "__main__":
 
     args = parse_args()
 
-    engine = Engine(tool_groups=args.tools, tool_filter=args.tool_filter, ignore_tensorrt=True, save_statistic=args.save_statistics, no_allocation=args.no_allocation, dtype=torch.float32)
+    engine = Engine(tool_groups=args.tools, tool_filter=args.tool_filter, ignore_tensorrt=True, no_allocation=args.no_allocation, dtype=torch.float32)
 
     if len(args.w_time) == 1:
         results = test_glob(engine, args.input, args.N, args.num_gen, os.path.join(args.output_dir, "results"), args.save_image, args.bpg_qp, args.w_time[0])

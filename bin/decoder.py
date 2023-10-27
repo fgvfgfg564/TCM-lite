@@ -19,9 +19,6 @@ def parse_args():
     parser.add_argument(
         "--tool_filter", nargs="+", type=str, default=None
     )
-    parser.add_argument(
-        "--save_statistic", action='store_true'
-    )
 
     args = parser.parse_args()
     return args
@@ -31,7 +28,7 @@ def main():
     torch.backends.cudnn.enabled = True
     args = parse_args()
 
-    engine = Engine(tool_groups=args.tools, tool_filter=args.tool_filter, save_statistic=args.save_statistic)
+    engine = Engine(tool_groups=args.tools, tool_filter=args.tool_filter)
 
     # Load bitstream
     fd = open(args.input, "rb")
