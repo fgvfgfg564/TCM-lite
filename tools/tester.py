@@ -76,19 +76,20 @@ def test_single_image(
 
     ## Encode
     time0 = time.time()
-    genetic_statistic = engine.encode(
-        input_filename,
-        obin,
-        N,
-        num_gen,
-        bpg_qp=bpg_qp,
-        w_time=w_time,
-        no_allocation=no_allocation,
-        boltzmann_k=boltzmann_k,
-        method_sigma=method_sigma,
-        bytes_sigma=bytes_sigma,
-    )
-    torch.cuda.synchronize()
+    if not os.path.isfile(obin):
+        genetic_statistic = engine.encode(
+            input_filename,
+            obin,
+            N,
+            num_gen,
+            bpg_qp=bpg_qp,
+            w_time=w_time,
+            no_allocation=no_allocation,
+            boltzmann_k=boltzmann_k,
+            method_sigma=method_sigma,
+            bytes_sigma=bytes_sigma,
+        )
+        torch.cuda.synchronize()
     time_enc = time.time() - time0
 
     # Load bitstream
