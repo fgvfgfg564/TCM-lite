@@ -90,6 +90,8 @@ def test_single_image(
             bytes_sigma=bytes_sigma,
         )
         torch.cuda.synchronize()
+    else:
+        genetic_statistic = {}
     time_enc = time.time() - time0
 
     # Load bitstream
