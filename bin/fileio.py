@@ -39,6 +39,7 @@ class FileIO:
 
         self.method_id = method_id
         self.bitstreams = bitstreams
+        self.num_bytes = None if bitstreams is None else np.array([[len(bitstreams[i][j] for j in range(self.ctu_w))] for i in range(self.ctu_h)])
         self.q_scale = q_scale
 
     @property
@@ -90,6 +91,7 @@ class FileIO:
                 file_io.method_id[i, j] = _method_id
                 file_io.q_scale[i, j] = _q_scale
                 num_bytes[i, j] = _num_bytes
+        file_io.num_bytes = num_bytes
 
         # read CTU bytes
         file_io.bitstreams = []
