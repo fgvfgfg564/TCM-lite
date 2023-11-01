@@ -113,7 +113,7 @@ class Engine:
                     self.methods.append(
                         (
                             engine_cls.from_model_name(
-                                model_name, self.ignore_tensorrt, self.dtype
+                                model_name, self.ignore_tensorrt, self.dtype, self.ctu_size
                             ),
                             model_name,
                             idx,

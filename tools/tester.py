@@ -93,7 +93,7 @@ def test_single_image(
         torch.cuda.synchronize()
 
         with open(osta, "w") as f:
-            json.dump(genetic_statistic, file=f)
+            json.dump(genetic_statistic, f)
 
     time_enc = time.time() - time0
 

@@ -14,16 +14,14 @@ from PIL import Image
 from .utils.timer import Timer
 from .utils.tensorrt_support import *
 
-BLOCK_SIZE = 512
-
-
 class CodingToolBase(nn.Module):
     MODELS = None
 
-    def __init__(self, model_name, dtype) -> None:
+    def __init__(self, model_name, dtype, ctu_size) -> None:
         super().__init__()
         self.dtype = dtype
         self.model_name = model_name
+        self.ctu_size = ctu_size
 
     def _q_scale_mapping(self, q_scale_0_1):
         # 0 -> self.q_scale_min
@@ -46,11 +44,11 @@ class CodingToolBase(nn.Module):
         raise NotImplemented
 
     @classmethod
-    def _load_from_weight(cls, model_name, compiled_path, dtype, compile=True):
+    def _load_from_weight(cls, model_name, compiled_path, dtype, ctu_size, compile=True):
         decoder_app = cls(model_name, dtype)
         torch.cuda.synchronize()
         dummy_input = torch.zeros(
-            [1, 3, BLOCK_SIZE, BLOCK_SIZE], device="cuda", dtype=dtype
+            [1, 3, ctu_size, ctu_size], device="cuda", dtype=dtype
         )
         decoder_app.i_frame_net(dummy_input, 0.5)
         if compile:
@@ -59,28 +57,28 @@ class CodingToolBase(nn.Module):
 
     def preheat(self):
         dummy_input = torch.zeros(
-            [1, 3, BLOCK_SIZE, BLOCK_SIZE], device="cuda", dtype=self.dtype
+            [1, 3, self.ctu_size, self.ctu_size], device="cuda", dtype=self.dtype
         )
 
         for q_scale in np.linspace(0, 1, 20):
             bitstream = self.compress_block(dummy_input, 0.5)
-            _ = self.decompress_block(bitstream, BLOCK_SIZE, BLOCK_SIZE, q_scale)
+            _ = self.decompress_block(bitstream, self.ctu_size, self.ctu_size, q_scale)
 
     @classmethod
-    def _load_from_compiled(cls, model_name, compiled_path, dtype):
+    def _load_from_compiled(cls, model_name, compiled_path, dtype, ctu_size):
         print("Load from compiled model")
         with InitTRTModelWithPlaceholder():
             decoder_app = cls(model_name, dtype)
         load_weights(decoder_app.i_frame_net, compiled_path)
 
         dummy_input = torch.zeros(
-            [1, 3, BLOCK_SIZE, BLOCK_SIZE], device="cuda", dtype=dtype
+            [1, 3, ctu_size, ctu_size], device="cuda", dtype=dtype
         )
         decoder_app.i_frame_net(dummy_input, 0.5)
         return decoder_app
 
     @classmethod
-    def from_model_name(cls, model_name, ignore_tensorrt, dtype):
+    def from_model_name(cls, model_name, ignore_tensorrt, dtype, ctu_size):
         with Timer("Loading"):
             model_path, compiled_path = cls.get_model_path(model_name)
             if not ignore_tensorrt and os.path.isdir(compiled_path):
@@ -90,11 +88,11 @@ class CodingToolBase(nn.Module):
                     )
                 except FileNotFoundError:
                     decoder_app = cls._load_from_weight(
-                        model_name, compiled_path, dtype, not ignore_tensorrt
+                        model_name, compiled_path, dtype, ctu_size, not ignore_tensorrt
                     )
             else:
                 decoder_app = cls._load_from_weight(
-                    model_name, compiled_path, dtype, not ignore_tensorrt
+                    model_name, compiled_path, dtype, ctu_size, not ignore_tensorrt
                 )
             decoder_app.cuda()
             decoder_app.preheat()

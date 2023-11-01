@@ -19,7 +19,6 @@ from einops import rearrange
 
 CODECS = ["TCM", "VTM", "BPG"]
 TRADITIONAL_CODECS = ["VTM", "BPG"]
-block_size = 1024
 
 
 def compute_psnr(a, b, max_val: float = 255.0) -> float:

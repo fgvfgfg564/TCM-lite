@@ -19,9 +19,6 @@ from ...utils.tensorrt_support import *
 
 from ...coding_tool import CodingToolBase
 
-BLOCK_SIZE = 512
-
-
 def get_state_dict(model_path, device):
     dictory = {}
     print("Loading", model_path)
