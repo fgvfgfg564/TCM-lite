@@ -73,8 +73,8 @@ if __name__ == "__main__":
                 method_id = method_ids[i, j]
                 color = hex_to_bgr(METHOD_COLORS[method_id])
                 
-                topleft = (i * ctu_size, j * ctu_size)
-                bottomright = ((i+1) * ctu_size, (j+1) * ctu_size)
+                topleft = (j * ctu_size, i * ctu_size)
+                bottomright = ((j+1) * ctu_size, (i+1) * ctu_size)
                 mask = cv2.rectangle(mask, topleft, bottomright, color, -1)
     else:
         # num_bytes
@@ -86,12 +86,12 @@ if __name__ == "__main__":
         for i in range(fileio.ctu_h):
             for j in range(fileio.ctu_w):
                 num_byte = num_bytes[i, j]
-                w = 255 - int(255 * (num_bytes - mi) / (mx-mi))
+                w = 255 - int(255 * (num_byte - mi) / (mx-mi))
                 color = (w, w, w)
                 
-                topleft = (i * ctu_size, j * ctu_size)
-                bottomright = ((i+1) * ctu_size, (j+1) * ctu_size)
-                mask = cv2.rectangle(mask, topleft, bottomright, color, 0)
+                topleft = (j * ctu_size, i * ctu_size)
+                bottomright = ((j+1) * ctu_size, (i+1) * ctu_size)
+                mask = cv2.rectangle(mask, topleft, bottomright, color, -1)
 
     alpha = args.alpha
     output_img = cv2.addWeighted(recon_img, 1 - alpha, mask, alpha, 0)
