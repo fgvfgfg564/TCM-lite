@@ -25,6 +25,7 @@ def parse_args():
         "--tools", nargs="+", type=str, default=Engine.TOOL_GROUPS.keys()
     )
     parser.add_argument("--tool_filter", nargs="+", type=str, default=None)
+    parser.add_argument("--ctu_size", type=int, default=512)
 
     # Encoder config args
     parser.add_argument("-N", nargs="+", type=int, default=[1000])
@@ -270,6 +271,7 @@ if __name__ == "__main__":
     args = parse_args()
 
     engine = Engine(
+        ctu_size=args.ctu_size
         tool_groups=args.tools,
         tool_filter=args.tool_filter,
         ignore_tensorrt=True,
