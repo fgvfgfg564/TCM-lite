@@ -1,0 +1,20 @@
+def rgb_to_hex(rgb):
+    """
+    Convert RGB color values to hexadecimal format.
+    
+    Args:
+        rgb (tuple): A tuple containing three integers representing RGB values in the range [0, 255].
+    
+    Returns:
+        str: The hexadecimal representation of the RGB color.
+    """
+    hex_color = "#{:02X}{:02X}{:02X}".format(*rgb)
+    return hex_color
+
+# Example RGB color values
+rgb_values = [(33, 26, 62), (69, 51, 112), (165, 151, 182), (254, 243, 232), (208, 108, 157)]
+
+# Convert RGB to hexadecimal format
+hex_values = [rgb_to_hex(rgb) for rgb in rgb_values]
+
+print(hex_values)

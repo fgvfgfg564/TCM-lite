@@ -595,7 +595,7 @@ class Engine:
         num_generation,
         bpg_qp=28,
         w_time=1.0,
-        boltzmann_k=0.05,
+        boltzmann_k=0.01,
         no_allocation=False,
         method_sigma=0.2,
         bytes_sigma=32,

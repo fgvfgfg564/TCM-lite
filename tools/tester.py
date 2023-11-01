@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument("--num-gen", nargs="+", type=int, default=[1000])
     parser.add_argument("--w_time", nargs="+", type=float, default=[1.0])
     parser.add_argument("--bpg_qp", nargs="+", type=int, default=[32])
-    parser.add_argument("--boltzmann_k", nargs="+", type=float, default=[0.05])
+    parser.add_argument("--boltzmann_k", nargs="+", type=float, default=[0.01])
     parser.add_argument("--method_sigma", nargs="+", type=float, default=[0.2])
     parser.add_argument("--bytes_sigma", nargs="+", type=float, default=[32])
     parser.add_argument("--no_allocation", nargs="+", type=bool, default=[False])
@@ -70,6 +70,7 @@ def test_single_image(
         realname = pathlib.Path(input_filename).stem
         obin = os.path.join(output_dir, realname + ".bin")
         orec = os.path.join(output_dir, realname + "_rec.png")
+        osta = os.path.join(output_dir, realname + "_statistics.json")
     else:
         _, obin = tempfile.mkstemp()
         _, orec = tempfile.mkstemp(suffix=".png")
@@ -90,8 +91,10 @@ def test_single_image(
             bytes_sigma=bytes_sigma,
         )
         torch.cuda.synchronize()
-    else:
-        genetic_statistic = {}
+
+        with open(osta, "w") as f:
+            json.dump(genetic_statistic, file=f)
+
     time_enc = time.time() - time0
 
     # Load bitstream
@@ -122,9 +125,7 @@ def test_single_image(
     results = {
         "bpp": bpp,
         "PSNR": psnr,
-        "t_enc": time_enc,
         "t_dec": time_dec_meter.avg,
-        "genetic_statistic": genetic_statistic,
     }
 
     if not save_image:
@@ -152,7 +153,6 @@ def test_glob(
 
     avg_psnr = AverageMeter()
     avg_bpp = AverageMeter()
-    avg_t_enc = AverageMeter()
     avg_t_dec = AverageMeter()
 
     results = {}
@@ -174,14 +174,12 @@ def test_glob(
         )
         avg_bpp.update(img_result["bpp"])
         avg_psnr.update(img_result["PSNR"])
-        avg_t_enc.update(img_result["t_enc"])
         avg_t_dec.update(img_result["t_dec"])
 
         results[pathlib.Path(filename).stem] = img_result
 
     results["avg_bpp"] = avg_bpp.avg
     results["avg_psnr"] = avg_psnr.avg
-    results["avg_t_enc"] = avg_t_enc.avg
     results["avg_t_dec"] = avg_t_dec.avg
 
     return results
