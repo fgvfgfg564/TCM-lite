@@ -32,7 +32,7 @@ def parse_args():
     args = parser.parse_args()
     return args
 
-METHOD_COLORS = ["#418DED", "#002875", "#D8A31A", "E6F4F1"]
+METHOD_COLORS = ["#418DED", "#D8A31A", "#002875", "E6F4F1"]
 
 def hex_to_bgr(hex_color):
     # Remove the '#' character if present
@@ -83,10 +83,12 @@ if __name__ == "__main__":
         mx = num_bytes.max()
         mi = num_bytes.min()
 
+        BOUND = 16
+
         for i in range(fileio.ctu_h):
             for j in range(fileio.ctu_w):
                 num_byte = num_bytes[i, j]
-                w = 255 - int(255 * (num_byte - mi) / (mx-mi))
+                w = 255 - BOUND - int((255 - BOUND*2) * (num_byte - mi) / (mx-mi))
                 color = (w, w, w)
                 
                 topleft = (j * ctu_size, i * ctu_size)
@@ -95,4 +97,15 @@ if __name__ == "__main__":
 
     alpha = args.alpha
     output_img = cv2.addWeighted(recon_img, 1 - alpha, mask, alpha, 0)
+    output_img = np.pad(output_img, ((0, 1), (0, 1), (0, 0)), mode='constant')
+
+    # Draw grid
+    for i in range(fileio.ctu_h):
+        for j in range(fileio.ctu_w):
+            color = (0, 0, 0)
+            
+            topleft = (j * ctu_size, i * ctu_size)
+            bottomright = ((j+1) * ctu_size, (i+1) * ctu_size)
+            output_img = cv2.rectangle(output_img, topleft, bottomright, color, 1)
+    
     cv2.imwrite(args.o, output_img)
