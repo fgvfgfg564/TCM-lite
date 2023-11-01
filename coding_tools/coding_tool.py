@@ -45,7 +45,7 @@ class CodingToolBase(nn.Module):
 
     @classmethod
     def _load_from_weight(cls, model_name, compiled_path, dtype, ctu_size, compile=True):
-        decoder_app = cls(model_name, dtype)
+        decoder_app = cls(model_name, dtype, ctu_size)
         torch.cuda.synchronize()
         dummy_input = torch.zeros(
             [1, 3, ctu_size, ctu_size], device="cuda", dtype=dtype
@@ -68,7 +68,7 @@ class CodingToolBase(nn.Module):
     def _load_from_compiled(cls, model_name, compiled_path, dtype, ctu_size):
         print("Load from compiled model")
         with InitTRTModelWithPlaceholder():
-            decoder_app = cls(model_name, dtype)
+            decoder_app = cls(model_name, dtype, ctu_size)
         load_weights(decoder_app.i_frame_net, compiled_path)
 
         dummy_input = torch.zeros(

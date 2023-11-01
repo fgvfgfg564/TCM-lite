@@ -34,8 +34,8 @@ class ModelEngine(CodingToolBase):
     # MODELS = copy.copy(MODELS1)
     MODELS = MODELS2
 
-    def __init__(self, model_name, dtype) -> None:
-        super().__init__(model_name, dtype)
+    def __init__(self, model_name, dtype, ctu_size) -> None:
+        super().__init__(model_name, dtype, ctu_size)
 
         # load model
         model_path, compiled_path = self.get_model_path(model_name)

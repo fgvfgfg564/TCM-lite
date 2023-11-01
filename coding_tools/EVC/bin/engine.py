@@ -23,8 +23,8 @@ class ModelEngine(CodingToolBase):
         # "Scale_EVC_SS": 'Scale_EVC_SS_MDRRL.pth.tar',
     }
 
-    def __init__(self, model_name, dtype) -> None:
-        super().__init__(model_name, dtype)
+    def __init__(self, model_name, dtype, ctu_size) -> None:
+        super().__init__(model_name, dtype, ctu_size)
 
         # load model
         model_path, compiled_path = self.get_model_path(model_name)

@@ -271,7 +271,7 @@ if __name__ == "__main__":
     args = parse_args()
 
     engine = Engine(
-        ctu_size=args.ctu_size
+        ctu_size=args.ctu_size,
         tool_groups=args.tools,
         tool_filter=args.tool_filter,
         ignore_tensorrt=True,
