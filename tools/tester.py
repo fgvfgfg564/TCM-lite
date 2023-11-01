@@ -33,7 +33,7 @@ def parse_args():
     parser.add_argument("--bpg_qp", nargs="+", type=int, default=[32])
     parser.add_argument("--boltzmann_k", nargs="+", type=float, default=[0.01])
     parser.add_argument("--method_sigma", nargs="+", type=float, default=[0.2])
-    parser.add_argument("--bytes_sigma", nargs="+", type=float, default=[32])
+    parser.add_argument("--bytes_sigma", nargs="+", type=float, default=[512])
     parser.add_argument("--no_allocation", nargs="+", type=bool, default=[False])
 
     args = parser.parse_args()

@@ -598,7 +598,7 @@ class Engine:
         boltzmann_k=0.01,
         no_allocation=False,
         method_sigma=0.2,
-        bytes_sigma=32,
+        bytes_sigma=512,
     ):
         input_img = self.read_img(input_pth)
         h, w, padded_img = self.pad_img(input_img)
