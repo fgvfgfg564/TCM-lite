@@ -71,7 +71,7 @@ if __name__ == "__main__":
             ax_e = axes[i, j]
             ax_t = ax_e.twinx()
 
-            for idx in len(engine.methods):
+            for idx in range(len(engine.methods)):
                 min_b = engine._precomputed_curve[idx][i][j]["min_t"]
                 max_b = engine._precomputed_curve[idx][i][j]["min_t"]
                 b = np.linspace(min_b, max_b, 100)
