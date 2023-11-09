@@ -148,3 +148,5 @@ output/
 
 *.bin
 *.png
+
+experiments/

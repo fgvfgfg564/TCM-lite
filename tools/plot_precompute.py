@@ -64,7 +64,7 @@ if __name__ == "__main__":
 
     engine._precompute_score(img_blocks, (h, w))
 
-    fig, axes = plt.subplots(n_ctu_h, n_ctu_w, figsize=(10, 6))
+    fig, axes = plt.subplots(n_ctu_h, n_ctu_w, figsize=(n_ctu_w*2, n_ctu_h*2))
 
     for i in range(n_ctu_h):
         for j in range(n_ctu_w):
@@ -73,19 +73,22 @@ if __name__ == "__main__":
 
             for idx in range(len(engine.methods)):
                 min_b = engine._precomputed_curve[idx][i][j]["min_t"]
-                max_b = engine._precomputed_curve[idx][i][j]["min_t"]
+                max_b = engine._precomputed_curve[idx][i][j]["max_t"]
                 b = np.linspace(min_b, max_b, 100)
                 e = engine._precomputed_curve[idx][i][j]["b_e"](b)
-                t = engine._precomputed_curve[idx][i][j]["b_t"](b)
+                t = np.polyval(engine._precomputed_curve[idx][i][j]["b_t"], b)
 
                 ax_e.plot(b, e, marker=' ', color=METHOD_COLORS[idx], linestyle='-')
                 ax_t.plot(b, t, marker=' ', color=METHOD_COLORS[idx], linestyle='--')
             
-            ax_e.set_xlabel("num_bytes")
-            ax_e.set_ylabel("SE")
-            ax_t.set_ylabel("dec. time")
+            # ax_e.set_xlabel("num_bytes")
+            # ax_e.set_ylabel("squared error")
+            # ax_t.set_ylabel("dec. time")
+            ax_e.set_xticks([])
+            ax_e.set_yticks([])
+            ax_t.set_yticks([])
     
     plt.tight_layout()
 
-    plt.savefig(args.o+".png")
+    plt.savefig(args.o+".png", dpi=300)
     plt.savefig(args.o+".pdf")

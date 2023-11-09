@@ -12,6 +12,13 @@ import cv2
 from bin.engine import *
 from bin.utils import *
 
+import matplotlib.pyplot as plt
+from matplotlib import colors
+
+CMAP = plt.get_cmap('bwr')
+    
+def get_color(position):
+    return list([int(x*255) for x in CMAP(position)[:3]])[::-1]
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -79,17 +86,18 @@ if __name__ == "__main__":
     else:
         # num_bytes
         num_bytes = fileio.num_bytes
+        print(num_bytes)
 
         mx = num_bytes.max()
         mi = num_bytes.min()
 
-        BOUND = 16
+        BOUND = 0
 
         for i in range(fileio.ctu_h):
             for j in range(fileio.ctu_w):
                 num_byte = num_bytes[i, j]
-                w = 255 - BOUND - int((255 - BOUND*2) * (num_byte - mi) / (mx-mi))
-                color = (w, w, w)
+                w = (num_byte - mi) / (mx-mi)
+                color = get_color(w)
                 
                 topleft = (j * ctu_size, i * ctu_size)
                 bottomright = ((j+1) * ctu_size, (i+1) * ctu_size)
