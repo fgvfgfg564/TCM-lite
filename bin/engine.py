@@ -110,16 +110,26 @@ class Engine:
             for model_name in engine_cls.MODELS.keys():
                 if not tool_filter or model_name in tool_filter:
                     print("Loading model:", model_name)
-                    self.methods.append(
-                        (
-                            engine_cls.from_model_name(
-                                model_name, self.ignore_tensorrt, self.dtype, self.ctu_size
-                            ),
-                            model_name,
-                            idx,
-                        )
+
+                    method = engine_cls.from_model_name(
+                        model_name, self.ignore_tensorrt, self.dtype, self.ctu_size
                     )
-                    idx += 1
+                    
+                    if tool_filter is None:
+                        cnt = 1
+                    else:
+                        cnt = tool_filter.count(model_name)
+
+                    for _ in range(cnt):
+                        self.methods.append(
+                            (
+                                method,
+                                model_name,
+                                idx,
+                            )
+                        )
+                        idx += 1
+        
         if len(self.methods) == 0:
             raise RuntimeError("No valid coding tool is loaded!")
 
@@ -226,7 +236,7 @@ class Engine:
                     times = []
 
                     clip_h = min(h - i * ctu_h, ctu_h)
-                    clip_w = min(w - i * ctu_w, ctu_w)
+                    clip_w = min(w - j * ctu_w, ctu_w)
 
                     for qscale in self.qscale_samples:
                         image_block = img_blocks[i, j]
@@ -401,7 +411,7 @@ class Engine:
                 est_sqe = curves["b_e"](target_bytes)
 
                 print(
-                    f"- CTU [{i}, {j}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\tsquared_error={est_sqe:.6f}"
+                    f"- CTU [{i}, {j}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\tsquared_error={est_sqe:.6f}; method_scores={solution.method_score[:, i, j]}"
                 )
 
     def _compress_blocks(self, img_blocks, solution):
@@ -471,6 +481,12 @@ class Engine:
             method_scores = self._initial_method_score(n_ctu_h, n_ctu_w, n_method)
             target_byteses = default_target_bytes.copy()
             method = Solution(method_scores, target_byteses)
+            self._mutate(
+                method,
+                total_target_bytes,
+                method_sigma,
+                bytes_sigma,
+            )
             method.normalize_target_byteses(
                 self._minimal_bytes, self._maximal_bytes, total_target_bytes
             )
@@ -522,6 +538,8 @@ class Engine:
                 probs.append(t)
             probs = np.array(probs, dtype=np.float32)
             probs = stable_softmax(probs)
+
+            print("Probability for top 10:", probs[:10], flush=True)
 
             # Hybrid
             idxes = np.arange(num_breed)

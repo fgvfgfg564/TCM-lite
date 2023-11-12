@@ -11,7 +11,7 @@ def main():
 
     try:
         # Load the saved model file
-        loaded_dict = torch.load(args.filename, map_location=torch.device("cpu"))
+        loaded_dict = torch.load(args.filename, map_location=torch.device("cpu"))['state_dict']
 
         if isinstance(loaded_dict, dict):
             # Display the keys of the dictionary
