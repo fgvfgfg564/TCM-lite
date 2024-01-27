@@ -31,7 +31,7 @@ cd src
 mkdir build
 cd build
 conda activate $YOUR_PY38_ENV_NAME
-cmake ../cpp -DCMAKE_BUILD_TYPE=Release
+cmake ../cpp -DCMAKE_BUILD_TYPE=Release -DPYTHON_EXECUTABLE=$(which python)
 make -j
 ```
 

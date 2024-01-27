@@ -29,8 +29,9 @@ def get_state_dict(model_path, device):
 
 
 class ModelEngine(CodingToolBase):
-    MODELS1 = {f"TCM_VBR1_{i}": f"vcip_vbr1_{i}_best.pth.tar" for i in range(3)}
-    MODELS2 = {f"TCM_VBR2_{i}": f"vcip_vbr2_{i}_best.pth.tar" for i in range(3)}
+    # MODELS1 = {f"TCM_VBR1_{i}": f"vcip_vbr1_{i}_best.pth.tar" for i in range(3)}
+    MODELS1 = {}
+    MODELS2 = {f"TCM_VBR2_{i}": f"vcip_vbr2_{i}_best.pth.tar" for i in [2]}
     # MODELS = copy.copy(MODELS1)
     MODELS = MODELS2
 
