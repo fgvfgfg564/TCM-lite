@@ -4,6 +4,7 @@ import time
 from PIL import Image
 import torch
 import torch.nn.functional as F
+from dataclasses import dataclass
 
 import tqdm
 import copy
@@ -19,24 +20,17 @@ from coding_tools.TCM.app.engine import ModelEngine as TCMModelEngine
 import coding_tools.utils.timer as timer
 
 from .utils import *
-from .fileio import FileIO
+from .fileio import FileIO, get_padding_size
 
 SAFETY_BYTE_PER_CTU = 2
 
 np.seterr(all="raise")
 
-
-def get_padding_size(height, width, p=768):
-    new_h = (height + p - 1) // p * p
-    new_w = (width + p - 1) // p * p
-    # padding_left = (new_w - width) // 2
-    padding_left = 0
-    padding_right = new_w - width - padding_left
-    # padding_top = (new_h - height) // 2
-    padding_top = 0
-    padding_bottom = new_h - height - padding_top
-    return padding_left, padding_right, padding_top, padding_bottom
-
+@dataclass
+class PaddedBlock:
+    padded_block: torch.Tensor
+    h: int
+    w: int
 
 class Solution:
     def __init__(self, method_score: np.ndarray, target_byteses: np.ndarray) -> None:
@@ -134,19 +128,19 @@ class Engine:
         if len(self.methods) == 0:
             raise RuntimeError("No valid coding tool is loaded!")
 
-    def _compress_with_target(self, method, image_block, target_bytes):
+    def _compress_with_target(self, method, image_block: PaddedBlock, target_bytes):
         min_qs = float(1e-5)
         max_qs = float(1.0)
         while min_qs < max_qs - 1e-6:
             mid_qs = (max_qs + min_qs) / 2.0
-            bitstream = method.compress_block(image_block, mid_qs)
+            bitstream = method.compress_block(image_block.padded_block, mid_qs)
             len_bytes = len(bitstream)
             if len_bytes <= target_bytes:
                 max_qs = mid_qs
             else:
                 min_qs = mid_qs
 
-        bitstream = method.compress_block(image_block, max_qs)
+        bitstream = method.compress_block(image_block.padded_block, max_qs)
         return bitstream, max_qs
 
     @classmethod
@@ -165,23 +159,21 @@ class Engine:
     def _estimate_score(
         self,
         method,
-        image_block,
-        clip_h,
-        clip_w,
+        image_block: PaddedBlock,
         target_bytes=None,
         q_scale=None,
         repeat=1,
     ):
         times = []
         sqes = []
-        _, c, h, w = image_block.shape
+        _, c, h, w = image_block.padded_block.shape
         for i in range(repeat):
             if q_scale is None:
                 bitstream, q_scale = self._compress_with_target(
-                    method, image_block, target_bytes
+                    method, image_block.padded_block, target_bytes
                 )
             else:
-                bitstream = method.compress_block(image_block, q_scale)
+                bitstream = method.compress_block(image_block.padded_block, q_scale)
             time0 = time.time()
             recon_img = method.decompress_block(bitstream, h, w, q_scale)
             recon_img = torch.clamp(recon_img, 0, 1)
@@ -189,13 +181,13 @@ class Engine:
             torch.cuda.synchronize()
             times.append(time.time() - time0)
 
-            image_block = self.torch_pseudo_quantize_to_uint8(image_block)
+            ref = self.torch_pseudo_quantize_to_uint8(image_block.padded_block)
             recon_img = self.torch_pseudo_quantize_to_uint8(recon_img)
 
-            image_block = image_block[:, :clip_h, :clip_w, :]
-            recon_img = recon_img[:, :clip_h, :clip_w, :]
+            ref = ref[:, :image_block.h, :image_block.w, :]
+            recon_img = recon_img[:, :image_block.h, :image_block.w, :]
 
-            sqe = torch.sum((image_block - recon_img) ** 2).detach().cpu().numpy()
+            sqe = torch.sum((ref - recon_img) ** 2).detach().cpu().numpy()
             sqes.append(sqe)
 
         sqe = np.mean(sqes)
@@ -203,65 +195,48 @@ class Engine:
 
         return sqe, np.mean(times), bitstream, recon_img, q_scale
     
-    def divide_blocks(self, padded_img):
-        if not self.mosaic:
-            img_blocks = einops.rearrange(
-                padded_img,
-                "b c (n_ctu_h ctu_size_h) (n_ctu_w ctu_size_w) -> (n_ctu_h n_ctu_w) b c ctu_size_h ctu_size_w",
-                ctu_size_h=self.ctu_size,
-                ctu_size_w=self.ctu_size,
-            )
-            return img_blocks
-        else:
-            raise NotImplemented
+    def divide_blocks(self, fileio: FileIO, h, w, padded_img):
+        blocks = []
+        for i in range(fileio.n_ctu):
+            upper, left, lower, right = fileio.block_indexes[i]
+            lower_real = min(lower, h)
+            right_real = min(right, w)
+            print(f"Block #{i}: ({upper}, {left}) ~ ({lower_real}, {right_real})")
+            if upper < lower_real and left < right_real:
+                blocks.append(PaddedBlock(padded_img[:, :, upper:lower, left:right], lower_real - upper, right_real - left))
+        
+        return blocks
+
+    def join_blocks(self, decoded_ctus, file_io: FileIO):
+        h = file_io.h
+        w = file_io.w
+        recon_img = torch.zeros(size=(3, h, w), device=decoded_ctus[0].device)
+        for i, ctu in enumerate(decoded_ctus):
+            upper, left, lower, right = file_io.block_indexes[i]
+            print(upper, left, lower, right, ctu.shape)
+            lower_real = min(lower, h)
+            right_real = min(right, w)
+
+            recon_img[:, upper:lower_real, left:right_real] = ctu[:, :, :lower_real-upper, :right_real-left]
+        return recon_img
     
-    def block_id_hw(self, h, w, block_id_mesh):
-        n_ctu_h = (h - 1) // self.ctu_size + 1
-        n_ctu_w = (w - 1) // self.ctu_size + 1
+    # GA
 
-        id_h = block_id_mesh // n_ctu_w
-        id_w = block_id_mesh % n_ctu_w
-
-        return id_h, id_w
-    
-    def block_upper_left(self, h, w, block_id):
-        if not self.mosaic:
-            id_h, id_w = self.block_id_hw(h, w, block_id)
-            return id_h * self.ctu_size, id_w * self.ctu_size
-
-    def block_lower_right(self, h, w, block_id):
-        if not self.mosaic:
-            id_h, id_w = self.block_id_hw(h, w, block_id)
-            return (id_h + 1) * self.ctu_size + 1, (id_w + 1) * self.ctu_size
-    
-    def get_clip(self, h, w, block_id):
-        upper, left = self.block_upper_left(h, w, block_id)
-        lower, right = self.block_lower_right(h, w, block_id)
-        lower = min(lower, h)
-        right = min(right, w)
-        return lower-upper, right-left
-
-    def join_blocks(self, decoded_ctus, file_io):
-        if not self.mosaic:
-            recon_img = torch.cat(decoded_ctus, dim=0)
-            recon_img = einops.rearrange(
-                recon_img,
-                "(n_ctu_h n_ctu_w) c ctu_size_h ctu_size_w -> 1 c (n_ctu_h ctu_size_h) (n_ctu_w ctu_size_w)",
-                ctu_size_h=file_io.ctu_size,
-                ctu_size_w=file_io.ctu_size,
-            )
-            return recon_img
-
-    def _precompute_score(self, img_blocks: torch.Tensor, img_size):
+    def _precompute_score(self, img_blocks, img_size):
         if (
             self.cached_blocks is not None
-            and self.cached_blocks.shape == img_blocks.shape
+            and len(self.cached_blocks) == len(img_blocks)
         ):
-            err = torch.max(torch.abs(img_blocks.cpu() - self.cached_blocks))
-            if err < 1e-3:
+            errmx = None
+            for x, y in zip(self.cached_blocks, img_blocks):
+                err = torch.max(torch.abs(x.padded_block.cpu() - y.padded_block.cpu()))
+                if errmx is None or errmx < err:
+                    errmx = err
+
+            if errmx < 1e-3:
                 print("Using cached precompute scores ...")
                 return
-        self.cached_blocks = img_blocks.cpu()
+        self.cached_blocks = [PaddedBlock(x.padded_block.cpu(), x.h, x.w) for x in img_blocks]
 
         h, w = img_size
         n_ctu = len(img_blocks)
@@ -283,16 +258,12 @@ class Engine:
                 qscales = []
                 times = []
 
-                clip_h, clip_w = self.get_clip(h, w, i)
-
                 for qscale in self.qscale_samples:
                     image_block = img_blocks[i]
 
                     sqe, dec_time, bitstream, __, ___ = self._estimate_score(
                         method,
                         image_block,
-                        clip_h,
-                        clip_w,
                         target_bytes=None,
                         q_scale=qscale,
                         repeat=1,
@@ -342,7 +313,6 @@ class Engine:
         global_time = 0
 
         for i in range(n_ctu):
-            img_block = img_blocks[i]
             method_id = method_ids[i]
             target_bytes = target_byteses[i]
 
@@ -424,7 +394,7 @@ class Engine:
             mid_qs = (max_qs + min_qs) / 2.0
             total_bytes = 0
             for i in range(n_ctu):
-                bitstream = method.compress_block(img_blocks[i], mid_qs)
+                bitstream = method.compress_block(img_blocks[i].padded_block, mid_qs)
                 len_bytes = len(bitstream)
                 target_bytes[i] = len_bytes
                 total_bytes += len_bytes
@@ -681,13 +651,13 @@ class Engine:
         )
 
         header_bytes = file_io.header_size
-        safety_bytes = SAFETY_BYTE_PER_CTU * file_io.num_ctu
+        safety_bytes = SAFETY_BYTE_PER_CTU * file_io.n_ctu
         total_target_bytes -= header_bytes + safety_bytes
         print(
             f"Header bytes={header_bytes}; Safety_bytes={safety_bytes}; CTU bytes={total_target_bytes}"
         )
 
-        img_blocks = self.divide_blocks(padded_img)
+        img_blocks = self.divide_blocks(file_io, h, w, padded_img)
         method_ids, q_scales, bitstreams = self._solve_genetic(
             img_blocks,
             img_size,
@@ -712,24 +682,23 @@ class Engine:
         }
         return data
 
-    def decode(self, file_io):
+    def decode(self, file_io: FileIO):
         with torch.no_grad():
             decoded_ctus = []
             with timer.Timer("Decode_CTU"):
-                for i in range(file_io.n_ctu):
+                for i, (upper, left, lower, right) in enumerate(file_io.block_indexes):
                     method_id = file_io.method_id[i]
                     q_scale = file_io.q_scale[i]
                     bitstream = file_io.bitstreams[i]
                     method, method_name, _ = self.methods[method_id]
                     print(
-                        f"Decoding CTU[{i}]: method #{method_id}('{method_name}'); q_scale={q_scale:.6f}"
+                        f"Decoding CTU #{i}: ({upper}, {left}) ~ ({lower}, {right})  method #{method_id}('{method_name}'); q_scale={q_scale:.6f}"
                     )
                     ctu = method.decompress_block(
-                        bitstream, self.ctu_size, self.ctu_size, q_scale
+                        bitstream, lower-upper, right-left, q_scale
                     )
                     decoded_ctus.append(ctu)
             with timer.Timer("Reconstruct&save"):
                 recon_img = self.join_blocks(decoded_ctus, file_io)
-                recon_img = recon_img[0, :, : file_io.h, : file_io.w]
 
             return recon_img

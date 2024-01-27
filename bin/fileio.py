@@ -17,6 +17,16 @@ from typing import BinaryIO
 import numpy as np
 import io
 
+def get_padding_size(height, width, p=768):
+    new_h = (height + p - 1) // p * p
+    new_w = (width + p - 1) // p * p
+    # padding_left = (new_w - width) // 2
+    padding_left = 0
+    padding_right = new_w - width - padding_left
+    # padding_top = (new_h - height) // 2
+    padding_top = 0
+    padding_bottom = new_h - height - padding_top
+    return padding_left, padding_right, padding_top, padding_bottom
 
 class FileIO:
     meta_str = "HH"
@@ -29,7 +39,8 @@ class FileIO:
         self.w = w
         self.ctu_size = ctu_size
         self.mosaic = mosaic
-        self.n_ctu = self.get_n_ctu()
+        self.block_indexes = []
+        self.build_block_partition()
 
         self.format_str = [self.meta_str]
         for i in range(self.n_ctu):
@@ -41,11 +52,22 @@ class FileIO:
         self.num_bytes = None if bitstreams is None else np.array([len(bitstreams[i] for i in range(self.n_ctu))])
         self.q_scale = q_scale
     
-    def get_n_ctu(self):
-        ctu_h = (self.h - 1) // self.ctu_size + 1
-        ctu_w = (self.w - 1) // self.ctu_size + 1
-        n_ctu = ctu_h * ctu_w
-        return n_ctu
+    def build_block_partition(self):
+        if not self.mosaic:
+            n_ctu_h, n_ctu_w = self.n_ctu_hw(self.h, self.w, self.ctu_size)
+            n_ctu = n_ctu_h * n_ctu_w
+        else:
+            n_ctu_h, n_ctu_w = self.n_ctu_hw(self.h, self.w, self.ctu_size * 3)
+            n_ctu = n_ctu_h * n_ctu_w * 5
+
+        for i in range(n_ctu):
+            upper, left, lower, right = self.block_bb(self.h, self.w, i)
+            lower_real = min(lower, self.h)
+            right_real = min(right, self.w)
+            if upper < lower_real and left < right_real:
+                self.block_indexes.append((upper, left, lower,right))
+        
+        self.n_ctu = len(self.block_indexes)
 
     @property
     def header_size(self):
@@ -98,10 +120,64 @@ class FileIO:
         # read CTU bytes
         file_io.bitstreams = []
         for i in range(file_io.n_ctu):
-            bitstream_tmp = []
             bits_ctu = fd.read(num_bytes[i])
-            bitstream_tmp.append(bits_ctu)
-            file_io.bitstreams.append(bitstream_tmp)
+            file_io.bitstreams.append(bits_ctu)
 
         fd.close()
         return file_io
+
+    # Block Division
+
+    def n_ctu_hw(self, h, w, ctu_size):
+        n_ctu_h = (h + ctu_size - 1) // ctu_size + 1
+        n_ctu_w = (w + ctu_size - 1) // ctu_size + 1
+
+        return n_ctu_h, n_ctu_w
+    
+    def block_id_hw(self, h, w, block_id_mesh):
+        n_ctu_h, n_ctu_w = self.n_ctu_hw(h, w, self.ctu_size)
+
+        id_h = block_id_mesh // n_ctu_w
+        id_w = block_id_mesh % n_ctu_w
+
+        if id_h >= n_ctu_h:
+            return None, None
+
+        return id_h, id_w
+    
+    def block_bb(self, h, w, block_id):
+        if not self.mosaic:
+            id_h, id_w = self.block_id_hw(h, w, block_id)
+
+            if id_h is None:
+                return None, None, None, None
+            
+            return id_h * self.ctu_size, id_w * self.ctu_size, (id_h + 1) * self.ctu_size, (id_w + 1) * self.ctu_size
+        else:
+            metablk_id = block_id // 5
+            miniblk_id = block_id % 5
+            n_ctu_h = (h - 1) // (self.ctu_size * 3) + 1
+            n_ctu_w = (w - 1) // (self.ctu_size * 3) + 1
+            
+            padded_h = (self.h + self.ctu_size - 1) // self.ctu_size * self.ctu_size
+            padded_w = (self.h + self.ctu_size - 1) // self.ctu_size * self.ctu_size
+
+            id_h = metablk_id // n_ctu_w
+            id_w = metablk_id % n_ctu_w
+
+            upper = id_h * self.ctu_size * 3
+            left = id_w * self.ctu_size * 3
+            lower = upper
+            right = left
+
+            bias = [(0, 0, 2, 1), (0, 1, 1, 3), (1, 1, 2, 2), (2, 0, 3, 2), (1, 2, 3, 3)]
+
+            upper += bias[miniblk_id][0] * self.ctu_size
+            left += bias[miniblk_id][1] * self.ctu_size
+            lower += bias[miniblk_id][2] * self.ctu_size
+            right += bias[miniblk_id][3] * self.ctu_size
+
+            lower = min(lower, padded_h)
+            right = min(right, padded_w)
+
+            return upper, left, lower, right
