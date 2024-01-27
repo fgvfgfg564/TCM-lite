@@ -26,6 +26,7 @@ def parse_args():
     )
     parser.add_argument("--tool_filter", nargs="+", type=str, default=None)
     parser.add_argument("--ctu_size", type=int, default=512)
+    parser.add_argument('--mosaic', action='store_true', default=False)
 
     # Encoder config args
     parser.add_argument("-N", nargs="+", type=int, default=[1000])
@@ -107,7 +108,7 @@ def test_single_image(
     time_dec_meter = AverageMeter()
     for i in range(10):
         time_start = time.time()
-        file_io: FileIO = FileIO.load(bitstream, engine.ctu_size)
+        file_io: FileIO = FileIO.load(bitstream, engine.mosaic, engine.ctu_size)
         out_img = engine.decode(file_io)  # Decoded image; shape=[3, H, W]
         torch.cuda.synchronize()
         time_end = time.time()
@@ -272,6 +273,7 @@ if __name__ == "__main__":
 
     engine = Engine(
         ctu_size=args.ctu_size,
+        mosaic=args.mosaic,
         tool_groups=args.tools,
         tool_filter=args.tool_filter,
         ignore_tensorrt=True,

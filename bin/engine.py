@@ -40,19 +40,18 @@ def get_padding_size(height, width, p=768):
 
 class Solution:
     def __init__(self, method_score: np.ndarray, target_byteses: np.ndarray) -> None:
-        self.method_score = method_score  # ctu_h, ctu_w, n_method
+        self.method_score = method_score  # ctu, n_method
         self.method_ids = np.argmax(method_score, axis=0)
         self.target_byteses = target_byteses
-        self.n_ctu_h, self.n_ctu_w = self.method_ids.shape
+        self.n_ctu = len(self.method_ids)
 
     def normalize_target_byteses(self, min_table, max_table, total_target):
         min_bytes = np.zeros_like(self.target_byteses, dtype=np.int32)
         max_bytes = np.zeros_like(self.target_byteses, dtype=np.int32)
 
-        for i in range(self.n_ctu_h):
-            for j in range(self.n_ctu_w):
-                min_bytes[i, j] = min_table[self.method_ids[i, j]][i][j]
-                max_bytes[i, j] = max_table[self.method_ids[i, j]][i][j]
+        for i in range(self.n_ctu):
+            min_bytes[i] = min_table[self.method_ids[i]][i]
+            max_bytes[i] = max_table[self.method_ids[i]][i]
 
         old_target = self.target_byteses
         old_target -= min_bytes
@@ -77,7 +76,8 @@ class Engine:
 
     def __init__(
         self,
-        ctu_size=512,
+        ctu_size,
+        mosaic,
         num_qscale_samples=20,
         tool_groups=TOOL_GROUPS.keys(),
         tool_filter=None,
@@ -85,6 +85,7 @@ class Engine:
         dtype=torch.half,
     ) -> None:
         self.ctu_size = ctu_size
+        self.mosaic = mosaic
         self.methods = []
         self.ignore_tensorrt = ignore_tensorrt
 
@@ -201,6 +202,55 @@ class Engine:
         psnr = -10 * np.log10(sqe)
 
         return sqe, np.mean(times), bitstream, recon_img, q_scale
+    
+    def divide_blocks(self, padded_img):
+        if not self.mosaic:
+            img_blocks = einops.rearrange(
+                padded_img,
+                "b c (n_ctu_h ctu_size_h) (n_ctu_w ctu_size_w) -> (n_ctu_h n_ctu_w) b c ctu_size_h ctu_size_w",
+                ctu_size_h=self.ctu_size,
+                ctu_size_w=self.ctu_size,
+            )
+            return img_blocks
+        else:
+            raise NotImplemented
+    
+    def block_id_hw(self, h, w, block_id_mesh):
+        n_ctu_h = (h - 1) // self.ctu_size + 1
+        n_ctu_w = (w - 1) // self.ctu_size + 1
+
+        id_h = block_id_mesh // n_ctu_w
+        id_w = block_id_mesh % n_ctu_w
+
+        return id_h, id_w
+    
+    def block_upper_left(self, h, w, block_id):
+        if not self.mosaic:
+            id_h, id_w = self.block_id_hw(h, w, block_id)
+            return id_h * self.ctu_size, id_w * self.ctu_size
+
+    def block_lower_right(self, h, w, block_id):
+        if not self.mosaic:
+            id_h, id_w = self.block_id_hw(h, w, block_id)
+            return (id_h + 1) * self.ctu_size + 1, (id_w + 1) * self.ctu_size
+    
+    def get_clip(self, h, w, block_id):
+        upper, left = self.block_upper_left(h, w, block_id)
+        lower, right = self.block_lower_right(h, w, block_id)
+        lower = min(lower, h)
+        right = min(right, w)
+        return lower-upper, right-left
+
+    def join_blocks(self, decoded_ctus, file_io):
+        if not self.mosaic:
+            recon_img = torch.cat(decoded_ctus, dim=0)
+            recon_img = einops.rearrange(
+                recon_img,
+                "(n_ctu_h n_ctu_w) c ctu_size_h ctu_size_w -> 1 c (n_ctu_h ctu_size_h) (n_ctu_w ctu_size_w)",
+                ctu_size_h=file_io.ctu_size,
+                ctu_size_w=file_io.ctu_size,
+            )
+            return recon_img
 
     def _precompute_score(self, img_blocks: torch.Tensor, img_size):
         if (
@@ -214,99 +264,95 @@ class Engine:
         self.cached_blocks = img_blocks.cpu()
 
         h, w = img_size
-        n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
+        n_ctu = len(img_blocks)
         n_methods = len(self.methods)
 
         self._precomputed_curve = {}
-        self._minimal_bytes = np.zeros([n_methods, n_ctu_h, n_ctu_w], dtype=np.int32)
-        self._maximal_bytes = np.zeros([n_methods, n_ctu_h, n_ctu_w], dtype=np.int32)
+        self._minimal_bytes = np.zeros([n_methods, n_ctu], dtype=np.int32)
+        self._maximal_bytes = np.zeros([n_methods, n_ctu], dtype=np.int32)
 
-        pbar = tqdm.trange(n_methods * n_ctu_h * n_ctu_w * len(self.qscale_samples))
+        pbar = tqdm.trange(n_methods * n_ctu * len(self.qscale_samples))
         pbar.set_description("Precomputing score")
         pbar_iter = pbar.__iter__()
         for method, _, idx in self.methods:
             self._precomputed_curve[idx] = {}
-            for i in range(n_ctu_h):
+            for i in range(n_ctu):
                 self._precomputed_curve[idx][i] = {}
-                for j in range(n_ctu_w):
-                    self._precomputed_curve[idx][i][j] = {}
-                    sqes = []
-                    num_bytes = []
-                    qscales = []
-                    times = []
+                sqes = []
+                num_bytes = []
+                qscales = []
+                times = []
 
-                    clip_h = min(h - i * ctu_h, ctu_h)
-                    clip_w = min(w - j * ctu_w, ctu_w)
+                clip_h, clip_w = self.get_clip(h, w, i)
 
-                    for qscale in self.qscale_samples:
-                        image_block = img_blocks[i, j]
+                for qscale in self.qscale_samples:
+                    image_block = img_blocks[i]
 
-                        sqe, dec_time, bitstream, __, ___ = self._estimate_score(
-                            method,
-                            image_block,
-                            clip_h,
-                            clip_w,
-                            target_bytes=None,
-                            q_scale=qscale,
-                            repeat=1,
-                        )
-                        num_byte = len(bitstream)
-                        num_bytes.append(num_byte)
-                        sqes.append(sqe)
-                        times.append(dec_time)
-                        qscales.append(qscale)
-                        pbar_iter.__next__()
+                    sqe, dec_time, bitstream, __, ___ = self._estimate_score(
+                        method,
+                        image_block,
+                        clip_h,
+                        clip_w,
+                        target_bytes=None,
+                        q_scale=qscale,
+                        repeat=1,
+                    )
+                    num_byte = len(bitstream)
+                    num_bytes.append(num_byte)
+                    sqes.append(sqe)
+                    times.append(dec_time)
+                    qscales.append(qscale)
+                    pbar_iter.__next__()
 
-                    make_strictly_increasing(num_bytes)
+                make_strictly_increasing(num_bytes)
 
-                    if len(num_bytes) <= 3 or not is_strictly_increasing(num_bytes):
-                        raise ValueError(
-                            f"num_bytes are too few or not strictly increasing: \nnum_bytes={num_bytes}\nsqes={sqes}\nqscales={qscales}"
-                        )
+                if len(num_bytes) <= 3 or not is_strictly_increasing(num_bytes):
+                    raise ValueError(
+                        f"num_bytes are too few or not strictly increasing: \nnum_bytes={num_bytes}\nsqes={sqes}\nqscales={qscales}"
+                    )
 
-                    self._minimal_bytes[idx, i, j] = num_bytes[0]
-                    self._maximal_bytes[idx, i, j] = num_bytes[-1]
+                self._minimal_bytes[idx, i] = num_bytes[0]
+                self._maximal_bytes[idx, i] = num_bytes[-1]
 
-                    try:
-                        b_e = interpolate.interp1d(num_bytes, sqes, kind="linear")
-                        # b_t = interpolate.interp1d(num_bytes, times, kind='linear')
-                        b_t = np.polyfit(num_bytes, times, 1)
-                        b_q = interpolate.interp1d(num_bytes, qscales, kind="linear")
-                    except ValueError as e:
-                        print(f"Interpolation error!")
-                        print(f"num_bytes={num_bytes}")
-                        print(f"sqes={sqes}")
-                        raise e
+                try:
+                    b_e = interpolate.interp1d(num_bytes, sqes, kind="linear")
+                    # b_t = interpolate.interp1d(num_bytes, times, kind='linear')
+                    b_t = np.polyfit(num_bytes, times, 1)
+                    b_q = interpolate.interp1d(num_bytes, qscales, kind="linear")
+                except ValueError as e:
+                    print(f"Interpolation error!")
+                    print(f"num_bytes={num_bytes}")
+                    print(f"sqes={sqes}")
+                    raise e
 
-                    self._precomputed_curve[idx][i][j]["b_e"] = b_e
-                    self._precomputed_curve[idx][i][j]["b_t"] = b_t
-                    self._precomputed_curve[idx][i][j]["min_t"] = min(num_bytes)
-                    self._precomputed_curve[idx][i][j]["max_t"] = max(num_bytes)
-                    self._precomputed_curve[idx][i][j]["b_q"] = b_q
+                self._precomputed_curve[idx][i]["b_e"] = b_e
+                self._precomputed_curve[idx][i]["b_t"] = b_t
+                self._precomputed_curve[idx][i]["min_t"] = min(num_bytes)
+                self._precomputed_curve[idx][i]["max_t"] = max(num_bytes)
+                self._precomputed_curve[idx][i]["b_q"] = b_q
 
     def _search(
         self, img_blocks, num_pixels, method_ids, target_byteses, total_target, bpg_psnr
     ):
         if np.sum(target_byteses) > total_target:
             return -np.inf, -np.inf, np.inf
-        n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
+        n_ctu = len(img_blocks)
 
         sqe = 0
         global_time = 0
 
-        for i in range(n_ctu_h):
-            for j in range(n_ctu_w):
-                img_block = img_blocks[i, j]
-                method_id = method_ids[i][j]
-                target_bytes = target_byteses[i][j]
+        for i in range(n_ctu):
+            img_block = img_blocks[i]
+            method_id = method_ids[i]
+            target_bytes = target_byteses[i]
 
-                precomputed_results = self._precomputed_curve[method_id][i][j]
+            precomputed_results = self._precomputed_curve[method_id][i]
 
-                ctu_sqe = precomputed_results["b_e"](target_bytes)
-                t = np.polyval(precomputed_results["b_t"], target_bytes)
+            ctu_sqe = precomputed_results["b_e"](target_bytes)
+            t = np.polyval(precomputed_results["b_t"], target_bytes)
 
-                global_time += t
-                sqe += ctu_sqe
+            global_time += t
+            sqe += ctu_sqe
 
         sqe /= num_pixels * 3
         psnr = -10 * np.log10(sqe)
@@ -371,18 +417,17 @@ class Engine:
     def _search_init_qscale(self, method, img_blocks, total_target_bytes):
         min_qs = float(1e-5)
         max_qs = float(1.0)
-        n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
-        target_bytes = np.zeros([n_ctu_h, n_ctu_w])
+        n_ctu = len(img_blocks)
+        target_bytes = np.zeros([n_ctu])
 
         while min_qs < max_qs - 1e-3:
             mid_qs = (max_qs + min_qs) / 2.0
             total_bytes = 0
-            for i in range(n_ctu_h):
-                for j in range(n_ctu_w):
-                    bitstream = method.compress_block(img_blocks[i, j], mid_qs)
-                    len_bytes = len(bitstream)
-                    target_bytes[i, j] = len_bytes
-                    total_bytes += len_bytes
+            for i in range(n_ctu):
+                bitstream = method.compress_block(img_blocks[i], mid_qs)
+                len_bytes = len(bitstream)
+                target_bytes[i] = len_bytes
+                total_bytes += len_bytes
             if total_bytes <= total_target_bytes:
                 max_qs = mid_qs
             else:
@@ -396,48 +441,44 @@ class Engine:
             f"score={solution.score}; total_bytes=[{total_bytes}/{total_target_bytes}]({100.0*total_bytes/total_target_bytes:.4f}%); PSNR={solution.psnr:.3f}; time={solution.time:.3f}s",
             flush=True,
         )
-        for i in range(solution.n_ctu_h):
-            for j in range(solution.n_ctu_w):
-                method_id = solution.method_ids[i, j]
-                target_bytes = solution.target_byteses[i, j]
+        for i in range(solution.n_ctu):
+            method_id = solution.method_ids[i]
+            target_bytes = solution.target_byteses[i]
 
-                curves = self._precomputed_curve[method_id][i][j]
+            curves = self._precomputed_curve[method_id][i]
 
-                min_tb = curves["min_t"]
-                max_tb = curves["max_t"]
+            min_tb = curves["min_t"]
+            max_tb = curves["max_t"]
 
-                est_time = np.polyval(curves["b_t"], target_bytes)
-                est_qscale = curves["b_q"](target_bytes)
-                est_sqe = curves["b_e"](target_bytes)
+            est_time = np.polyval(curves["b_t"], target_bytes)
+            est_qscale = curves["b_q"](target_bytes)
+            est_sqe = curves["b_e"](target_bytes)
 
-                print(
-                    f"- CTU [{i}, {j}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\tsquared_error={est_sqe:.6f}; method_scores={solution.method_score[:, i, j]}"
-                )
+            print(
+                f"- CTU [{i}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\tsquared_error={est_sqe:.6f}; method_scores={solution.method_score[:, i]}"
+            )
 
     def _compress_blocks(self, img_blocks, solution):
         # Calculate q_scale and bitstream for CTUs
-        n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
+        n_ctu = len(img_blocks)
         bitstreams = []
-        q_scales = np.zeros([n_ctu_h, n_ctu_w], dtype=np.float32)
-        for i in range(n_ctu_h):
-            bitstreams_tmp = []
-            for j in range(n_ctu_w):
-                method, method_name, method_id = self.methods[solution.method_ids[i, j]]
-                target = solution.target_byteses[i, j]
-                print(
-                    f"Encoding CTU[{i}, {j}]: method #{method_id}('{method_name}'); Target = {target} B"
-                )
-                bitstream, q_scale = self._compress_with_target(
-                    method, img_blocks[i, j], target
-                )
-                bitstreams_tmp.append(bitstream)
-                q_scales[i, j] = q_scale
-            bitstreams.append(bitstreams_tmp)
+        q_scales = np.zeros([n_ctu], dtype=np.float32)
+        for i in range(n_ctu):
+            method, method_name, method_id = self.methods[solution.method_ids[i]]
+            target = solution.target_byteses[i]
+            print(
+                f"Encoding CTU[{i}]: method #{method_id}('{method_name}'); Target = {target} B"
+            )
+            bitstream, q_scale = self._compress_with_target(
+                method, img_blocks[i], target
+            )
+            q_scales[i] = q_scale
+            bitstreams.append(bitstream)
 
         return solution.method_ids, q_scales, bitstreams
 
-    def _initial_method_score(self, n_ctu_h, n_ctu_w, n_method):
-        result = np.random.uniform(0.0, 1.0, [n_method, n_ctu_h, n_ctu_w])
+    def _initial_method_score(self, n_ctu, n_method):
+        result = np.random.uniform(0.0, 1.0, [n_method, n_ctu])
         return result
 
     def _solve_genetic(
@@ -453,9 +494,8 @@ class Engine:
         method_sigma,
         bytes_sigma,
     ):
-        n_ctu_h, n_ctu_w, _, c, ctu_h, ctu_w = img_blocks.shape
+        n_ctu = len(img_blocks)
         n_method = len(self.methods)
-        n_ctus = n_ctu_h * n_ctu_w
         h, w = img_size
         num_pixels = h * w
 
@@ -467,7 +507,7 @@ class Engine:
         )
 
         if no_allocation:
-            method_scores = self._initial_method_score(n_ctu_h, n_ctu_w, n_method)
+            method_scores = self._initial_method_score(n_ctu, n_method)
             solution = Solution(method_scores, default_target_bytes)
             return self._compress_blocks(img_blocks, solution)
 
@@ -478,7 +518,7 @@ class Engine:
         solutions = []
         for k in (pbar := tqdm.tqdm(range(N))):
             pbar.set_description(f"Generate initial solutions")
-            method_scores = self._initial_method_score(n_ctu_h, n_ctu_w, n_method)
+            method_scores = self._initial_method_score(n_ctu, n_method)
             target_byteses = default_target_bytes.copy()
             method = Solution(method_scores, target_byteses)
             self._mutate(
@@ -605,6 +645,7 @@ class Engine:
         )
         return pic_height, pic_width, x_padded
 
+
     def encode(
         self,
         input_pth,
@@ -622,7 +663,7 @@ class Engine:
         h, w, padded_img = self.pad_img(input_img)
         img_size = (h, w)
 
-        file_io = FileIO(h, w, self.ctu_size)
+        file_io = FileIO(h, w, self.ctu_size, self.mosaic)
 
         # Set loss
         self.w_time = w_time
@@ -638,12 +679,6 @@ class Engine:
         print(
             f"Target={total_target_bytes}B; Target bpp={target_bpp:.4f}; bpg_psnr={bpg_psnr:.2f}"
         )
-        img_blocks = einops.rearrange(
-            padded_img,
-            "b c (n_ctu_h ctu_size_h) (n_ctu_w ctu_size_w) -> n_ctu_h n_ctu_w b c ctu_size_h ctu_size_w",
-            ctu_size_h=self.ctu_size,
-            ctu_size_w=self.ctu_size,
-        )
 
         header_bytes = file_io.header_size
         safety_bytes = SAFETY_BYTE_PER_CTU * file_io.num_ctu
@@ -652,6 +687,7 @@ class Engine:
             f"Header bytes={header_bytes}; Safety_bytes={safety_bytes}; CTU bytes={total_target_bytes}"
         )
 
+        img_blocks = self.divide_blocks(padded_img)
         method_ids, q_scales, bitstreams = self._solve_genetic(
             img_blocks,
             img_size,
@@ -680,26 +716,20 @@ class Engine:
         with torch.no_grad():
             decoded_ctus = []
             with timer.Timer("Decode_CTU"):
-                for i in range(file_io.ctu_h):
-                    for j in range(file_io.ctu_w):
-                        method_id = file_io.method_id[i, j]
-                        q_scale = file_io.q_scale[i, j]
-                        bitstream = file_io.bitstreams[i][j]
-                        method, method_name, _ = self.methods[method_id]
-                        print(
-                            f"Decoding CTU[{i}, {j}]: method #{method_id}('{method_name}'); q_scale={q_scale:.6f}"
-                        )
-                        ctu = method.decompress_block(
-                            bitstream, self.ctu_size, self.ctu_size, q_scale
-                        )
-                        decoded_ctus.append(ctu)
+                for i in range(file_io.n_ctu):
+                    method_id = file_io.method_id[i]
+                    q_scale = file_io.q_scale[i]
+                    bitstream = file_io.bitstreams[i]
+                    method, method_name, _ = self.methods[method_id]
+                    print(
+                        f"Decoding CTU[{i}]: method #{method_id}('{method_name}'); q_scale={q_scale:.6f}"
+                    )
+                    ctu = method.decompress_block(
+                        bitstream, self.ctu_size, self.ctu_size, q_scale
+                    )
+                    decoded_ctus.append(ctu)
             with timer.Timer("Reconstruct&save"):
-                recon_img = torch.cat(decoded_ctus, dim=0)
-                recon_img = einops.rearrange(
-                    recon_img,
-                    "(n_ctu_h n_ctu_w) c ctu_size_h ctu_size_w -> 1 c (n_ctu_h ctu_size_h) (n_ctu_w ctu_size_w)",
-                    n_ctu_h=file_io.ctu_h,
-                )
+                recon_img = self.join_blocks(decoded_ctus, file_io)
                 recon_img = recon_img[0, :, : file_io.h, : file_io.w]
 
             return recon_img
