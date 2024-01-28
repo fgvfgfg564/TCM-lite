@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from matplotlib import colors
 
 CMAP = plt.get_cmap('bwr')
-    
+
 def get_color(position):
     return list([int(x*255) for x in CMAP(position)[:3]])[::-1]
 
@@ -87,16 +87,22 @@ if __name__ == "__main__":
             mask = cv2.rectangle(mask, topleft, bottomright, color, -1)
     else:
         # num_bytes
-        num_bytes = fileio.num_bytes
-        print(num_bytes)
+        bpps = []
+        for i in range(fileio.n_ctu):
+            num_byte = fileio.num_bytes[i]
+            top, left, bottom, right = fileio.block_indexes[i]
+            bottom = min(bottom, fileio.h)
+            right = min(right, fileio.w)
+            num_pixels = (bottom-top) * (right-left)
+            bpps.append(num_byte / num_pixels)
 
-        mx = num_bytes.max()
-        mi = num_bytes.min()
+        mx = max(bpps)
+        mi = min(bpps)
 
         BOUND = 0
 
         for i in range(fileio.n_ctu):
-            num_byte = num_bytes[i]
+            num_byte = bpps[i]
             w = (num_byte - mi) / (mx-mi)
             color = get_color(w)
     
@@ -117,6 +123,6 @@ if __name__ == "__main__":
         bbox = fileio.block_indexes[i]
         topleft = (bbox[1], bbox[0])
         bottomright = (bbox[3], bbox[2])
-        output_img = cv2.rectangle(output_img, topleft, bottomright, color, 1)
+        output_img = cv2.rectangle(output_img, topleft, bottomright, color, 4)
     
     cv2.imwrite(args.o, output_img)
