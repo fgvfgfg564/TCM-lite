@@ -34,7 +34,8 @@ def parse_args():
     parser.add_argument("--alpha", type=float, default=0.5)
 
     # Engine args
-    parser.add_argument("--ctu_size", type=int)
+    parser.add_argument("--ctu_size", type=int, required=True)
+    parser.add_argument("--mosaic", action='store_true')
 
     args = parser.parse_args()
     return args
@@ -64,7 +65,7 @@ if __name__ == "__main__":
     args = parse_args()
 
     print(args.image, flush=True)
-    fileio = FileIO.load(args.input, args.ctu_size)
+    fileio = FileIO.load(args.input, args.mosaic, args.ctu_size)
     recon_img = cv2.imread(args.image)
     print("Image shape:", recon_img.shape)
 
@@ -75,14 +76,15 @@ if __name__ == "__main__":
     if args.type == 'method':
         # Method ID
         method_ids = fileio.method_id
-        for i in range(fileio.ctu_h):
-            for j in range(fileio.ctu_w):
-                method_id = method_ids[i, j]
-                color = hex_to_bgr(METHOD_COLORS[method_id])
-                
-                topleft = (j * ctu_size, i * ctu_size)
-                bottomright = ((j+1) * ctu_size, (i+1) * ctu_size)
-                mask = cv2.rectangle(mask, topleft, bottomright, color, -1)
+        for i in range(fileio.n_ctu):
+            method_id = method_ids[i]
+            bbox = fileio.block_indexes[i]
+            print(fileio.n_ctu, i, method_id, bbox)
+            color = hex_to_bgr(METHOD_COLORS[method_id])
+
+            topleft = (bbox[1], bbox[0])
+            bottomright = (bbox[3], bbox[2])
+            mask = cv2.rectangle(mask, topleft, bottomright, color, -1)
     else:
         # num_bytes
         num_bytes = fileio.num_bytes
@@ -93,27 +95,28 @@ if __name__ == "__main__":
 
         BOUND = 0
 
-        for i in range(fileio.ctu_h):
-            for j in range(fileio.ctu_w):
-                num_byte = num_bytes[i, j]
-                w = (num_byte - mi) / (mx-mi)
-                color = get_color(w)
-                
-                topleft = (j * ctu_size, i * ctu_size)
-                bottomright = ((j+1) * ctu_size, (i+1) * ctu_size)
-                mask = cv2.rectangle(mask, topleft, bottomright, color, -1)
+        for i in range(fileio.n_ctu):
+            num_byte = num_bytes[i]
+            w = (num_byte - mi) / (mx-mi)
+            color = get_color(w)
+    
+            bbox = fileio.block_indexes[i]
+            topleft = (bbox[1], bbox[0])
+            bottomright = (bbox[3], bbox[2])
+            mask = cv2.rectangle(mask, topleft, bottomright, color, -1)
 
     alpha = args.alpha
     output_img = cv2.addWeighted(recon_img, 1 - alpha, mask, alpha, 0)
     output_img = np.pad(output_img, ((0, 1), (0, 1), (0, 0)), mode='constant')
 
     # Draw grid
-    for i in range(fileio.ctu_h):
-        for j in range(fileio.ctu_w):
-            color = (0, 0, 0)
-            
-            topleft = (j * ctu_size, i * ctu_size)
-            bottomright = ((j+1) * ctu_size, (i+1) * ctu_size)
-            output_img = cv2.rectangle(output_img, topleft, bottomright, color, 1)
+    for i in range(fileio.n_ctu):
+        bbox = fileio.block_indexes[i]
+        color = (0, 0, 0)
+        
+        bbox = fileio.block_indexes[i]
+        topleft = (bbox[1], bbox[0])
+        bottomright = (bbox[3], bbox[2])
+        output_img = cv2.rectangle(output_img, topleft, bottomright, color, 1)
     
     cv2.imwrite(args.o, output_img)
