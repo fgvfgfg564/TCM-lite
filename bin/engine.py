@@ -213,7 +213,6 @@ class Engine:
         recon_img = torch.zeros(size=(3, h, w), device=decoded_ctus[0].device)
         for i, ctu in enumerate(decoded_ctus):
             upper, left, lower, right = file_io.block_indexes[i]
-            print(upper, left, lower, right, ctu.shape)
             lower_real = min(lower, h)
             right_real = min(right, w)
 
@@ -692,8 +691,9 @@ class Engine:
                     bitstream = file_io.bitstreams[i]
                     method, method_name, _ = self.methods[method_id]
                     print(
-                        f"Decoding CTU #{i}: ({upper}, {left}) ~ ({lower}, {right})  method #{method_id}('{method_name}'); q_scale={q_scale:.6f}"
+                        f"Decoding CTU #{i}: ({upper}, {left}) ~ ({lower}, {right})  method #{method_id}('{method_name}'); q_scale={q_scale:.6f}; len_bitstream={len(bitstream)}B"
                     )
+                    torch.cuda.synchronize()
                     ctu = method.decompress_block(
                         bitstream, lower-upper, right-left, q_scale
                     )

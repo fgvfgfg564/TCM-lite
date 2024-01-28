@@ -158,9 +158,9 @@ class FileIO:
             miniblk_id = block_id % 5
             n_ctu_h = (h - 1) // (self.ctu_size * 3) + 1
             n_ctu_w = (w - 1) // (self.ctu_size * 3) + 1
-            
+
             padded_h = (self.h + self.ctu_size - 1) // self.ctu_size * self.ctu_size
-            padded_w = (self.h + self.ctu_size - 1) // self.ctu_size * self.ctu_size
+            padded_w = (self.w + self.ctu_size - 1) // self.ctu_size * self.ctu_size
 
             id_h = metablk_id // n_ctu_w
             id_w = metablk_id % n_ctu_w
