@@ -123,10 +123,12 @@ def test_single_image(
     w, h = get_image_dimensions(input_filename)
     bpp = n_bytes * 8 / (w * h)
     psnr = psnr_with_file(input_filename, orec)
+    ms_ssim = msssim_with_file(input_filename, orec)
 
     results = {
         "bpp": bpp,
         "PSNR": psnr,
+        "MS-SSIM": ms_ssim,
         "t_dec": time_dec_meter.avg,
     }
 
@@ -156,6 +158,7 @@ def test_glob(
     avg_psnr = AverageMeter()
     avg_bpp = AverageMeter()
     avg_t_dec = AverageMeter()
+    avg_ms_ssim = AverageMeter()
 
     results = {}
 
@@ -177,12 +180,14 @@ def test_glob(
         avg_bpp.update(img_result["bpp"])
         avg_psnr.update(img_result["PSNR"])
         avg_t_dec.update(img_result["t_dec"])
+        avg_ms_ssim.update(img_result["MS-SSIM"])
 
         results[pathlib.Path(filename).stem] = img_result
 
     results["avg_bpp"] = avg_bpp.avg
     results["avg_psnr"] = avg_psnr.avg
     results["avg_t_dec"] = avg_t_dec.avg
+    results["avg_ms_ssim"] = avg_ms_ssim.avg
 
     return results
 

@@ -113,7 +113,7 @@ if __name__ == "__main__":
 
     alpha = args.alpha
     output_img = cv2.addWeighted(recon_img, 1 - alpha, mask, alpha, 0)
-    output_img = np.pad(output_img, ((0, 1), (0, 1), (0, 0)), mode='constant')
+    # output_img = np.pad(output_img, ((0, 1), (0, 1), (0, 0)), mode='constant')
 
     # Draw grid
     for i in range(fileio.n_ctu):

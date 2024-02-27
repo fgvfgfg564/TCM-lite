@@ -4,7 +4,9 @@ from PIL import Image
 import subprocess
 import numpy as np
 import torch
+from torchvision.transforms import ToTensor
 import math
+import pytorch_msssim
 
 
 def stable_softmax(x: np.ndarray):
@@ -104,6 +106,25 @@ def psnr_with_file(image_path1, image_path2):
     psnr = 20 * np.log10(max_pixel_value) - 10 * np.log10(mse)
     return psnr
 
+def msssim_with_file(image_path1, image_path2):
+    """
+    Calculate the PSNR of two image files
+    """
+    # Open and load the images using PIL
+    image1 = Image.open(image_path1)
+    image2 = Image.open(image_path2)
+
+    # Ensure the images have the same dimensions
+    if image1.size != image2.size:
+        raise ValueError("Both images must have the same dimensions.")
+
+    # Convert the PIL images to NumPy arrays
+    image1 = ToTensor()(image1).unsqueeze(0)
+    image2 = ToTensor()(image2).unsqueeze(0)
+
+    # Calculate the mean squared error (MSE)
+    msssim = pytorch_msssim.ms_ssim(image1, image2, 1.).detach().cpu().numpy().item()
+    return msssim
 
 def get_image_dimensions(image_path):
     """
