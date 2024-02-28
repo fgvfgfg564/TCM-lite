@@ -33,6 +33,13 @@ class PaddedBlock:
     w: int
 
 class Solution:
+    def __init__(self, method_ids: np.ndarray, target_byteses: np.ndarray) -> None:
+        self.method_ids = method_ids
+        self.target_byteses = target_byteses
+        self.n_ctu = len(self.method_ids)
+
+
+class GASolution:
     def __init__(self, method_score: np.ndarray, target_byteses: np.ndarray) -> None:
         self.method_score = method_score  # ctu, n_method
         self.method_ids = np.argmax(method_score, axis=0)
@@ -61,8 +68,7 @@ class Solution:
         new_target = np.floor(new_target).astype(np.int32)
         self.target_byteses = new_target
 
-
-class Engine:
+class EngineBase:
     TOOL_GROUPS = {
         "EVC": EVCModelEngine,
         "TCM": TCMModelEngine,
@@ -218,8 +224,6 @@ class Engine:
 
             recon_img[:, upper:lower_real, left:right_real] = ctu[:, :, :lower_real-upper, :right_real-left]
         return recon_img
-    
-    # GA
 
     def _precompute_score(self, img_blocks, img_size):
         if (
@@ -301,6 +305,141 @@ class Engine:
                 self._precomputed_curve[idx][i]["max_t"] = max(num_bytes)
                 self._precomputed_curve[idx][i]["b_q"] = b_q
 
+    def _compress_blocks(self, img_blocks, solution):
+        # Calculate q_scale and bitstream for CTUs
+        n_ctu = len(img_blocks)
+        bitstreams = []
+        q_scales = np.zeros([n_ctu], dtype=np.float32)
+        for i in range(n_ctu):
+            method, method_name, method_id = self.methods[solution.method_ids[i]]
+            target = solution.target_byteses[i]
+            print(
+                f"Encoding CTU[{i}]: method #{method_id}('{method_name}'); Target = {target} B"
+            )
+            bitstream, q_scale = self._compress_with_target(
+                method, img_blocks[i], target
+            )
+            q_scales[i] = q_scale
+            bitstreams.append(bitstream)
+
+        return solution.method_ids, q_scales, bitstreams
+
+    def read_img(self, img_path):
+        if not os.path.exists(img_path):
+            raise FileNotFoundError(img_path)
+
+        rgb = Image.open(img_path).convert("RGB")
+        rgb = np.asarray(rgb).astype("float32").transpose(2, 0, 1)
+        rgb = rgb / 255.0
+        rgb = torch.from_numpy(rgb).type(self.dtype)
+        rgb = rgb.unsqueeze(0)
+        rgb = rgb.cuda()
+        return rgb
+
+    def pad_img(self, x):
+        pic_height = x.shape[2]
+        pic_width = x.shape[3]
+        padding_l, padding_r, padding_t, padding_b = get_padding_size(
+            pic_height, pic_width, self.ctu_size
+        )
+        x_padded = F.pad(
+            x,
+            (padding_l, padding_r, padding_t, padding_b),
+            mode="constant",
+            value=0,
+        )
+        return pic_height, pic_width, x_padded
+
+    def _solve(self, *args, **kwargs):
+        raise NotImplemented
+
+    def encode(
+        self,
+        input_pth,
+        output_pth,
+        N,
+        num_generation,
+        bpg_qp=28,
+        w_time=1.0,
+        **kwargs,
+    ):
+        input_img = self.read_img(input_pth)
+        h, w, padded_img = self.pad_img(input_img)
+        img_size = (h, w)
+
+        file_io = FileIO(h, w, self.ctu_size, self.mosaic)
+
+        # Set loss
+        self.w_time = w_time
+
+        # statistics
+        self.gen_score = []
+        self.gen_psnr = []
+        self.gen_time = []
+
+        total_target_bytes, bpg_psnr = get_bpg_result(input_pth, qp=bpg_qp)
+        target_bpp = total_target_bytes * 8 / h / w
+        print(f"Image shape: {h}x{w}")
+        print(
+            f"Target={total_target_bytes}B; Target bpp={target_bpp:.4f}; bpg_psnr={bpg_psnr:.2f}"
+        )
+
+        header_bytes = file_io.header_size
+        safety_bytes = SAFETY_BYTE_PER_CTU * file_io.n_ctu
+        total_target_bytes -= header_bytes + safety_bytes
+        print(
+            f"Header bytes={header_bytes}; Safety_bytes={safety_bytes}; CTU bytes={total_target_bytes}"
+        )
+
+        img_blocks = self.divide_blocks(file_io, h, w, padded_img)
+        method_ids, q_scales, bitstreams = self._solve(
+            img_blocks,
+            img_size,
+            total_target_bytes,
+            bpg_psnr,
+            num_generation=num_generation,
+            N=N,
+            **kwargs,
+        )
+        file_io.method_id = method_ids
+        file_io.bitstreams = bitstreams
+        file_io.q_scale = q_scales
+        file_io.dump(output_pth)
+
+        data = {
+            "gen_score": self.gen_score,
+            "gen_psnr": self.gen_psnr,
+            "gen_time": self.gen_time,
+        }
+        return data
+
+    def decode(self, file_io: FileIO):
+        with torch.no_grad():
+            decoded_ctus = []
+            with timer.Timer("Decode_CTU"):
+                for i, (upper, left, lower, right) in enumerate(file_io.block_indexes):
+                    method_id = file_io.method_id[i]
+                    q_scale = file_io.q_scale[i]
+                    bitstream = file_io.bitstreams[i]
+                    method, method_name, _ = self.methods[method_id]
+                    print(
+                        f"Decoding CTU #{i}: ({upper}, {left}) ~ ({lower}, {right})  method #{method_id}('{method_name}'); q_scale={q_scale:.6f}; len_bitstream={len(bitstream)}B"
+                    )
+                    torch.cuda.synchronize()
+                    ctu = method.decompress_block(
+                        bitstream, lower-upper, right-left, q_scale
+                    )
+                    decoded_ctus.append(ctu)
+            with timer.Timer("Reconstruct&save"):
+                recon_img = self.join_blocks(decoded_ctus, file_io)
+
+            return recon_img
+
+class GAEngine1(EngineBase):
+    def _initial_method_score(self, n_ctu, n_method):
+        result = np.random.uniform(0.0, 1.0, [n_method, n_ctu])
+        return result
+
     def _search(
         self, img_blocks, num_pixels, method_ids, target_byteses, total_target, bpg_psnr
     ):
@@ -339,14 +478,14 @@ class Engine:
         result.astype(a.dtype)
         return result
 
-    def _hybrid(self, header1: Solution, header2: Solution, total_target_bytes, p):
+    def _hybrid(self, header1: GASolution, header2: GASolution, total_target_bytes, p):
         new_method_score = self.arithmetic_crossover(
             header1.method_score, header2.method_score
         )
         new_target = self.arithmetic_crossover(
             header1.target_byteses, header2.target_byteses
         )
-        new_header = Solution(new_method_score, new_target)
+        new_header = GASolution(new_method_score, new_target)
         new_header.normalize_target_byteses(
             self._minimal_bytes, self._maximal_bytes, total_target_bytes
         )
@@ -355,7 +494,7 @@ class Engine:
 
     def _mutate(
         self,
-        header: Solution,
+        header: GASolution,
         total_target_bytes,
         method_mutate_sigma,
         byte_mutate_sigma,
@@ -404,7 +543,7 @@ class Engine:
 
         return max_qs, target_bytes
 
-    def _show_solution(self, solution: Solution, total_target_bytes):
+    def _show_solution(self, solution: GASolution, total_target_bytes):
         total_bytes = np.sum(solution.target_byteses)
         print(
             f"score={solution.score}; total_bytes=[{total_bytes}/{total_target_bytes}]({100.0*total_bytes/total_target_bytes:.4f}%); PSNR={solution.psnr:.3f}; time={solution.time:.3f}s",
@@ -427,30 +566,7 @@ class Engine:
                 f"- CTU [{i}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\tsquared_error={est_sqe:.6f}; method_scores={solution.method_score[:, i]}"
             )
 
-    def _compress_blocks(self, img_blocks, solution):
-        # Calculate q_scale and bitstream for CTUs
-        n_ctu = len(img_blocks)
-        bitstreams = []
-        q_scales = np.zeros([n_ctu], dtype=np.float32)
-        for i in range(n_ctu):
-            method, method_name, method_id = self.methods[solution.method_ids[i]]
-            target = solution.target_byteses[i]
-            print(
-                f"Encoding CTU[{i}]: method #{method_id}('{method_name}'); Target = {target} B"
-            )
-            bitstream, q_scale = self._compress_with_target(
-                method, img_blocks[i], target
-            )
-            q_scales[i] = q_scale
-            bitstreams.append(bitstream)
-
-        return solution.method_ids, q_scales, bitstreams
-
-    def _initial_method_score(self, n_ctu, n_method):
-        result = np.random.uniform(0.0, 1.0, [n_method, n_ctu])
-        return result
-
-    def _solve_genetic(
+    def _solve(
         self,
         img_blocks,
         img_size,
@@ -477,7 +593,7 @@ class Engine:
 
         if no_allocation:
             method_scores = self._initial_method_score(n_ctu, n_method)
-            solution = Solution(method_scores, default_target_bytes)
+            solution = GASolution(method_scores, default_target_bytes)
             return self._compress_blocks(img_blocks, solution)
 
         print("Precompute all scorees")
@@ -489,7 +605,7 @@ class Engine:
             pbar.set_description(f"Generate initial solutions")
             method_scores = self._initial_method_score(n_ctu, n_method)
             target_byteses = default_target_bytes.copy()
-            method = Solution(method_scores, target_byteses)
+            method = GASolution(method_scores, target_byteses)
             self._mutate(
                 method,
                 total_target_bytes,
@@ -518,7 +634,7 @@ class Engine:
 
         for k in range(num_generation):
             # show best solution on generation
-            best_solution: Solution = solutions[0]
+            best_solution: GASolution = solutions[0]
             self.gen_psnr.append(best_psnr)
             self.gen_score.append(max_score)
             self.gen_time.append(best_time)
@@ -587,118 +703,3 @@ class Engine:
             solutions.sort(key=lambda x: x.score, reverse=True)
 
         return self._compress_blocks(img_blocks, solutions[0])
-
-    def read_img(self, img_path):
-        if not os.path.exists(img_path):
-            raise FileNotFoundError(img_path)
-
-        rgb = Image.open(img_path).convert("RGB")
-        rgb = np.asarray(rgb).astype("float32").transpose(2, 0, 1)
-        rgb = rgb / 255.0
-        rgb = torch.from_numpy(rgb).type(self.dtype)
-        rgb = rgb.unsqueeze(0)
-        rgb = rgb.cuda()
-        return rgb
-
-    def pad_img(self, x):
-        pic_height = x.shape[2]
-        pic_width = x.shape[3]
-        padding_l, padding_r, padding_t, padding_b = get_padding_size(
-            pic_height, pic_width, self.ctu_size
-        )
-        x_padded = F.pad(
-            x,
-            (padding_l, padding_r, padding_t, padding_b),
-            mode="constant",
-            value=0,
-        )
-        return pic_height, pic_width, x_padded
-
-
-    def encode(
-        self,
-        input_pth,
-        output_pth,
-        N,
-        num_generation,
-        bpg_qp=28,
-        w_time=1.0,
-        boltzmann_k=0.01,
-        no_allocation=False,
-        method_sigma=0.2,
-        bytes_sigma=512,
-    ):
-        input_img = self.read_img(input_pth)
-        h, w, padded_img = self.pad_img(input_img)
-        img_size = (h, w)
-
-        file_io = FileIO(h, w, self.ctu_size, self.mosaic)
-
-        # Set loss
-        self.w_time = w_time
-
-        # statistics
-        self.gen_score = []
-        self.gen_psnr = []
-        self.gen_time = []
-
-        total_target_bytes, bpg_psnr = get_bpg_result(input_pth, qp=bpg_qp)
-        target_bpp = total_target_bytes * 8 / h / w
-        print(f"Image shape: {h}x{w}")
-        print(
-            f"Target={total_target_bytes}B; Target bpp={target_bpp:.4f}; bpg_psnr={bpg_psnr:.2f}"
-        )
-
-        header_bytes = file_io.header_size
-        safety_bytes = SAFETY_BYTE_PER_CTU * file_io.n_ctu
-        total_target_bytes -= header_bytes + safety_bytes
-        print(
-            f"Header bytes={header_bytes}; Safety_bytes={safety_bytes}; CTU bytes={total_target_bytes}"
-        )
-
-        img_blocks = self.divide_blocks(file_io, h, w, padded_img)
-        method_ids, q_scales, bitstreams = self._solve_genetic(
-            img_blocks,
-            img_size,
-            total_target_bytes,
-            bpg_psnr,
-            num_generation=num_generation,
-            N=N,
-            boltzmann_k=boltzmann_k,
-            no_allocation=no_allocation,
-            method_sigma=method_sigma,
-            bytes_sigma=bytes_sigma,
-        )
-        file_io.method_id = method_ids
-        file_io.bitstreams = bitstreams
-        file_io.q_scale = q_scales
-        file_io.dump(output_pth)
-
-        data = {
-            "gen_score": self.gen_score,
-            "gen_psnr": self.gen_psnr,
-            "gen_time": self.gen_time,
-        }
-        return data
-
-    def decode(self, file_io: FileIO):
-        with torch.no_grad():
-            decoded_ctus = []
-            with timer.Timer("Decode_CTU"):
-                for i, (upper, left, lower, right) in enumerate(file_io.block_indexes):
-                    method_id = file_io.method_id[i]
-                    q_scale = file_io.q_scale[i]
-                    bitstream = file_io.bitstreams[i]
-                    method, method_name, _ = self.methods[method_id]
-                    print(
-                        f"Decoding CTU #{i}: ({upper}, {left}) ~ ({lower}, {right})  method #{method_id}('{method_name}'); q_scale={q_scale:.6f}; len_bitstream={len(bitstream)}B"
-                    )
-                    torch.cuda.synchronize()
-                    ctu = method.decompress_block(
-                        bitstream, lower-upper, right-left, q_scale
-                    )
-                    decoded_ctus.append(ctu)
-            with timer.Timer("Reconstruct&save"):
-                recon_img = self.join_blocks(decoded_ctus, file_io)
-
-            return recon_img

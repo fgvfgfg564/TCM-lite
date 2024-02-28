@@ -22,7 +22,7 @@ def parse_args():
 
     # Engine args
     parser.add_argument(
-        "--tools", nargs="+", type=str, default=Engine.TOOL_GROUPS.keys()
+        "--tools", nargs="+", type=str, default=GAEngine1.TOOL_GROUPS.keys()
     )
     parser.add_argument("--tool_filter", nargs="+", type=str, default=None)
     parser.add_argument("--ctu_size", type=int, default=512)
@@ -43,7 +43,7 @@ def parse_args():
 
 
 def test_single_image(
-    engine: Engine,
+    engine: GAEngine1,
     input_filename,
     output_dir,
     save_image,
@@ -276,7 +276,7 @@ if __name__ == "__main__":
 
     args = parse_args()
 
-    engine = Engine(
+    engine = GAEngine1(
         ctu_size=args.ctu_size,
         mosaic=args.mosaic,
         tool_groups=args.tools,

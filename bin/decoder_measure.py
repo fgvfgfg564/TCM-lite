@@ -5,7 +5,7 @@ import pathlib
 from PIL import Image
 import numpy as np
 
-from bin.engine import Engine
+from bin.engine import GAEngine1
 from bin.fileio import FileIO
 from bin.utils import dump_torch_image
 
@@ -17,7 +17,7 @@ def parse_args():
     parser.add_argument("-r", "--original", type=str, required=True)
     parser.add_argument("--logfile", type=str, required=True)
     parser.add_argument(
-        "--tools", nargs="+", type=str, default=Engine.TOOL_GROUPS.keys()
+        "--tools", nargs="+", type=str, default=GAEngine1.TOOL_GROUPS.keys()
     )
     parser.add_argument("--tool_filter", nargs="+", type=str, default=None)
 
@@ -38,7 +38,7 @@ def main():
     torch.backends.cudnn.enabled = True
     args = parse_args()
 
-    engine = Engine(tool_groups=args.tools, tool_filter=args.tool_filter)
+    engine = GAEngine1(tool_groups=args.tools, tool_filter=args.tool_filter)
 
     # Load bitstream
     fd = open(args.input, "rb")

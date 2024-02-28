@@ -11,7 +11,7 @@ import time
 import matplotlib.pyplot as plt
 import numpy as np
 
-from bin.engine import Engine
+from bin.engine import GAEngine1
 from bin.utils import *
 import einops
 
@@ -25,7 +25,7 @@ def parse_args():
 
     # Engine args
     parser.add_argument(
-        "--tools", nargs="+", type=str, default=Engine.TOOL_GROUPS.keys()
+        "--tools", nargs="+", type=str, default=GAEngine1.TOOL_GROUPS.keys()
     )
     parser.add_argument("--tool_filter", nargs="+", type=str, default=None)
     parser.add_argument("--ctu_size", type=int, default=512)
@@ -41,7 +41,7 @@ if __name__ == "__main__":
 
     args = parse_args()
 
-    engine = Engine(
+    engine = GAEngine1(
         ctu_size=args.ctu_size,
         tool_groups=args.tools,
         tool_filter=args.tool_filter,
