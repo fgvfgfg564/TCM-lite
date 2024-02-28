@@ -148,6 +148,28 @@ class EngineBase:
 
         bitstream = method.compress_block(image_block.padded_block, max_qs)
         return bitstream, max_qs
+    
+    def _search_init_qscale(self, method, img_blocks, total_target_bytes):
+        # Given method, search a shared qscale for all blocks and return target bytes for each block
+        min_qs = float(1e-5)
+        max_qs = float(1.0)
+        n_ctu = len(img_blocks)
+        target_bytes = np.zeros([n_ctu])
+
+        while min_qs < max_qs - 1e-3:
+            mid_qs = (max_qs + min_qs) / 2.0
+            total_bytes = 0
+            for i in range(n_ctu):
+                bitstream = method.compress_block(img_blocks[i].padded_block, mid_qs)
+                len_bytes = len(bitstream)
+                target_bytes[i] = len_bytes
+                total_bytes += len_bytes
+            if total_bytes <= total_target_bytes:
+                max_qs = mid_qs
+            else:
+                min_qs = mid_qs
+
+        return max_qs, target_bytes
 
     @classmethod
     def torch_to_uint8(cls, x):
@@ -350,15 +372,21 @@ class EngineBase:
         )
         return pic_height, pic_width, x_padded
 
-    def _solve(self, *args, **kwargs):
+    def _solve(
+            self, 
+            img_blocks,
+            img_size,
+            total_target_bytes,
+            bpg_psnr,
+            file_io,
+            **kwargs,
+        ):
         raise NotImplemented
 
     def encode(
         self,
         input_pth,
         output_pth,
-        N,
-        num_generation,
         bpg_qp=28,
         w_time=1.0,
         **kwargs,
@@ -397,8 +425,7 @@ class EngineBase:
             img_size,
             total_target_bytes,
             bpg_psnr,
-            num_generation=num_generation,
-            N=N,
+            file_io,
             **kwargs,
         )
         file_io.method_id = method_ids
@@ -434,6 +461,24 @@ class EngineBase:
                 recon_img = self.join_blocks(decoded_ctus, file_io)
 
             return recon_img
+
+class SAEngine1(EngineBase):
+    def _solve(self, img_blocks, img_size, total_target_bytes, bpg_psnr, file_io, **kwargs):
+        n_ctu = len(img_blocks)
+        n_method = len(self.methods)
+        h, w = img_size
+        num_pixels = h * w
+
+        DEFAULT_METHOD = 0
+
+        print("Initializing qscale")
+        default_qscale, default_target_bytes = self._search_init_qscale(
+            self.methods[DEFAULT_METHOD][0], img_blocks, total_target_bytes
+        )
+
+        # TODO
+
+
 
 class GAEngine1(EngineBase):
     def _initial_method_score(self, n_ctu, n_method):
@@ -522,27 +567,6 @@ class GAEngine1(EngineBase):
 
         return header
 
-    def _search_init_qscale(self, method, img_blocks, total_target_bytes):
-        min_qs = float(1e-5)
-        max_qs = float(1.0)
-        n_ctu = len(img_blocks)
-        target_bytes = np.zeros([n_ctu])
-
-        while min_qs < max_qs - 1e-3:
-            mid_qs = (max_qs + min_qs) / 2.0
-            total_bytes = 0
-            for i in range(n_ctu):
-                bitstream = method.compress_block(img_blocks[i].padded_block, mid_qs)
-                len_bytes = len(bitstream)
-                target_bytes[i] = len_bytes
-                total_bytes += len_bytes
-            if total_bytes <= total_target_bytes:
-                max_qs = mid_qs
-            else:
-                min_qs = mid_qs
-
-        return max_qs, target_bytes
-
     def _show_solution(self, solution: GASolution, total_target_bytes):
         total_bytes = np.sum(solution.target_byteses)
         print(
@@ -572,6 +596,7 @@ class GAEngine1(EngineBase):
         img_size,
         total_target_bytes,
         bpg_psnr,
+        file_io,
         N,
         num_generation,
         boltzmann_k,

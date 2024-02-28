@@ -83,10 +83,10 @@ def test_single_image(
         genetic_statistic = engine.encode(
             input_filename,
             obin,
-            N,
-            num_gen,
             bpg_qp=bpg_qp,
             w_time=w_time,
+            N=N,
+            num_generation=num_gen,
             no_allocation=no_allocation,
             boltzmann_k=boltzmann_k,
             method_sigma=method_sigma,

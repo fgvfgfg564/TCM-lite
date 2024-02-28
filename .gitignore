@@ -148,5 +148,7 @@ output/
 
 *.bin
 *.png
-
-experiments/
+*.log
+*.json
+*.pdf
+*.jpg
