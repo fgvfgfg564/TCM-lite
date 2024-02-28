@@ -40,7 +40,7 @@ class FileIO:
         self.ctu_size = ctu_size
         self.mosaic = mosaic
         self.block_indexes = []
-        self.build_block_partition()
+        self._build_block_partition()
 
         self.format_str = [self.meta_str]
         for i in range(self.n_ctu):
@@ -52,16 +52,37 @@ class FileIO:
         self.num_bytes = None if bitstreams is None else np.array([len(bitstreams[i] for i in range(self.n_ctu))])
         self.q_scale = q_scale
     
-    def build_block_partition(self):
+    @property
+    def adjacencyMatrix(self):
+        # The adjacency matrix of the blocks
+
+        def intersects(bb1, bb2):
+            # <upper, left, lower, right>
+            d1 = min(bb1[2] - bb2[2]) - max(bb1[0], bb2[0])
+            d2 = min(bb1[3] - bb2[3]) - max(bb1[1], bb2[1])
+            return d1 >= 0 and d2 >= 0
+
+        N = self.n_ctu
+
+        AM = np.zeros([N, N], dtype=np.bool_)
+
+        for i in range(N):
+            AM[i, i] = True
+            for j in range(i+1, N):
+                AM[i, j] = AM[j, i] = intersects(self.block_indexes[i], self.block_indexes[j])
+        
+        return AM
+    
+    def _build_block_partition(self):
         if not self.mosaic:
-            n_ctu_h, n_ctu_w = self.n_ctu_hw(self.h, self.w, self.ctu_size)
+            n_ctu_h, n_ctu_w = self._n_ctu_hw(self.h, self.w, self.ctu_size)
             n_ctu = n_ctu_h * n_ctu_w
         else:
-            n_ctu_h, n_ctu_w = self.n_ctu_hw(self.h, self.w, self.ctu_size * 3)
+            n_ctu_h, n_ctu_w = self._n_ctu_hw(self.h, self.w, self.ctu_size * 3)
             n_ctu = n_ctu_h * n_ctu_w * 5
 
         for i in range(n_ctu):
-            upper, left, lower, right = self.block_bb(self.h, self.w, i)
+            upper, left, lower, right = self._block_bb(self.h, self.w, i)
             lower_real = min(lower, self.h)
             right_real = min(right, self.w)
             if upper < lower_real and left < right_real:
@@ -128,14 +149,15 @@ class FileIO:
 
     # Block Division
 
-    def n_ctu_hw(self, h, w, ctu_size):
+    def _n_ctu_hw(self, h, w, ctu_size):
         n_ctu_h = (h + ctu_size - 1) // ctu_size + 1
         n_ctu_w = (w + ctu_size - 1) // ctu_size + 1
 
         return n_ctu_h, n_ctu_w
     
-    def block_id_hw(self, h, w, block_id_mesh):
-        n_ctu_h, n_ctu_w = self.n_ctu_hw(h, w, self.ctu_size)
+    def _block_id_hw(self, h, w, block_id_mesh):
+        # Only in mesh mod. Return the id of the image in height and width dimension
+        n_ctu_h, n_ctu_w = self._n_ctu_hw(h, w, self.ctu_size)
 
         id_h = block_id_mesh // n_ctu_w
         id_w = block_id_mesh % n_ctu_w
@@ -145,9 +167,9 @@ class FileIO:
 
         return id_h, id_w
     
-    def block_bb(self, h, w, block_id):
+    def _block_bb(self, h, w, block_id):
         if not self.mosaic:
-            id_h, id_w = self.block_id_hw(h, w, block_id)
+            id_h, id_w = self._block_id_hw(h, w, block_id)
 
             if id_h is None:
                 return None, None, None, None
