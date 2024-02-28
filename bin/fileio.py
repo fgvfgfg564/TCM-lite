@@ -33,7 +33,7 @@ class FileIO:
     ctu_str = "BIf"
 
     def __init__(
-        self, h, w, ctu_size, mosaic, method_id=None, q_scale=None, bitstreams=None
+        self, h: int, w: int, ctu_size: int, mosaic: bool, method_id=None, q_scale=None, bitstreams=None
     ) -> None:
         self.h = h
         self.w = w
@@ -51,27 +51,54 @@ class FileIO:
         self.bitstreams = bitstreams
         self.num_bytes = None if bitstreams is None else np.array([len(bitstreams[i] for i in range(self.n_ctu))])
         self.q_scale = q_scale
+
+        self._adjacencyMatrix = None
+        self._adjacencyTable = None
+
+    @staticmethod
+    def intersects(bb1, bb2):
+        # <upper, left, lower, right>
+        d1 = min(bb1[2], bb2[2]) - max(bb1[0], bb2[0])
+        d2 = min(bb1[3], bb2[3]) - max(bb1[1], bb2[1])
+        return d1 >= 0 and d2 >= 0 and not (d1==0 and d2==0)
     
     @property
     def adjacencyMatrix(self):
         # The adjacency matrix of the blocks
+        if self._adjacencyMatrix is None:
+            N = self.n_ctu
 
-        def intersects(bb1, bb2):
-            # <upper, left, lower, right>
-            d1 = min(bb1[2] - bb2[2]) - max(bb1[0], bb2[0])
-            d2 = min(bb1[3] - bb2[3]) - max(bb1[1], bb2[1])
-            return d1 >= 0 and d2 >= 0
+            AM = np.zeros([N, N], dtype=np.bool_)
 
-        N = self.n_ctu
-
-        AM = np.zeros([N, N], dtype=np.bool_)
-
-        for i in range(N):
-            AM[i, i] = True
-            for j in range(i+1, N):
-                AM[i, j] = AM[j, i] = intersects(self.block_indexes[i], self.block_indexes[j])
-        
+            for i in range(N):
+                AM[i, i] = False
+                for j in range(N):
+                    AM[i, j] = AM[j, i] = self.intersects(self.block_indexes[i], self.block_indexes[j])
+            self._adjacencyMatrix = AM
+        else:
+            AM = self._adjacencyMatrix
         return AM
+    
+    @property
+    def adjacencyTable(self):
+        # The adjacency table of the blocks
+
+        if self._adjacencyTable is None:
+            N = self.n_ctu
+
+            AT = []
+
+            for i in range(N):
+                at_item = []
+                for j in range(i+1, N):
+                    if self.intersects(self.block_indexes[i], self.block_indexes[j]):
+                        at_item.append(j)
+                AT.append(at_item)
+            self._adjacencyTable = AT
+        else:
+            AT = self._adjacencyTable
+
+        return AT
     
     def _build_block_partition(self):
         if not self.mosaic:
