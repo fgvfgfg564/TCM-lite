@@ -17,8 +17,12 @@ def parse_args():
 
     # tester args
     parser.add_argument("output_dir", type=str)
-    parser.add_argument("--save_image", action="store_true")
     parser.add_argument("-i", "--input", type=str, required=True, help="input glob")
+    parser.add_argument("--w_time", nargs="+", type=float, default=[1.0])
+    parser.add_argument("--target_bpp", nargs="+", type=float, default=[1.0])
+    parser.add_argument("--save_image", action="store_true")
+
+    parser.add_argument("-a", "--algorithm", type=str, choices=['GA', 'SAv1'], required=True)
 
     # Engine args
     parser.add_argument(
@@ -28,22 +32,22 @@ def parse_args():
     parser.add_argument("--ctu_size", type=int, default=512)
     parser.add_argument('--mosaic', action='store_true', default=False)
 
-    # Encoder config args
+    # Encoder config args (GA)
     parser.add_argument("-N", nargs="+", type=int, default=[1000])
     parser.add_argument("--num-gen", nargs="+", type=int, default=[1000])
-    parser.add_argument("--w_time", nargs="+", type=float, default=[1.0])
-    parser.add_argument("--target_bpp", nargs="+", type=float, default=[1.0])
     parser.add_argument("--boltzmann_k", nargs="+", type=float, default=[0.05])
     parser.add_argument("--method_sigma", nargs="+", type=float, default=[0.2])
     parser.add_argument("--bytes_sigma", nargs="+", type=float, default=[256])
     parser.add_argument("--no_allocation", nargs="+", type=bool, default=[False])
+
+    # Encoder config args (SA)
 
     args = parser.parse_args()
     return args
 
 
 def test_single_image(
-    engine: GAEngine1,
+    engine: EngineBase,
     input_filename,
     output_dir,
     target_bpp,
@@ -227,29 +231,48 @@ if __name__ == "__main__":
 
     args = parse_args()
 
-    engine = GAEngine1(
-        ctu_size=args.ctu_size,
-        mosaic=args.mosaic,
-        tool_groups=args.tools,
-        tool_filter=args.tool_filter,
-        ignore_tensorrt=True,
-        dtype=torch.float32,
-    )
+    if args.algorithm == 'GA':
+        engine = GAEngine1(
+            ctu_size=args.ctu_size,
+            mosaic=args.mosaic,
+            tool_groups=args.tools,
+            tool_filter=args.tool_filter,
+            ignore_tensorrt=True,
+            dtype=torch.float32,
+        )
 
-    results = test_multiple_configs(
-        engine,
-        args.input,
-        args.output_dir,
-        args.target_bpp,
-        args.w_time,
-        args.save_image,
-        N=args.N,
-        num_gen=args.num_gen,
-        no_allocation=args.no_allocation,
-        boltzmann_k=args.boltzmann_k,
-        method_sigma=args.method_sigma,
-        bytes_sigma=args.bytes_sigma,
-    )
+        results = test_multiple_configs(
+            engine,
+            args.input,
+            args.output_dir,
+            args.target_bpp,
+            args.w_time,
+            args.save_image,
+            N=args.N,
+            num_gen=args.num_gen,
+            no_allocation=args.no_allocation,
+            boltzmann_k=args.boltzmann_k,
+            method_sigma=args.method_sigma,
+            bytes_sigma=args.bytes_sigma,
+        )
+    elif args.algorithm == 'SAv1':
+        engine = SAEngine1(
+            ctu_size=args.ctu_size,
+            mosaic=args.mosaic,
+            tool_groups=args.tools,
+            tool_filter=args.tool_filter,
+            ignore_tensorrt=True,
+            dtype=torch.float32,
+        )
+
+        results = test_multiple_configs(
+            engine,
+            args.input,
+            args.output_dir,
+            args.target_bpp,
+            args.w_time,
+            args.save_image,
+        )
 
     os.makedirs(args.output_dir, exist_ok=True)
     result_filename = os.path.join(args.output_dir, "results.json")

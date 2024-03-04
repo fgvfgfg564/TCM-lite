@@ -550,6 +550,9 @@ class SAEngine1(EngineBase):
         h, w = img_size
         num_pixels = h * w
 
+        print("Precompute all scorees")
+        self._precompute_score(img_blocks, img_size)
+
         ans = np.random.random_integers([n_ctu,], dtype=np.int32)
         target_byteses, score, psnr, time = self._find_optimal_target_bytes(file_io, n_ctu, num_pixels, ans, total_target_bytes)
 
@@ -578,12 +581,6 @@ class SAEngine1(EngineBase):
         
         solution = Solution(ans, target_byteses)
         return self._compress_blocks(img_blocks, solution)
-
-
-
-
-
-
 
 class GAEngine1(EngineBase):
     def _initial_method_score(self, n_ctu, n_method):
