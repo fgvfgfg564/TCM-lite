@@ -22,7 +22,7 @@ import coding_tools.utils.timer as timer
 
 from .utils import *
 from .fileio import FileIO, get_padding_size
-from .math import LinearInterpolation
+from .math import LinearInterpolation, normalize_to_target
 
 SAFETY_BYTE_PER_CTU = 2
 
@@ -40,7 +40,6 @@ class Solution:
         self.target_byteses = target_byteses
         self.n_ctu = len(self.method_ids)
 
-
 class GASolution:
     def __init__(self, method_score: np.ndarray, target_byteses: np.ndarray) -> None:
         self.method_score = method_score  # ctu, n_method
@@ -55,20 +54,8 @@ class GASolution:
         for i in range(self.n_ctu):
             min_bytes[i] = min_table[self.method_ids[i]][i]
             max_bytes[i] = max_table[self.method_ids[i]][i]
-
-        old_target = self.target_byteses
-        old_target -= min_bytes
-        old_target = np.maximum(old_target, 1)
-        old_target = old_target.astype(np.float32)
-        old_target_rate = old_target / np.sum(old_target)
-
-        total_target = np.maximum(total_target, np.sum(min_bytes))
-
-        new_target = old_target_rate * (total_target - np.sum(min_bytes))
-        new_target += min_bytes
-        new_target = np.minimum(new_target, max_bytes)
-        new_target = np.floor(new_target).astype(np.int32)
-        self.target_byteses = new_target
+        
+        self.target_byteses = normalize_to_target(self.target_byteses - min_bytes, max_bytes - min_bytes, total_target - min_bytes.sum())
 
 class EngineBase:
     TOOL_GROUPS = {
@@ -491,12 +478,14 @@ class EngineBase:
 class SAEngine1(EngineBase):
 
     def _find_optimal_target_bytes(
-        self, n_ctu, num_pixels, method_ids, total_target
+        self, file_io: FileIO, n_ctu, num_pixels, method_ids, total_target, learning_rate=1e-2, num_steps=1000, 
     ):
+        bpp = total_target / num_pixels
+        defaults = []
+        for i in range(n_ctu):
+            defaults.append(file_io.block_num_pixels * bpp)
         
-        # Returns score given method ids and target bytes
-        if np.sum(target_byteses) > total_target:
-            return -np.inf, -np.inf, np.inf
+
 
         sqe = 0
         global_time = 0

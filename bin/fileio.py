@@ -40,6 +40,7 @@ class FileIO:
         self.ctu_size = ctu_size
         self.mosaic = mosaic
         self.block_indexes = []
+        self.block_num_pixels = []
         self._build_block_partition()
 
         self.format_str = [self.meta_str]
@@ -114,6 +115,7 @@ class FileIO:
             right_real = min(right, self.w)
             if upper < lower_real and left < right_real:
                 self.block_indexes.append((upper, left, lower,right))
+                self.block_num_pixels.append((lower-upper) * (right-left))
         
         self.n_ctu = len(self.block_indexes)
 
