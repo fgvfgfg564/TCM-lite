@@ -12,6 +12,7 @@ import math
 import random
 import json
 from scipy import interpolate
+from scipy.misc import derivative
 import einops
 
 from coding_tools.coding_tool import CodingToolBase
@@ -21,6 +22,7 @@ import coding_tools.utils.timer as timer
 
 from .utils import *
 from .fileio import FileIO, get_padding_size
+from .math import LinearInterpolation
 
 SAFETY_BYTE_PER_CTU = 2
 
@@ -311,18 +313,18 @@ class EngineBase:
                 self._maximal_bytes[idx, i] = num_bytes[-1]
 
                 try:
-                    b_e = interpolate.interp1d(num_bytes, sqes, kind="linear")
+                    b_e = LinearInterpolation(num_bytes, sqes)
                     # b_t = interpolate.interp1d(num_bytes, times, kind='linear')
                     b_t = np.polyfit(num_bytes, times, 1)
-                    b_q = interpolate.interp1d(num_bytes, qscales, kind="linear")
+                    b_q = LinearInterpolation(num_bytes, qscales)
                 except ValueError as e:
                     print(f"Interpolation error!")
                     print(f"num_bytes={num_bytes}")
                     print(f"sqes={sqes}")
                     raise e
 
-                self._precomputed_curve[idx][i]["b_e"] = b_e
-                self._precomputed_curve[idx][i]["b_t"] = b_t
+                self._precomputed_curve[idx][i]["b_e"] = b_e    # interpolate.interp1d; Linear
+                self._precomputed_curve[idx][i]["b_t"] = b_t    # Linear fitting
                 self._precomputed_curve[idx][i]["min_t"] = min(num_bytes)
                 self._precomputed_curve[idx][i]["max_t"] = max(num_bytes)
                 self._precomputed_curve[idx][i]["b_q"] = b_q
@@ -372,12 +374,38 @@ class EngineBase:
         )
         return pic_height, pic_width, x_padded
 
+    def _search(
+        self, n_ctu, num_pixels, method_ids, target_byteses, total_target
+    ):
+        # Returns score given method ids and target bytes
+        if np.sum(target_byteses) > total_target:
+            return -np.inf, -np.inf, np.inf
+
+        sqe = 0
+        global_time = 0
+
+        for i in range(n_ctu):
+            method_id = method_ids[i]
+            target_bytes = target_byteses[i]
+
+            precomputed_results = self._precomputed_curve[method_id][i]
+
+            ctu_sqe = precomputed_results["b_e"](target_bytes)
+            t = np.polyval(precomputed_results["b_t"], target_bytes)
+
+            global_time += t
+            sqe += ctu_sqe
+
+        sqe /= num_pixels * 3
+        psnr = -10 * np.log10(sqe)
+        return psnr - self.w_time * global_time, psnr, global_time
+
+
     def _solve(
             self, 
             img_blocks,
             img_size,
             total_target_bytes,
-            bpg_psnr,
             file_io,
             **kwargs,
         ):
@@ -387,7 +415,7 @@ class EngineBase:
         self,
         input_pth,
         output_pth,
-        bpg_qp=28,
+        total_target_bytes,
         w_time=1.0,
         **kwargs,
     ):
@@ -405,11 +433,10 @@ class EngineBase:
         self.gen_psnr = []
         self.gen_time = []
 
-        total_target_bytes, bpg_psnr = get_bpg_result(input_pth, qp=bpg_qp)
         target_bpp = total_target_bytes * 8 / h / w
         print(f"Image shape: {h}x{w}")
         print(
-            f"Target={total_target_bytes}B; Target bpp={target_bpp:.4f}; bpg_psnr={bpg_psnr:.2f}"
+            f"Target={total_target_bytes}B; Target bpp={target_bpp:.4f};"
         )
 
         header_bytes = file_io.header_size
@@ -424,7 +451,6 @@ class EngineBase:
             img_blocks,
             img_size,
             total_target_bytes,
-            bpg_psnr,
             file_io,
             **kwargs,
         )
@@ -463,34 +489,14 @@ class EngineBase:
             return recon_img
 
 class SAEngine1(EngineBase):
-    def _solve(self, img_blocks, img_size, total_target_bytes, bpg_psnr, file_io, **kwargs):
-        n_ctu = len(img_blocks)
-        n_method = len(self.methods)
-        h, w = img_size
-        num_pixels = h * w
 
-        DEFAULT_METHOD = 0
-
-        print("Initializing qscale")
-        default_qscale, default_target_bytes = self._search_init_qscale(
-            self.methods[DEFAULT_METHOD][0], img_blocks, total_target_bytes
-        )
-
-        # TODO
-
-
-
-class GAEngine1(EngineBase):
-    def _initial_method_score(self, n_ctu, n_method):
-        result = np.random.uniform(0.0, 1.0, [n_method, n_ctu])
-        return result
-
-    def _search(
-        self, img_blocks, num_pixels, method_ids, target_byteses, total_target, bpg_psnr
+    def _find_optimal_target_bytes(
+        self, n_ctu, num_pixels, method_ids, total_target
     ):
+        
+        # Returns score given method ids and target bytes
         if np.sum(target_byteses) > total_target:
             return -np.inf, -np.inf, np.inf
-        n_ctu = len(img_blocks)
 
         sqe = 0
         global_time = 0
@@ -509,7 +515,32 @@ class GAEngine1(EngineBase):
 
         sqe /= num_pixels * 3
         psnr = -10 * np.log10(sqe)
-        return psnr - self.w_time * global_time - bpg_psnr, psnr, global_time
+        return psnr - self.w_time * global_time, psnr, global_time
+        
+
+    def _solve(self, img_blocks, img_size, total_target_bytes, file_io, **kwargs):
+        n_ctu = len(img_blocks)
+        n_method = len(self.methods)
+        h, w = img_size
+        num_pixels = h * w
+
+        DEFAULT_METHOD = 0
+
+        print("Initializing qscale")
+        _, init_target_bytes = self._search_init_qscale(
+            self.methods[DEFAULT_METHOD][0], img_blocks, total_target_bytes
+        )
+
+        solution = Solution(np.zeros([n_ctu]), init_target_bytes)
+
+        # TODO
+
+
+
+class GAEngine1(EngineBase):
+    def _initial_method_score(self, n_ctu, n_method):
+        result = np.random.uniform(0.0, 1.0, [n_method, n_ctu])
+        return result
 
     def _normal_noise_like(self, x, sigma):
         noise = np.random.normal(0, sigma, x.shape).astype(x.dtype)
@@ -595,7 +626,6 @@ class GAEngine1(EngineBase):
         img_blocks,
         img_size,
         total_target_bytes,
-        bpg_psnr,
         file_io,
         N,
         num_generation,
@@ -641,12 +671,11 @@ class GAEngine1(EngineBase):
                 self._minimal_bytes, self._maximal_bytes, total_target_bytes
             )
             method.score, method.psnr, method.time = self._search(
-                img_blocks,
+                n_ctu,
                 num_pixels,
                 method.method_ids,
                 method.target_byteses,
                 total_target_bytes,
-                bpg_psnr,
             )
             solutions.append(method)
 
@@ -712,12 +741,11 @@ class GAEngine1(EngineBase):
                     T * bytes_sigma,
                 )
                 newborn.score, newborn.psnr, newborn.time = self._search(
-                    img_blocks,
+                    n_ctu,
                     num_pixels,
                     newborn.method_ids,
                     newborn.target_byteses,
                     total_target_bytes,
-                    bpg_psnr,
                 )
                 solutions.append(newborn)
                 if max_score is None or max_score < newborn.score:

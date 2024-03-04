@@ -5,6 +5,9 @@ import pytorch_msssim
 import numpy as np
 from io import BytesIO
 import os
+import matplotlib.pyplot as plt
+
+ROOTDIR = os.path.dirname(__file__)
 
 def compress_image_jpeg(input_array, quality):
     """
@@ -41,6 +44,7 @@ def load_images_from_folder(folder_path):
     images = []
     for filename in os.listdir(folder_path):
         if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff')):
+            print(filename)
             img_path = os.path.join(folder_path, filename)
             with Image.open(img_path) as img:
                 img_array = np.array(img).astype('float32') / 255
@@ -78,7 +82,8 @@ def pad_and_patchify(img, patch_size=256):
     for i in range(num_patches_y):
         for j in range(num_patches_x):
             patches[i, j] = padded_img[i*patch_size:(i+1)*patch_size, j*patch_size:(j+1)*patch_size]
-
+    
+    patches = patches.reshape([num_patches_x*num_patches_y, patch_size, patch_size, img.shape[2]])
     return patches
 
 # Example usage
@@ -91,25 +96,57 @@ def pad_and_patchify(img, patch_size=256):
 def compute_msssim(img1, img2):
     img1 = torch.tensor(img1).permute(2, 0, 1).unsqueeze(0)
     img2 = torch.tensor(img2).permute(2, 0, 1).unsqueeze(0)
-    return pytorch_msssim.ms_ssim(img1, img2, 1.).numpy().item()
+    return pytorch_msssim.ms_ssim(img1.cuda(), img2.cuda(), 1.).cpu().numpy().item()
 
-LPIPSNET = lpips.LPIPS()
+LPIPSNET = lpips.LPIPS().cuda()
 
 @torch.no_grad()
 def compute_lpips(img1, img2):
     img1 = torch.tensor(img1).permute(2, 0, 1).unsqueeze(0)
     img2 = torch.tensor(img2).permute(2, 0, 1).unsqueeze(0)
-    return LPIPSNET(img1, img2, normalize=True)[0,0,0,0].numpy().item()
+    return LPIPSNET(img1.cuda(), img2.cuda(), normalize=True)[0,0,0,0].cpu().numpy().item()
 
 if __name__ == '__main__':
     images = load_images_from_folder(os.path.expanduser('~/dataset/kodak'))
-    for img in images:
+    result_msssim = []
+    result_lpips = []
+    for i, img in enumerate(images):
+        result_img_msssim = []
+        result_img_lpips = []
         for q in [20, 30, 40, 50, 60, 70, 80, 90, 100]:
             compressed_img = compress_image_jpeg(img, q)
             gt_msssim = compute_msssim(img, compressed_img)
             gt_lpips = compute_lpips(img, compressed_img)
-            print(gt_msssim, gt_lpips)
 
-            for patch_size in [64, 128, 256, 512]:
+            for patch_size in [256]:
                 patched_img = pad_and_patchify(img, patch_size)
                 patched_compressed_img = pad_and_patchify(compressed_img, patch_size)
+
+                patched_msssim = sum([compute_msssim(x,y) for x,y in zip(patched_img, patched_compressed_img)]) / patched_img.shape[0]
+                patched_lpips = sum([compute_lpips(x,y) for x,y in zip(patched_img, patched_compressed_img)]) / patched_img.shape[0]
+
+                d_msssim = patched_msssim-gt_msssim
+                r_msssim = d_msssim / gt_msssim
+                d_lpips = patched_lpips-gt_lpips
+                r_lpips = d_lpips / gt_lpips
+                print(f"Diff-MSSSIM={r_msssim*100:.2f}%\tDiff-LPIPS={r_lpips*100:.2f}%")
+                result_img_msssim.append(r_msssim*100)
+                result_img_lpips.append(r_lpips*100)
+
+        result_msssim.append(result_img_msssim)
+        result_lpips.append(result_img_lpips)
+        # break
+    
+    plt.eventplot(result_msssim, orientation="vertical")
+    plt.title('MS-SSIM')
+    plt.xlabel('ID')
+    plt.ylabel('%')
+    plt.savefig(os.path.join(ROOTDIR, 'MSSSIM'))
+    plt.close()
+    
+    plt.eventplot(result_lpips, orientation="vertical")
+    plt.title('LPIPS')
+    plt.xlabel('ID')
+    plt.ylabel('%')
+    plt.savefig(os.path.join(ROOTDIR, 'LPIPS'))
+    plt.close()
