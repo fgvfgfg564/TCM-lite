@@ -95,15 +95,9 @@ def waterfill(X, k):
         else:
             r = mid
     
-    for i in range(l + 1):
-        results[sorted_indexes[i]] = X[sorted_indexes[i]]
-        k -= X[sorted_indexes[i]]
-    
-    if l < N - 1:
-        d = k / (N - 1 - l)
-
-        for i in range(l + 1, N):
-            results[sorted_indexes[i]] += d
+    results[sorted_indexes[:l+1]] = X[sorted_indexes[:l+1]]
+    d = (k - pref_sorted_X[l]) / (N - 1 - l)
+    results[sorted_indexes[l+1:]] = d
 
     return results
 
