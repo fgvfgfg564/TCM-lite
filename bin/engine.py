@@ -676,7 +676,7 @@ class GAEngine1(EngineBase):
         total_target_bytes,
         file_io,
         N,
-        num_generation,
+        num_gen,
         boltzmann_k,
         no_allocation,
         method_sigma,
@@ -734,7 +734,7 @@ class GAEngine1(EngineBase):
         best_time = solutions[0].time
         initial_score = abs(max_score)
 
-        for k in range(num_generation):
+        for k in range(num_gen):
             # show best solution on generation
             best_solution: GASolution = solutions[0]
             self.gen_psnr.append(best_psnr)
@@ -745,9 +745,9 @@ class GAEngine1(EngineBase):
             self._show_solution(best_solution, total_target_bytes)
             print(flush=True)
 
-            G = num_generation
+            G = num_gen
             R = (G + 2 * np.sqrt(k)) / (3 * G)
-            T = 0.75 * (1 - (k / num_generation)) ** 2 + 0.25
+            T = 0.75 * (1 - (k / num_gen)) ** 2 + 0.25
 
             # Elitism, but only keep the best alive
             num_alive = 1

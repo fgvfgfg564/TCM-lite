@@ -46,26 +46,16 @@ def test_single_image(
     engine: GAEngine1,
     input_filename,
     output_dir,
-    save_image,
-    N,
-    num_gen,
     target_bpp,
     w_time,
-    no_allocation,
-    boltzmann_k,
-    method_sigma,
-    bytes_sigma,
+    save_image,
+    **kwargs,
 ):
     output_dir = os.path.join(
         output_dir,
-        str(N),
-        str(num_gen),
-        str(target_bpp),
-        str(w_time),
-        str(boltzmann_k),
-        str(no_allocation),
-        str(method_sigma),
-        str(bytes_sigma),
+        "target_bpp="+str(target_bpp),
+        "w_time="+str(w_time),
+        *([str(k)+"="+str(v) for k, v in kwargs.items()]),
     )
     if save_image:
         os.makedirs(output_dir, exist_ok=True)
@@ -85,12 +75,7 @@ def test_single_image(
             obin,
             target_bpp,
             w_time=w_time,
-            N=N,
-            num_generation=num_gen,
-            no_allocation=no_allocation,
-            boltzmann_k=boltzmann_k,
-            method_sigma=method_sigma,
-            bytes_sigma=bytes_sigma,
+            **kwargs,
         )
         torch.cuda.synchronize()
 
@@ -143,15 +128,10 @@ def test_glob(
     engine,
     input_pattern,
     output_dir,
-    save_image,
-    N,
-    num_gen,
     target_bpp,
     w_time,
-    no_allocation,
-    boltzmann_k,
-    method_sigma,
-    bytes_sigma,
+    save_image,
+    **kwargs,
 ):
     input_glob = glob.glob(input_pattern)
 
@@ -167,15 +147,10 @@ def test_glob(
             engine,
             filename,
             output_dir,
-            save_image,
-            N=N,
-            num_gen=num_gen,
             target_bpp=target_bpp,
             w_time=w_time,
-            no_allocation=no_allocation,
-            boltzmann_k=boltzmann_k,
-            method_sigma=method_sigma,
-            bytes_sigma=bytes_sigma,
+            save_image=save_image,
+            **kwargs,
         )
         avg_bpp.update(img_result["bpp"])
         avg_psnr.update(img_result["PSNR"])
@@ -217,53 +192,29 @@ def test_multiple_configs(
     engine,
     input_pattern,
     output_dir,
-    save_image,
-    N,
-    num_gen,
     target_bpp,
     w_time,
-    no_allocation,
-    boltzmann_k,
-    method_sigma,
-    bytes_sigma,
+    save_image,
+    **kwargs,
 ):
     output_dir = os.path.join(output_dir, "results")
 
     def _test_glob(
-        N,
-        num_gen,
         target_bpp,
         w_time,
-        no_allocation,
-        boltzmann_k,
-        method_sigma,
-        bytes_sigma,
+        **kwargs,
     ):
         return test_glob(
             engine,
             input_pattern,
             output_dir,
-            save_image,
-            N=N,
-            num_gen=num_gen,
             target_bpp=target_bpp,
             w_time=w_time,
-            no_allocation=no_allocation,
-            boltzmann_k=boltzmann_k,
-            method_sigma=method_sigma,
-            bytes_sigma=bytes_sigma,
+            save_image=save_image,
+            **kwargs
         )
 
-    configs = [
-        ("N", N),
-        ("num_gen", num_gen),
-        ("target_bpp", target_bpp),
-        ("w_time", w_time),
-        ("no_allocation", no_allocation),
-        ("boltzmann_k", boltzmann_k),
-        ("method_sigma", method_sigma),
-        ("bytes_sigma", bytes_sigma),
-    ]
+    configs = [("target_bpp", target_bpp), ("w_time", w_time)] + [(k, v) for k, v in kwargs.items()]
     results = _config_mapper(configs, _test_glob)
     return results
 
@@ -289,15 +240,15 @@ if __name__ == "__main__":
         engine,
         args.input,
         args.output_dir,
-        args.save_image,
-        args.N,
-        args.num_gen,
         args.target_bpp,
         args.w_time,
-        args.no_allocation,
-        args.boltzmann_k,
-        args.method_sigma,
-        args.bytes_sigma,
+        args.save_image,
+        N=args.N,
+        num_gen=args.num_gen,
+        no_allocation=args.no_allocation,
+        boltzmann_k=args.boltzmann_k,
+        method_sigma=args.method_sigma,
+        bytes_sigma=args.bytes_sigma,
     )
 
     os.makedirs(args.output_dir, exist_ok=True)
