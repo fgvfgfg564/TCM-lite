@@ -45,6 +45,13 @@ def safe_softmax(x: np.ndarray):
     y = np.exp(x)
     return y / np.sum(y)
 
+def safe_SA_prob(delta, T):
+    if delta / T < 60:
+        p = 1. / (1. + np.exp(delta / T))
+    else:
+        p = 0
+    return p
+
 # class LinearRegression:
 #     def __init__(self, X, Y):
 #         self.X = np.asarray(X)
@@ -99,12 +106,20 @@ def waterfill(X, k):
             r = mid
     
     results[sorted_indexes[:l+1]] = X[sorted_indexes[:l+1]]
-    d = (k - pref_sorted_X[l]) / (N - 1 - l)
+    if l == -1:
+        pref = 0
+    else:
+        pref = pref_sorted_X[l]
+    d = (k - pref) / (N - 1 - l)
     results[sorted_indexes[l+1:]] = d
 
     return results
 
 def normalize_to_target(X: np.ndarray, X_min, X_max, target):
+
+    X = np.maximum(X, X_min)
+    X = np.minimum(X, X_max)
+
     X = X - X_min
     X_max = X_max - X_min
     target = target - sum(X_min)
@@ -115,19 +130,14 @@ def normalize_to_target(X: np.ndarray, X_min, X_max, target):
         space = X_max - X
     else:
         inverse = True
-        space = X
+        space = X.copy()
         remain = -remain
     
     fill = waterfill(space, remain)
+
     if inverse:
         X -= fill
     else:
         X += fill
-
-    # print(X, X_max, X_min, target)
-
-    # assert(np.all(X >= 0))
-    # assert(np.all(X <= X_max))
-    # assert(np.sum(X) <= target)
     
     return X + X_min

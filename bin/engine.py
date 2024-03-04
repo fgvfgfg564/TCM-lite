@@ -22,7 +22,7 @@ import coding_tools.utils.timer as timer
 
 from .utils import *
 from .fileio import FileIO, get_padding_size
-from .math import LinearInterpolation, normalize_to_target
+from .math import *
 
 SAFETY_BYTE_PER_CTU = 2
 
@@ -487,7 +487,7 @@ class SAEngine1(EngineBase):
 
 
     def _find_optimal_target_bytes(
-        self, file_io: FileIO, n_ctu, num_pixels, method_ids, total_target, learning_rate=1e-2, num_steps=100, init_value=None
+        self, file_io: FileIO, n_ctu, num_pixels, method_ids, total_target, learning_rate=1e5, num_steps=1000, init_value=None
     ):
         """
         Find the optimal target bytes given CTU methods
@@ -496,16 +496,17 @@ class SAEngine1(EngineBase):
         min_bytes = np.zeros([n_ctu,], dtype=np.int32)
         max_bytes = np.zeros([n_ctu,], dtype=np.int32)
 
-        for i in range(self.n_ctu):
-            min_bytes[i] = self._minimal_bytes[self.method_ids[i]][i]
-            max_bytes[i] = self._maximal_bytes[self.method_ids[i]][i]
+        for i in range(n_ctu):
+            min_bytes[i] = self._minimal_bytes[method_ids[i]][i]
+            max_bytes[i] = self._maximal_bytes[method_ids[i]][i]
 
         if init_value is None:
             bpp = total_target / num_pixels
             ans = file_io.block_num_pixels * bpp
         else:
             ans = init_value
-            ans = normalize_to_target(ans, min_bytes, max_bytes, total_target)
+        
+        ans = normalize_to_target(ans, min_bytes, max_bytes, total_target)
 
         for step in range(num_steps):
             gradients = np.zeros_like(ans)
@@ -517,15 +518,15 @@ class SAEngine1(EngineBase):
                 precomputed_results = self._precomputed_curve[method_id][i]
                 sqes.append(precomputed_results["b_e"](ans[i]))
             
-            sqe_gradient = self._calc_gradient_psnr(sqes)
+            sqe_gradient = self._calc_gradient_psnr(np.array(sqes))
             
             for i in range(n_ctu):
                 b_e: LinearInterpolation = self._precomputed_curve[method_id][i]["b_e"]
                 b_t: np.ndarray = self._precomputed_curve[method_id][i]["b_t"]
-                gradients[i] = b_t[0] - sqe_gradient * b_e.derivative(ans[i])
+                gradients[i] = self.w_time * b_t[0] - sqe_gradient * b_e.derivative(ans[i])
             
             # Gradient descent            
-            ans -= gradients * learning_rate
+            ans = ans - gradients * learning_rate
             # Normalize
             ans = normalize_to_target(ans, min_bytes, max_bytes, total_target)
             
@@ -544,7 +545,32 @@ class SAEngine1(EngineBase):
         new_method_ids[selected] = new_method
         return new_method_ids
 
-    def _solve(self, img_blocks, img_size, total_target_bytes, file_io, num_steps=10000, alpha=0.999):
+    def _show_solution(self, method_ids, target_byteses, total_target_bytes, score, psnr, time):
+        n_ctu = len(method_ids)
+        total_bytes = np.sum(target_byteses)
+        print(
+            f"score={score}; total_bytes=[{total_bytes}/{total_target_bytes}]({100.0*total_bytes/total_target_bytes:.4f}%); PSNR={psnr:.3f}; time={time:.3f}s",
+            flush=True,
+        )
+        for i in range(n_ctu):
+            method_id = method_ids[i]
+            target_bytes = target_byteses[i]
+
+            curves = self._precomputed_curve[method_id][i]
+
+            min_tb = curves["min_t"]
+            max_tb = curves["max_t"]
+
+            est_time = np.polyval(curves["b_t"], target_bytes)
+            est_qscale = curves["b_q"](target_bytes)
+            est_sqe = curves["b_e"](target_bytes)
+
+            print(
+                f"- CTU [{i}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\tsquared_error={est_sqe:.6f};",
+                flush=True
+            )
+
+    def _solve(self, img_blocks, img_size, total_target_bytes, file_io, num_steps=1000, alpha=0.999):
         n_ctu = len(img_blocks)
         n_method = len(self.methods)
         h, w = img_size
@@ -553,21 +579,22 @@ class SAEngine1(EngineBase):
         print("Precompute all scorees")
         self._precompute_score(img_blocks, img_size)
 
-        ans = np.random.random_integers([n_ctu,], dtype=np.int32)
-        target_byteses, score, psnr, time = self._find_optimal_target_bytes(file_io, n_ctu, num_pixels, ans, total_target_bytes)
+        ans = np.random.random_integers(0, n_method-1, [n_ctu,])
+        target_byteses, score, psnr, time = self._find_optimal_target_bytes(file_io, n_ctu, num_pixels, ans, total_target_bytes, num_steps=10000)
 
         T = 1.
 
         # Simulated Annealing
         for step in range(num_steps):
-            next_state = self._try_move(ans)
-            next_target_byteses, next_score, next_psnr, next_time = self._find_optimal_target_bytes(file_io, n_ctu, num_pixels, next_state, total_target_bytes)
+            next_state = self._try_move(ans, n_method)
+            next_target_byteses, next_score, next_psnr, next_time = self._find_optimal_target_bytes(
+                file_io, n_ctu, num_pixels, next_state, total_target_bytes, init_value=target_byteses, num_steps=100)
 
             if next_score > score:
                 accept = True
             else:
                 delta = score - next_score
-                p = 1. / (1. + np.exp(delta / T))
+                p = safe_SA_prob(delta, T)
                 accept = (np.random.rand() < p)
             
             if accept:
@@ -576,6 +603,10 @@ class SAEngine1(EngineBase):
                 score = next_score
                 psnr = next_psnr
                 time = next_time
+            
+            if step % (num_steps // 100) == 0:
+                print(f"Results for step: {step}; T={T:.6f}")
+                self._show_solution(ans, target_byteses, total_target_bytes, score, psnr, time)
             
             T *= alpha
         

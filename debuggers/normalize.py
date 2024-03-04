@@ -1,9 +1,10 @@
 from bin.math import normalize_to_target
 import numpy as np
+# [2033.33333333 2033.33333333 2033.33333333 2033.33333333 2033.33333333
+#  2033.33333333] [1359 1191 1083 1135 1355 1239] [3263 3095 3071 3215 4051 4183] 12200.0
+# [587. 587. 587. 587. 587. 587.] [1359 1191 1083 1135 1355 1239] [3263 3095 3071 3215 4051 4183] 12200.0
+X = np.array([2000, 2000, 2000, 2000, 2000, 2000])
+X_min = np.array([1359, 1191, 1083, 1135, 1355, 1239])
+X_max = np.array([3263, 3095, 3071, 3215, 4051, 4183])
 
-X = np.array([0., 0, 0, 9])
-X_min = np.array([0, 0, 0, 1])
-X_max = np.array([3.,5,7,9])
-
-for target in range(30):
-    print(normalize_to_target(X, X_min, X_max, target))
+print(normalize_to_target(X, X_min, X_max, 12200))
