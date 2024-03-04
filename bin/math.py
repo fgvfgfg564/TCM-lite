@@ -96,17 +96,14 @@ def waterfill(X, k):
             r = mid
     
     for i in range(l + 1):
-        results[sorted_indexes[i]]= X[sorted_indexes[i]]
+        results[sorted_indexes[i]] = X[sorted_indexes[i]]
         k -= X[sorted_indexes[i]]
     
     if l < N - 1:
-        d = k // (N - 1 - l)
-        tail = k - d * (N - 1 - l)
+        d = k / (N - 1 - l)
 
         for i in range(l + 1, N):
             results[sorted_indexes[i]] += d
-            if (N - i) <= tail:
-                results[sorted_indexes[i]] += 1
 
     return results
 
