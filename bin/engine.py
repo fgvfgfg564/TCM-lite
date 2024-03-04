@@ -402,7 +402,7 @@ class EngineBase:
         self,
         input_pth,
         output_pth,
-        total_target_bytes,
+        target_bpp,
         w_time=1.0,
         **kwargs,
     ):
@@ -420,7 +420,7 @@ class EngineBase:
         self.gen_psnr = []
         self.gen_time = []
 
-        target_bpp = total_target_bytes * 8 / h / w
+        total_target_bytes = target_bpp * h * w // 8
         print(f"Image shape: {h}x{w}")
         print(
             f"Target={total_target_bytes}B; Target bpp={target_bpp:.4f};"

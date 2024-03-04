@@ -32,7 +32,7 @@ def parse_args():
     parser.add_argument("-N", nargs="+", type=int, default=[1000])
     parser.add_argument("--num-gen", nargs="+", type=int, default=[1000])
     parser.add_argument("--w_time", nargs="+", type=float, default=[1.0])
-    parser.add_argument("--bpg_qp", nargs="+", type=int, default=[32])
+    parser.add_argument("--target_bpp", nargs="+", type=float, default=[1.0])
     parser.add_argument("--boltzmann_k", nargs="+", type=float, default=[0.05])
     parser.add_argument("--method_sigma", nargs="+", type=float, default=[0.2])
     parser.add_argument("--bytes_sigma", nargs="+", type=float, default=[256])
@@ -49,7 +49,7 @@ def test_single_image(
     save_image,
     N,
     num_gen,
-    bpg_qp,
+    target_bpp,
     w_time,
     no_allocation,
     boltzmann_k,
@@ -60,7 +60,7 @@ def test_single_image(
         output_dir,
         str(N),
         str(num_gen),
-        str(bpg_qp),
+        str(target_bpp),
         str(w_time),
         str(boltzmann_k),
         str(no_allocation),
@@ -83,7 +83,7 @@ def test_single_image(
         genetic_statistic = engine.encode(
             input_filename,
             obin,
-            bpg_qp=bpg_qp,
+            target_bpp,
             w_time=w_time,
             N=N,
             num_generation=num_gen,
@@ -146,7 +146,7 @@ def test_glob(
     save_image,
     N,
     num_gen,
-    bpg_qp,
+    target_bpp,
     w_time,
     no_allocation,
     boltzmann_k,
@@ -170,7 +170,7 @@ def test_glob(
             save_image,
             N=N,
             num_gen=num_gen,
-            bpg_qp=bpg_qp,
+            target_bpp=target_bpp,
             w_time=w_time,
             no_allocation=no_allocation,
             boltzmann_k=boltzmann_k,
@@ -220,7 +220,7 @@ def test_multiple_configs(
     save_image,
     N,
     num_gen,
-    bpg_qp,
+    target_bpp,
     w_time,
     no_allocation,
     boltzmann_k,
@@ -232,7 +232,7 @@ def test_multiple_configs(
     def _test_glob(
         N,
         num_gen,
-        bpg_qp,
+        target_bpp,
         w_time,
         no_allocation,
         boltzmann_k,
@@ -246,7 +246,7 @@ def test_multiple_configs(
             save_image,
             N=N,
             num_gen=num_gen,
-            bpg_qp=bpg_qp,
+            target_bpp=target_bpp,
             w_time=w_time,
             no_allocation=no_allocation,
             boltzmann_k=boltzmann_k,
@@ -257,7 +257,7 @@ def test_multiple_configs(
     configs = [
         ("N", N),
         ("num_gen", num_gen),
-        ("bpg_qp", bpg_qp),
+        ("target_bpp", target_bpp),
         ("w_time", w_time),
         ("no_allocation", no_allocation),
         ("boltzmann_k", boltzmann_k),
@@ -292,7 +292,7 @@ if __name__ == "__main__":
         args.save_image,
         args.N,
         args.num_gen,
-        args.bpg_qp,
+        args.target_bpp,
         args.w_time,
         args.no_allocation,
         args.boltzmann_k,
