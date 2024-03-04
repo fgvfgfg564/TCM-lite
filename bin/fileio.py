@@ -118,6 +118,7 @@ class FileIO:
                 self.block_num_pixels.append((lower-upper) * (right-left))
         
         self.n_ctu = len(self.block_indexes)
+        self.block_num_pixels = np.array(self.block_num_pixels)
 
     @property
     def header_size(self):

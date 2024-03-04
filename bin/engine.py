@@ -40,7 +40,7 @@ class Solution:
         self.target_byteses = target_byteses
         self.n_ctu = len(self.method_ids)
 
-class GASolution:
+class GASolution(Solution):
     def __init__(self, method_score: np.ndarray, target_byteses: np.ndarray) -> None:
         self.method_score = method_score  # ctu, n_method
         self.method_ids = np.argmax(method_score, axis=0)
@@ -55,7 +55,7 @@ class GASolution:
             min_bytes[i] = min_table[self.method_ids[i]][i]
             max_bytes[i] = max_table[self.method_ids[i]][i]
         
-        self.target_byteses = normalize_to_target(self.target_byteses - min_bytes, max_bytes - min_bytes, total_target - min_bytes.sum())
+        self.target_byteses = normalize_to_target(self.target_byteses, min_bytes, max_bytes, total_target)
 
 class EngineBase:
     TOOL_GROUPS = {
@@ -173,7 +173,7 @@ class EngineBase:
         x = x.to(self.dtype) / 255.0
         return x
 
-    def _estimate_score(
+    def _try_compress_decompress(
         self,
         method,
         image_block: PaddedBlock,
@@ -275,7 +275,7 @@ class EngineBase:
                 for qscale in self.qscale_samples:
                     image_block = img_blocks[i]
 
-                    sqe, dec_time, bitstream, __, ___ = self._estimate_score(
+                    sqe, dec_time, bitstream, __, ___ = self._try_compress_decompress(
                         method,
                         image_block,
                         target_bytes=None,
@@ -361,7 +361,7 @@ class EngineBase:
         )
         return pic_height, pic_width, x_padded
 
-    def _search(
+    def _get_score(
         self, n_ctu, num_pixels, method_ids, target_byteses, total_target
     ):
         # Returns score given method ids and target bytes
@@ -477,52 +477,111 @@ class EngineBase:
 
 class SAEngine1(EngineBase):
 
+    @staticmethod
+    def _calc_gradient_psnr(sqes: np.ndarray):
+        r"""
+        $ PSNR(sqes) = - 10 * \log_{10}{(\frac{\sum X}{num\_pixels})} $
+        """
+
+        return -10 / (sqes.sum() * np.log(10))
+
+
     def _find_optimal_target_bytes(
-        self, file_io: FileIO, n_ctu, num_pixels, method_ids, total_target, learning_rate=1e-2, num_steps=1000, 
+        self, file_io: FileIO, n_ctu, num_pixels, method_ids, total_target, learning_rate=1e-2, num_steps=100, init_value=None
     ):
-        bpp = total_target / num_pixels
-        defaults = []
-        for i in range(n_ctu):
-            defaults.append(file_io.block_num_pixels * bpp)
-        
+        """
+        Find the optimal target bytes given CTU methods
+        """
 
+        min_bytes = np.zeros([n_ctu,], dtype=np.int32)
+        max_bytes = np.zeros([n_ctu,], dtype=np.int32)
 
-        sqe = 0
-        global_time = 0
+        for i in range(self.n_ctu):
+            min_bytes[i] = self._minimal_bytes[self.method_ids[i]][i]
+            max_bytes[i] = self._maximal_bytes[self.method_ids[i]][i]
 
-        for i in range(n_ctu):
-            method_id = method_ids[i]
-            target_bytes = target_byteses[i]
+        if init_value is None:
+            bpp = total_target / num_pixels
+            ans = file_io.block_num_pixels * bpp
+        else:
+            ans = init_value
+            ans = normalize_to_target(ans, min_bytes, max_bytes, total_target)
 
-            precomputed_results = self._precomputed_curve[method_id][i]
+        for step in range(num_steps):
+            gradients = np.zeros_like(ans)
 
-            ctu_sqe = precomputed_results["b_e"](target_bytes)
-            t = np.polyval(precomputed_results["b_t"], target_bytes)
+            # Gradient item on sqe
+            sqes = []
+            for i in range(n_ctu):
+                method_id = method_ids[i]
+                precomputed_results = self._precomputed_curve[method_id][i]
+                sqes.append(precomputed_results["b_e"](ans[i]))
+            
+            sqe_gradient = self._calc_gradient_psnr(sqes)
+            
+            for i in range(n_ctu):
+                b_e: LinearInterpolation = self._precomputed_curve[method_id][i]["b_e"]
+                b_t: np.ndarray = self._precomputed_curve[method_id][i]["b_t"]
+                gradients[i] = b_t[0] - sqe_gradient * b_e.derivative(ans[i])
+            
+            # Gradient descent            
+            ans -= gradients * learning_rate
+            # Normalize
+            ans = normalize_to_target(ans, min_bytes, max_bytes, total_target)
+            
+        score, psnr, time = self._get_score(n_ctu, num_pixels, method_ids, ans, total_target)
 
-            global_time += t
-            sqe += ctu_sqe
+        return ans, score, psnr, time
+    
+    def _try_move(self, method_ids: np.ndarray, n_method):
+        # Generate a group of new method_ids that move from current state
 
-        sqe /= num_pixels * 3
-        psnr = -10 * np.log10(sqe)
-        return psnr - self.w_time * global_time, psnr, global_time
-        
+        # Pure random
+        n_ctu = len(method_ids)
+        selected = np.random.random_integers(0, n_ctu - 1)
+        new_method = np.random.random_integers(0, n_method - 1)
+        new_method_ids = method_ids.copy()
+        new_method_ids[selected] = new_method
+        return new_method_ids
 
-    def _solve(self, img_blocks, img_size, total_target_bytes, file_io, **kwargs):
+    def _solve(self, img_blocks, img_size, total_target_bytes, file_io, num_steps=10000, alpha=0.999):
         n_ctu = len(img_blocks)
         n_method = len(self.methods)
         h, w = img_size
         num_pixels = h * w
 
-        DEFAULT_METHOD = 0
+        ans = np.random.random_integers([n_ctu,], dtype=np.int32)
+        target_byteses, score, psnr, time = self._find_optimal_target_bytes(file_io, n_ctu, num_pixels, ans, total_target_bytes)
 
-        print("Initializing qscale")
-        _, init_target_bytes = self._search_init_qscale(
-            self.methods[DEFAULT_METHOD][0], img_blocks, total_target_bytes
-        )
+        T = 1.
 
-        solution = Solution(np.zeros([n_ctu]), init_target_bytes)
+        # Simulated Annealing
+        for step in range(num_steps):
+            next_state = self._try_move(ans)
+            next_target_byteses, next_score, next_psnr, next_time = self._find_optimal_target_bytes(file_io, n_ctu, num_pixels, next_state, total_target_bytes)
 
-        # TODO
+            if next_score > score:
+                accept = True
+            else:
+                delta = score - next_score
+                p = 1. / (1. + np.exp(delta / T))
+                accept = (np.random.rand() < p)
+            
+            if accept:
+                ans = next_state
+                target_byteses = next_target_byteses
+                score = next_score
+                psnr = next_psnr
+                time = next_time
+            
+            T *= alpha
+        
+        solution = Solution(ans, target_byteses)
+        return self._compress_blocks(img_blocks, solution)
+
+
+
+
 
 
 
@@ -659,7 +718,7 @@ class GAEngine1(EngineBase):
             method.normalize_target_byteses(
                 self._minimal_bytes, self._maximal_bytes, total_target_bytes
             )
-            method.score, method.psnr, method.time = self._search(
+            method.score, method.psnr, method.time = self._get_score(
                 n_ctu,
                 num_pixels,
                 method.method_ids,
@@ -729,7 +788,7 @@ class GAEngine1(EngineBase):
                     T * method_sigma,
                     T * bytes_sigma,
                 )
-                newborn.score, newborn.psnr, newborn.time = self._search(
+                newborn.score, newborn.psnr, newborn.time = self._get_score(
                     n_ctu,
                     num_pixels,
                     newborn.method_ids,

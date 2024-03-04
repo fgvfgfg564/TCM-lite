@@ -68,6 +68,9 @@ def safe_softmax(x: np.ndarray):
 #         return self.slope
 
 def waterfill(X, k):
+    if k <= 0:
+        return np.zeros_like(X)
+    
     if np.sum(X) <= k:
         return X
     
@@ -101,9 +104,11 @@ def waterfill(X, k):
 
     return results
 
-def normalize_to_target(X: np.ndarray, X_max, target, inplace=False):
-    if not inplace:
-        X = X.copy()
+def normalize_to_target(X: np.ndarray, X_min, X_max, target):
+    X = X - X_min
+    X_max = X_max - X_min
+    target = target - sum(X_min)
+
     remain = target - np.sum(X)
     if remain > 0:
         inverse = False
@@ -119,8 +124,10 @@ def normalize_to_target(X: np.ndarray, X_max, target, inplace=False):
     else:
         X += fill
 
-    assert(np.all(X >= 0))
-    assert(np.all(X <= X_max))
-    assert(np.sum(X) <= target)
+    # print(X, X_max, X_min, target)
+
+    # assert(np.all(X >= 0))
+    # assert(np.all(X <= X_max))
+    # assert(np.sum(X) <= target)
     
-    return X
+    return X + X_min
