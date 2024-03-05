@@ -1,4 +1,5 @@
 import torch
+from ..coding_tool import CodingToolBase
 
 
 def PSNR(x, y):
@@ -6,7 +7,9 @@ def PSNR(x, y):
     return -10 * torch.log10(mse)
 
 
-class TraditionalCodingToolBase:
+class TraditionalCodingToolBase(CodingToolBase):
+    PLATFORM = 'numpy'
+
     def compress_block(self, img_block: torch.Tensor, q_scale: float) -> bytes:
         """
         输入:

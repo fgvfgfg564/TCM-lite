@@ -8,21 +8,14 @@ from dataclasses import dataclass
 
 import tqdm
 import copy
-import math
-import random
-import json
-from scipy import interpolate
-from scipy.misc import derivative
-import einops
 
 from coding_tools.coding_tool import CodingToolBase
-from coding_tools.EVC.bin.engine import ModelEngine as EVCModelEngine
-from coding_tools.TCM.app.engine import ModelEngine as TCMModelEngine
 import coding_tools.utils.timer as timer
 
 from .utils import *
 from .fileio import FileIO, get_padding_size
 from .math import *
+from ..coding_tools import TOOL_GROUPS
 
 SAFETY_BYTE_PER_CTU = 2
 
@@ -59,11 +52,6 @@ class GASolution(Solution):
         self.target_byteses = normalize_to_target(self.target_byteses, min_bytes, max_bytes, total_target)
 
 class EngineBase:
-    TOOL_GROUPS = {
-        "EVC": EVCModelEngine,
-        "TCM": TCMModelEngine,
-    }
-
     CACHE_DIR = os.path.join(os.path.split(__file__)[0], "../cache")
 
     def __init__(
@@ -92,30 +80,50 @@ class EngineBase:
         idx = 0
         # Load models
         for group_name in valid_groups:
-            engine_cls = self.TOOL_GROUPS[group_name]
+            engine_cls = TOOL_GROUPS[group_name]
             print("Loading tool group:", group_name)
-            for model_name in engine_cls.MODELS.keys():
-                if not tool_filter or model_name in tool_filter:
-                    print("Loading model:", model_name)
+            if engine_cls.MODELS is None:
+                print("Loading model:", group_name)
 
-                    method = engine_cls.from_model_name(
-                        model_name, self.dtype, self.ctu_size
-                    )
-                    
-                    if tool_filter is None:
-                        cnt = 1
-                    else:
-                        cnt = tool_filter.count(model_name)
+                method = engine_cls()
+                
+                if tool_filter is None:
+                    cnt = 1
+                else:
+                    cnt = tool_filter.count(group_name)
 
-                    for _ in range(cnt):
-                        self.methods.append(
-                            (
-                                method,
-                                model_name,
-                                idx,
-                            )
+                for _ in range(cnt):
+                    self.methods.append(
+                        (
+                            method,
+                            group_name,
+                            idx,
                         )
-                        idx += 1
+                    )
+                    idx += 1
+            else:
+                for model_name in engine_cls.MODELS.keys():
+                    if not tool_filter or model_name in tool_filter:
+                        print("Loading model:", model_name)
+
+                        method = engine_cls.from_model_name(
+                            model_name, self.dtype, self.ctu_size
+                        )
+                        
+                        if tool_filter is None:
+                            cnt = 1
+                        else:
+                            cnt = tool_filter.count(model_name)
+
+                        for _ in range(cnt):
+                            self.methods.append(
+                                (
+                                    method,
+                                    model_name,
+                                    idx,
+                                )
+                            )
+                            idx += 1
         
         if len(self.methods) == 0:
             raise RuntimeError("No valid coding tool is loaded!")
@@ -423,11 +431,6 @@ class EngineBase:
         # Set loss
         self.w_time = w_time
 
-        # statistics
-        self.gen_score = []
-        self.gen_psnr = []
-        self.gen_time = []
-
         total_target_bytes = target_bpp * h * w // 8
         print(f"Image shape: {h}x{w}")
         print(
@@ -446,7 +449,7 @@ class EngineBase:
         print("Precompute all scorees", flush=True)
         self._precompute_score(img_blocks, img_size, img_hash)
 
-        method_ids, q_scales, bitstreams = self._solve(
+        method_ids, q_scales, bitstreams, data = self._solve(
             img_blocks,
             img_size,
             total_target_bytes,
@@ -458,11 +461,6 @@ class EngineBase:
         file_io.q_scale = q_scales
         file_io.dump(output_pth)
 
-        data = {
-            "gen_score": self.gen_score,
-            "gen_psnr": self.gen_psnr,
-            "gen_time": self.gen_time,
-        }
         return data
 
     def join_blocks(self, decoded_ctus, file_io: FileIO):
@@ -600,7 +598,7 @@ class SAEngine1(EngineBase):
                 flush=True
             )
 
-    def _solve(self, img_blocks, img_size, total_target_bytes, file_io, num_steps=1000, T_start=1e-3, T_end=1e-6):
+    def _solve(self, img_blocks, img_size, total_target_bytes, file_io, num_steps=1000, T_start=1e-3, T_end=1e-6, ):
         n_ctu = len(img_blocks)
         n_method = len(self.methods)
         h, w = img_size
@@ -639,7 +637,9 @@ class SAEngine1(EngineBase):
             T *= alpha
         
         solution = Solution(ans, target_byteses)
-        return self._compress_blocks(img_blocks, solution)
+
+        method_ids, q_scales, bitstreams = self._compress_blocks(img_blocks, solution)
+        return method_ids, q_scales, bitstreams, []
 
 class GAEngine1(EngineBase):
     def _initial_method_score(self, n_ctu, n_method):
@@ -738,6 +738,11 @@ class GAEngine1(EngineBase):
         method_sigma,
         bytes_sigma,
     ):
+        # statistics
+        gen_score = []
+        gen_psnr = []
+        gen_time = []
+
         n_ctu = len(img_blocks)
         n_method = len(self.methods)
         h, w = img_size
@@ -790,9 +795,9 @@ class GAEngine1(EngineBase):
         for k in range(num_gen):
             # show best solution on generation
             best_solution: GASolution = solutions[0]
-            self.gen_psnr.append(best_psnr)
-            self.gen_score.append(max_score)
-            self.gen_time.append(best_time)
+            gen_psnr.append(best_psnr)
+            gen_score.append(max_score)
+            gen_time.append(best_time)
 
             print(f"Best Solution before Gen.{k}:")
             self._show_solution(best_solution, total_target_bytes)
@@ -856,4 +861,11 @@ class GAEngine1(EngineBase):
 
             solutions.sort(key=lambda x: x.score, reverse=True)
 
-        return self._compress_blocks(img_blocks, solutions[0])
+        data = {
+            "gen_score": gen_score,
+            "gen_psnr": gen_psnr,
+            "gen_time": gen_time,
+        }
+
+        method_ids, q_scales, bitstreams = self._compress_blocks(img_blocks, solutions[0])
+        return method_ids, q_scales, bitstreams, data

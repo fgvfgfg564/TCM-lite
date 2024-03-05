@@ -1,5 +1,6 @@
 from coding_tools.traditional.tool_base import TraditionalCodingToolBase, PSNR
 import os
+import PIL
 import io
 import math
 import torch
@@ -9,12 +10,13 @@ from torchvision import transforms
 from coding_tools.TCM.models import rgb2yuv, yuv2rgb, run_command
 from coding_tools.utils.timer import Timer
 import time
+from ..register import register_tool
 
 from PIL import Image
 
 # 实现的传统编码工具放在这里
 
-
+@register_tool('VTM')
 class VTMTool(TraditionalCodingToolBase):
     def __init__(self):
         self.encoder_path = "../third_party/VVCSoftware_VTM/bin/EncoderAppStatic"
@@ -95,10 +97,43 @@ class VTMTool(TraditionalCodingToolBase):
 
         return rec
 
-
+@register_tool('WebP')
 class WebPTool(TraditionalCodingToolBase):
     def __init__(self):
         self.fmt = "webp"
+
+    def compress_block(self, img_block: torch.Tensor, q_scale: float) -> bytes:
+        q_scale = 100 * (1 - q_scale)
+        if not 0.0 <= q_scale <= 100.0:
+            raise ValueError(f"Invalid quality value: {q_scale} (0,100)")
+        img = transforms.ToPILImage()(img_block.squeeze(0))
+        # Encode
+        tmp = io.BytesIO()
+        img.save(tmp, format=self.fmt, quality=int(q_scale))
+        tmp.seek(0)
+        bit_stream = tmp.read()
+
+        return bit_stream
+
+    def decompress_block(
+        self, bit_stream: bytes, h: int, w: int, q_scale: float
+    ) -> torch.Tensor:
+        with Timer("bytesio"):
+            image_bytes = io.BytesIO(bit_stream)
+        # Decode
+        with Timer("open"):
+            rec_img = Image.open(image_bytes, formats=(self.fmt,))
+        with Timer("load"):
+            rec_img.load()
+        with Timer("totensor"):
+            rec = transforms.ToTensor()(rec_img).unsqueeze(0)
+
+        return rec
+
+@register_tool('JPEG')
+class JPEGTool(TraditionalCodingToolBase):
+    def __init__(self):
+        self.fmt = "jpeg"
 
     def compress_block(self, img_block: torch.Tensor, q_scale: float) -> bytes:
         q_scale = 100 * (1 - q_scale)

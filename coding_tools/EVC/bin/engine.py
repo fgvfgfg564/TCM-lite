@@ -2,11 +2,12 @@ import os
 import torch
 
 from ...coding_tool import CodingToolBase
+from ...register import register_tool
 
 from ..src.models import build_model, image_model
 from ..src.utils.stream_helper import get_state_dict
 
-
+@register_tool('EVC')
 class ModelEngine(CodingToolBase):
     MODELS = {
         "EVC_LS": "EVC_LS_MD.pth.tar",

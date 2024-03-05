@@ -17,6 +17,7 @@ from ..models.tcm import TCM_vbr, TCM_vbr2
 from .utils import *
 
 from ...coding_tool import CodingToolBase
+from ...register import register_tool
 
 def get_state_dict(model_path, device):
     dictory = {}
@@ -26,7 +27,7 @@ def get_state_dict(model_path, device):
         dictory[k.replace("module.", "")] = v
     return dictory
 
-
+@register_tool('TCM')
 class ModelEngine(CodingToolBase):
     # MODELS1 = {f"TCM_VBR1_{i}": f"vcip_vbr1_{i}_best.pth.tar" for i in range(3)}
     MODELS1 = {}
