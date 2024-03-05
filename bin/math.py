@@ -38,6 +38,14 @@ class LinearInterpolation:
 
         slope = (y1 - y0) / (x1 - x0)
         return slope
+    
+    def dump(self, filename):
+        np.savez_compressed(filename, X=self.X, Y=self.Y)
+    
+    @classmethod
+    def load(cls, filename):
+        loaded = np.load(filename)
+        return cls(X=loaded['X'], Y=loaded['Y'])
 
 def safe_softmax(x: np.ndarray):
     x = x - np.max(x)

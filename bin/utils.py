@@ -7,6 +7,7 @@ import torch
 from torchvision.transforms import ToTensor
 import math
 import pytorch_msssim
+import hashlib
 
 
 def stable_softmax(x: np.ndarray):
@@ -155,3 +156,40 @@ class AverageMeter:
         self.sum += val * n
         self.count += n
         self.avg = self.sum / self.count
+
+def hash_numpy_array(array, hash_function='sha256'):
+    """
+    Computes the hash of a NumPy array.
+
+    :param array: NumPy array to be hashed.
+    :param hash_function: Name of the hash function to use (e.g., 'md5', 'sha1', 'sha256').
+    :return: Hexadecimal hash of the array.
+    """
+    if hash_function not in hashlib.algorithms_available:
+        raise ValueError(f"Hash function {hash_function} is not available.")
+
+    # Convert the array to bytes
+    array_bytes = array.tobytes()
+
+    # Create a hash object and update it with the array bytes
+    hash_obj = hashlib.new(hash_function)
+    hash_obj.update(array_bytes)
+
+    # Return the hexadecimal digest of the hash
+    return hash_obj.hexdigest()
+
+def hash_list_of_arrays(array_list, hash_function='sha256'):
+    """
+    Computes the hash of a list of NumPy arrays.
+
+    :param array_list: List of NumPy arrays to be hashed.
+    :param hash_function: Name of the hash function to use.
+    :return: Hexadecimal hash of the list of arrays.
+    """
+    combined_hash = hashlib.new(hash_function)
+
+    for array in array_list:
+        array_hash = hash_numpy_array(array, hash_function)
+        combined_hash.update(array_hash.encode())
+
+    return combined_hash.hexdigest()

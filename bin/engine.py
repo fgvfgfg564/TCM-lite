@@ -63,6 +63,8 @@ class EngineBase:
         "TCM": TCMModelEngine,
     }
 
+    CACHE_DIR = os.path.join(os.path.split(__file__)[0], "../cache")
+
     def __init__(
         self,
         ctu_size,
@@ -88,8 +90,6 @@ class EngineBase:
         self.qscale_samples = np.linspace(0, 1, num_qscale_samples, dtype=np.float32)[
             ::-1
         ]
-
-        self.cached_blocks = None
 
     def _load_models(self, valid_groups, tool_filter):
         idx = 0
@@ -236,22 +236,7 @@ class EngineBase:
             recon_img[:, upper:lower_real, left:right_real] = ctu[:, :, :lower_real-upper, :right_real-left]
         return recon_img
 
-    def _precompute_score(self, img_blocks, img_size):
-        if (
-            self.cached_blocks is not None
-            and len(self.cached_blocks) == len(img_blocks)
-        ):
-            errmx = None
-            for x, y in zip(self.cached_blocks, img_blocks):
-                err = torch.max(torch.abs(x.padded_block.cpu() - y.padded_block.cpu()))
-                if errmx is None or errmx < err:
-                    errmx = err
-
-            if errmx < 1e-3:
-                print("Using cached precompute scores ...")
-                return
-        self.cached_blocks = [PaddedBlock(x.padded_block.cpu(), x.h, x.w) for x in img_blocks]
-
+    def _precompute_score(self, img_blocks, img_size, img_hash):
         h, w = img_size
         n_ctu = len(img_blocks)
         n_methods = len(self.methods)
@@ -263,58 +248,86 @@ class EngineBase:
         pbar = tqdm.trange(n_methods * n_ctu * len(self.qscale_samples))
         pbar.set_description("Precomputing score")
         pbar_iter = pbar.__iter__()
-        for method, _, idx in self.methods:
-            self._precomputed_curve[idx] = {}
+        for method, method_name, method_idx in self.methods:
+            self._precomputed_curve[method_idx] = {}
             for i in range(n_ctu):
-                self._precomputed_curve[idx][i] = {}
-                sqes = []
-                num_bytes = []
-                qscales = []
-                times = []
-
-                for qscale in self.qscale_samples:
-                    image_block = img_blocks[i]
-
-                    sqe, dec_time, bitstream, __, ___ = self._try_compress_decompress(
-                        method,
-                        image_block,
-                        target_bytes=None,
-                        q_scale=qscale,
-                        repeat=1,
-                    )
-                    num_byte = len(bitstream)
-                    num_bytes.append(num_byte)
-                    sqes.append(sqe)
-                    times.append(dec_time)
-                    qscales.append(qscale)
-                    pbar_iter.__next__()
-
-                make_strictly_increasing(num_bytes)
-
-                if len(num_bytes) <= 3 or not is_strictly_increasing(num_bytes):
-                    raise ValueError(
-                        f"num_bytes are too few or not strictly increasing: \nnum_bytes={num_bytes}\nsqes={sqes}\nqscales={qscales}"
-                    )
-
-                self._minimal_bytes[idx, i] = num_bytes[0]
-                self._maximal_bytes[idx, i] = num_bytes[-1]
+                self._precomputed_curve[method_idx][i] = {}
+                cache_dir = os.path.join(self.CACHE_DIR, method_name, img_hash, "-".join([str(self.ctu_size),str(self.mosaic),str(self.num_qscale_samples), str(i)]))
+                b_e_file = os.path.join(cache_dir, 'b_e.npz')
+                b_t_file = os.path.join(cache_dir, 'b_t.npy')
+                b_q_file = os.path.join(cache_dir, 'b_q.npz')
+                min_max_file = os.path.join(cache_dir, 'min_max.npz')
 
                 try:
-                    b_e = LinearInterpolation(num_bytes, sqes)
-                    # b_t = interpolate.interp1d(num_bytes, times, kind='linear')
-                    b_t = np.polyfit(num_bytes, times, 1)
-                    b_q = LinearInterpolation(num_bytes, qscales)
-                except ValueError as e:
-                    print(f"Interpolation error!")
-                    print(f"num_bytes={num_bytes}")
-                    print(f"sqes={sqes}")
-                    raise e
+                    # If the caches are complete, load them
+                    b_e = LinearInterpolation.load(b_e_file)
+                    b_q = LinearInterpolation.load(b_q_file)
+                    b_t = np.load(b_t_file)
+                    min_max = np.load(min_max_file)
+                    min_t = min_max['min_t']
+                    max_t = min_max['max_t']
+                    print("Loaded cache from:", cache_dir, flush=True)
 
-                self._precomputed_curve[idx][i]["b_e"] = b_e    # interpolate.interp1d; Linear
-                self._precomputed_curve[idx][i]["b_t"] = b_t    # Linear fitting
-                self._precomputed_curve[idx][i]["min_t"] = min(num_bytes)
-                self._precomputed_curve[idx][i]["max_t"] = max(num_bytes)
-                self._precomputed_curve[idx][i]["b_q"] = b_q
+                    for qscale in self.qscale_samples:
+                        pbar_iter.__next__()
+                except:
+                    # No cache or cache is broken
+                    sqes = []
+                    num_bytes = []
+                    qscales = []
+                    times = []
+
+                    for qscale in self.qscale_samples:
+                        image_block = img_blocks[i]
+
+                        sqe, dec_time, bitstream, __, ___ = self._try_compress_decompress(
+                            method,
+                            image_block,
+                            target_bytes=None,
+                            q_scale=qscale,
+                            repeat=1,
+                        )
+                        num_byte = len(bitstream)
+                        num_bytes.append(num_byte)
+                        sqes.append(sqe)
+                        times.append(dec_time)
+                        qscales.append(qscale)
+                        pbar_iter.__next__()
+
+                    make_strictly_increasing(num_bytes)
+
+                    if len(num_bytes) <= 3 or not is_strictly_increasing(num_bytes):
+                        raise ValueError(
+                            f"num_bytes are too few or not strictly increasing: \nnum_bytes={num_bytes}\nsqes={sqes}\nqscales={qscales}"
+                        )
+
+                    try:
+                        b_e = LinearInterpolation(num_bytes, sqes)
+                        # b_t = interpolate.interp1d(num_bytes, times, kind='linear')
+                        b_t = np.polyfit(num_bytes, times, 1)
+                        b_q = LinearInterpolation(num_bytes, qscales)
+                    except ValueError as e:
+                        print(f"Interpolation error!")
+                        print(f"num_bytes={num_bytes}")
+                        print(f"sqes={sqes}")
+                        raise e
+                    
+                    min_t = min(num_bytes)
+                    max_t = max(num_bytes)
+
+                    # Save to cache
+                    os.makedirs(cache_dir, exist_ok=True)
+                    b_e.dump(b_e_file)
+                    b_q.dump(b_q_file)
+                    np.save(b_t_file, b_t)
+                    np.savez(min_max_file, min_t=min_t, max_t=max_t)
+                    print("Cache saved to:", cache_dir, flush=True)
+
+                self._precomputed_curve[method_idx][i]["b_e"] = b_e    # interpolate.interp1d; Linear
+                self._precomputed_curve[method_idx][i]["b_t"] = b_t    # Linear fitting
+                self._minimal_bytes[method_idx][i] = min_t
+                self._maximal_bytes[method_idx][i] = max_t
+                self._precomputed_curve[method_idx][i]["b_q"] = b_q
 
     def _compress_blocks(self, img_blocks, solution):
         # Calculate q_scale and bitstream for CTUs
@@ -340,12 +353,14 @@ class EngineBase:
             raise FileNotFoundError(img_path)
 
         rgb = Image.open(img_path).convert("RGB")
-        rgb = np.asarray(rgb).astype("float32").transpose(2, 0, 1)
+        rgb = np.asarray(rgb)
+        img_hash = hash_numpy_array(rgb)
+        rgb = rgb.astype("float32").transpose(2, 0, 1)
         rgb = rgb / 255.0
         rgb = torch.from_numpy(rgb).type(self.dtype)
         rgb = rgb.unsqueeze(0)
         rgb = rgb.cuda()
-        return rgb
+        return rgb, img_hash
 
     def pad_img(self, x):
         pic_height = x.shape[2]
@@ -406,7 +421,7 @@ class EngineBase:
         w_time=1.0,
         **kwargs,
     ):
-        input_img = self.read_img(input_pth)
+        input_img, img_hash = self.read_img(input_pth)
         h, w, padded_img = self.pad_img(input_img)
         img_size = (h, w)
 
@@ -434,6 +449,10 @@ class EngineBase:
         )
 
         img_blocks = self.divide_blocks(file_io, h, w, padded_img)
+
+        print("Precompute all scorees", flush=True)
+        self._precompute_score(img_blocks, img_size, img_hash)
+
         method_ids, q_scales, bitstreams = self._solve(
             img_blocks,
             img_size,
@@ -558,31 +577,29 @@ class SAEngine1(EngineBase):
 
             curves = self._precomputed_curve[method_id][i]
 
-            min_tb = curves["min_t"]
-            max_tb = curves["max_t"]
+            min_tb = self._minimal_bytes[method_ids[i]][i]
+            max_tb = self._maximal_bytes[method_ids[i]][i]
 
             est_time = np.polyval(curves["b_t"], target_bytes)
             est_qscale = curves["b_q"](target_bytes)
             est_sqe = curves["b_e"](target_bytes)
 
             print(
-                f"- CTU [{i}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\tsquared_error={est_sqe:.6f};",
+                f"- CTU [{i}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes:.1f}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\tsquared_error={est_sqe:.6f};",
                 flush=True
             )
 
-    def _solve(self, img_blocks, img_size, total_target_bytes, file_io, num_steps=1000, alpha=0.999):
+    def _solve(self, img_blocks, img_size, total_target_bytes, file_io, num_steps=1000, T_start=1e-3, T_end=1e-6):
         n_ctu = len(img_blocks)
         n_method = len(self.methods)
         h, w = img_size
         num_pixels = h * w
-
-        print("Precompute all scorees")
-        self._precompute_score(img_blocks, img_size)
+        alpha = np.power(T_end / T_start, 1. / num_steps)
 
         ans = np.random.random_integers(0, n_method-1, [n_ctu,])
         target_byteses, score, psnr, time = self._find_optimal_target_bytes(file_io, n_ctu, num_pixels, ans, total_target_bytes, num_steps=10000)
 
-        T = 1.
+        T = T_start
 
         # Simulated Annealing
         for step in range(num_steps):
@@ -604,7 +621,7 @@ class SAEngine1(EngineBase):
                 psnr = next_psnr
                 time = next_time
             
-            if step % (num_steps // 100) == 0:
+            if step % (num_steps // 20) == 0:
                 print(f"Results for step: {step}; T={T:.6f}")
                 self._show_solution(ans, target_byteses, total_target_bytes, score, psnr, time)
             
@@ -686,15 +703,15 @@ class GAEngine1(EngineBase):
 
             curves = self._precomputed_curve[method_id][i]
 
-            min_tb = curves["min_t"]
-            max_tb = curves["max_t"]
+            min_tb = self._minimal_bytes[solution.method_ids[i]][i]
+            max_tb = self._maximal_bytes[solution.method_ids[i]][i]
 
             est_time = np.polyval(curves["b_t"], target_bytes)
             est_qscale = curves["b_q"](target_bytes)
             est_sqe = curves["b_e"](target_bytes)
 
             print(
-                f"- CTU [{i}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\tsquared_error={est_sqe:.6f}; method_scores={solution.method_score[:, i]}"
+                f"- CTU [{i}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes:.1f}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\tsquared_error={est_sqe:.6f}; method_scores={solution.method_score[:, i]}"
             )
 
     def _solve(
@@ -726,9 +743,6 @@ class GAEngine1(EngineBase):
             method_scores = self._initial_method_score(n_ctu, n_method)
             solution = GASolution(method_scores, default_target_bytes)
             return self._compress_blocks(img_blocks, solution)
-
-        print("Precompute all scorees")
-        self._precompute_score(img_blocks, img_size)
 
         # Generate initial solutions
         solutions = []

@@ -73,18 +73,17 @@ def test_single_image(
 
     ## Encode
     time0 = time.time()
-    if not os.path.isfile(obin):
-        genetic_statistic = engine.encode(
-            input_filename,
-            obin,
-            target_bpp,
-            w_time=w_time,
-            **kwargs,
-        )
-        torch.cuda.synchronize()
+    genetic_statistic = engine.encode(
+        input_filename,
+        obin,
+        target_bpp,
+        w_time=w_time,
+        **kwargs,
+    )
+    torch.cuda.synchronize()
 
-        with open(osta, "w") as f:
-            json.dump(genetic_statistic, f)
+    with open(osta, "w") as f:
+        json.dump(genetic_statistic, f)
 
     time_enc = time.time() - time0
 
