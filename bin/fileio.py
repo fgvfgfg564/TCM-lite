@@ -17,6 +17,7 @@ from typing import BinaryIO
 import numpy as np
 import io
 
+
 def get_padding_size(height, width, p=768):
     new_h = (height + p - 1) // p * p
     new_w = (width + p - 1) // p * p
@@ -28,12 +29,20 @@ def get_padding_size(height, width, p=768):
     padding_bottom = new_h - height - padding_top
     return padding_left, padding_right, padding_top, padding_bottom
 
+
 class FileIO:
     meta_str = "HH"
     ctu_str = "BIf"
 
     def __init__(
-        self, h: int, w: int, ctu_size: int, mosaic: bool, method_id=None, q_scale=None, bitstreams=None
+        self,
+        h: int,
+        w: int,
+        ctu_size: int,
+        mosaic: bool,
+        method_id=None,
+        q_scale=None,
+        bitstreams=None,
     ) -> None:
         self.h = h
         self.w = w
@@ -50,7 +59,11 @@ class FileIO:
 
         self.method_id = method_id
         self.bitstreams = bitstreams
-        self.num_bytes = None if bitstreams is None else np.array([len(bitstreams[i] for i in range(self.n_ctu))])
+        self.num_bytes = (
+            None
+            if bitstreams is None
+            else np.array([len(bitstreams[i] for i in range(self.n_ctu))])
+        )
         self.q_scale = q_scale
 
         self._adjacencyMatrix = None
@@ -61,8 +74,8 @@ class FileIO:
         # <upper, left, lower, right>
         d1 = min(bb1[2], bb2[2]) - max(bb1[0], bb2[0])
         d2 = min(bb1[3], bb2[3]) - max(bb1[1], bb2[1])
-        return d1 >= 0 and d2 >= 0 and not (d1==0 and d2==0)
-    
+        return d1 >= 0 and d2 >= 0 and not (d1 == 0 and d2 == 0)
+
     @property
     def adjacencyMatrix(self):
         # The adjacency matrix of the blocks
@@ -74,12 +87,14 @@ class FileIO:
             for i in range(N):
                 AM[i, i] = False
                 for j in range(N):
-                    AM[i, j] = AM[j, i] = self.intersects(self.block_indexes[i], self.block_indexes[j])
+                    AM[i, j] = AM[j, i] = self.intersects(
+                        self.block_indexes[i], self.block_indexes[j]
+                    )
             self._adjacencyMatrix = AM
         else:
             AM = self._adjacencyMatrix
         return AM
-    
+
     @property
     def adjacencyTable(self):
         # The adjacency table of the blocks
@@ -91,7 +106,7 @@ class FileIO:
 
             for i in range(N):
                 at_item = []
-                for j in range(i+1, N):
+                for j in range(i + 1, N):
                     if self.intersects(self.block_indexes[i], self.block_indexes[j]):
                         at_item.append(j)
                 AT.append(at_item)
@@ -100,7 +115,7 @@ class FileIO:
             AT = self._adjacencyTable
 
         return AT
-    
+
     def _build_block_partition(self):
         if not self.mosaic:
             n_ctu_h, n_ctu_w = self._n_ctu_hw(self.h, self.w, self.ctu_size)
@@ -114,9 +129,9 @@ class FileIO:
             lower_real = min(lower, self.h)
             right_real = min(right, self.w)
             if upper < lower_real and left < right_real:
-                self.block_indexes.append((upper, left, lower,right))
-                self.block_num_pixels.append((lower-upper) * (right-left))
-        
+                self.block_indexes.append((upper, left, lower, right))
+                self.block_num_pixels.append((lower - upper) * (right - left))
+
         self.n_ctu = len(self.block_indexes)
         self.block_num_pixels = np.array(self.block_num_pixels)
 
@@ -160,9 +175,7 @@ class FileIO:
 
         # read CTU header
         for i in range(file_io.n_ctu):
-            _method_id, _num_bytes, _q_scale = cls._read_with_format(
-                cls.ctu_str, fd
-            )
+            _method_id, _num_bytes, _q_scale = cls._read_with_format(cls.ctu_str, fd)
             file_io.method_id[i] = _method_id
             file_io.q_scale[i] = _q_scale
             num_bytes[i] = _num_bytes
@@ -184,7 +197,7 @@ class FileIO:
         n_ctu_w = (w + ctu_size - 1) // ctu_size + 1
 
         return n_ctu_h, n_ctu_w
-    
+
     def _block_id_hw(self, h, w, block_id_mesh):
         # Only in mesh mod. Return the id of the image in height and width dimension
         n_ctu_h, n_ctu_w = self._n_ctu_hw(h, w, self.ctu_size)
@@ -196,15 +209,20 @@ class FileIO:
             return None, None
 
         return id_h, id_w
-    
+
     def _block_bb(self, h, w, block_id):
         if not self.mosaic:
             id_h, id_w = self._block_id_hw(h, w, block_id)
 
             if id_h is None:
                 return None, None, None, None
-            
-            return id_h * self.ctu_size, id_w * self.ctu_size, (id_h + 1) * self.ctu_size, (id_w + 1) * self.ctu_size
+
+            return (
+                id_h * self.ctu_size,
+                id_w * self.ctu_size,
+                (id_h + 1) * self.ctu_size,
+                (id_w + 1) * self.ctu_size,
+            )
         else:
             metablk_id = block_id // 5
             miniblk_id = block_id % 5
@@ -222,7 +240,13 @@ class FileIO:
             lower = upper
             right = left
 
-            bias = [(0, 0, 2, 1), (0, 1, 1, 3), (1, 1, 2, 2), (2, 0, 3, 2), (1, 2, 3, 3)]
+            bias = [
+                (0, 0, 2, 1),
+                (0, 1, 1, 3),
+                (1, 1, 2, 2),
+                (2, 0, 3, 2),
+                (1, 2, 3, 3),
+            ]
 
             upper += bias[miniblk_id][0] * self.ctu_size
             left += bias[miniblk_id][1] * self.ctu_size

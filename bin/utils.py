@@ -108,6 +108,7 @@ def psnr_with_file(image_path1, image_path2):
     psnr = 20 * np.log10(max_pixel_value) - 10 * np.log10(mse)
     return psnr
 
+
 def msssim_with_file(image_path1, image_path2):
     """
     Calculate the PSNR of two image files
@@ -125,8 +126,9 @@ def msssim_with_file(image_path1, image_path2):
     image2 = ToTensor()(image2).unsqueeze(0)
 
     # Calculate the mean squared error (MSE)
-    msssim = pytorch_msssim.ms_ssim(image1, image2, 1.).detach().cpu().numpy().item()
+    msssim = pytorch_msssim.ms_ssim(image1, image2, 1.0).detach().cpu().numpy().item()
     return msssim
+
 
 def get_image_dimensions(image_path):
     """
@@ -158,7 +160,8 @@ class AverageMeter:
         self.count += n
         self.avg = self.sum / self.count
 
-def hash_numpy_array(array, hash_function='sha256'):
+
+def hash_numpy_array(array, hash_function="sha256"):
     """
     Computes the hash of a NumPy array.
 
@@ -179,7 +182,8 @@ def hash_numpy_array(array, hash_function='sha256'):
     # Return the hexadecimal digest of the hash
     return hash_obj.hexdigest()
 
-def hash_list_of_arrays(array_list, hash_function='sha256'):
+
+def hash_list_of_arrays(array_list, hash_function="sha256"):
     """
     Computes the hash of a list of NumPy arrays.
 

@@ -1,7 +1,9 @@
 import numpy as np
 
+
 def is_sorted(arr):
     return np.array_equal(arr, np.sort(arr))
+
 
 class LinearInterpolation:
     def __init__(self, X, Y):
@@ -14,7 +16,7 @@ class LinearInterpolation:
             raise ValueError("X and Y must have the same length.")
         if not is_sorted(self.X):
             raise ValueError(f"X must be sorted. Found: {self.X}")
-    
+
     def __call__(self, x):
         return self.interpolate(x)
 
@@ -38,14 +40,15 @@ class LinearInterpolation:
 
         slope = (y1 - y0) / (x1 - x0)
         return slope
-    
+
     def dump(self, filename):
         np.savez_compressed(filename, X=self.X, Y=self.Y)
-    
+
     @classmethod
     def load(cls, filename):
         loaded = np.load(filename)
-        return cls(X=loaded['X'], Y=loaded['Y'])
+        return cls(X=loaded["X"], Y=loaded["Y"])
+
 
 def safe_softmax(x: np.ndarray):
     x = x - np.max(x)
@@ -53,12 +56,14 @@ def safe_softmax(x: np.ndarray):
     y = np.exp(x)
     return y / np.sum(y)
 
+
 def safe_SA_prob(delta, T):
     if delta / T < 60:
-        p = 1. / (1. + np.exp(delta / T))
+        p = 1.0 / (1.0 + np.exp(delta / T))
     else:
         p = 0
     return p
+
 
 # class LinearRegression:
 #     def __init__(self, X, Y):
@@ -82,13 +87,14 @@ def safe_SA_prob(delta, T):
 #         # Derivative of the linear regression function (constant slope)
 #         return self.slope
 
+
 def waterfill(X, k):
     if k <= 0:
         return np.zeros_like(X)
-    
+
     if np.sum(X) <= k:
         return X
-    
+
     N = len(X)
     sorted_indexes = np.argsort(X)
     sorted_X = X[sorted_indexes]
@@ -98,8 +104,8 @@ def waterfill(X, k):
     # Search the end of fully occupied cell
     l = -1
     r = N - 1
-    while(l < r - 1):
-        mid = (l+r) // 2
+    while l < r - 1:
+        mid = (l + r) // 2
         if mid == -1:
             y = 0
             t = 0
@@ -112,19 +118,19 @@ def waterfill(X, k):
             l = mid
         else:
             r = mid
-    
-    results[sorted_indexes[:l+1]] = X[sorted_indexes[:l+1]]
+
+    results[sorted_indexes[: l + 1]] = X[sorted_indexes[: l + 1]]
     if l == -1:
         pref = 0
     else:
         pref = pref_sorted_X[l]
     d = (k - pref) / (N - 1 - l)
-    results[sorted_indexes[l+1:]] = d
+    results[sorted_indexes[l + 1 :]] = d
 
     return results
 
-def normalize_to_target(X: np.ndarray, X_min, X_max, target):
 
+def normalize_to_target(X: np.ndarray, X_min, X_max, target):
     X = np.maximum(X, X_min)
     X = np.minimum(X, X_max)
 
@@ -140,12 +146,12 @@ def normalize_to_target(X: np.ndarray, X_min, X_max, target):
         inverse = True
         space = X.copy()
         remain = -remain
-    
+
     fill = waterfill(space, remain)
 
     if inverse:
         X -= fill
     else:
         X += fill
-    
+
     return X + X_min

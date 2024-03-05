@@ -21,6 +21,7 @@ SAFETY_BYTE_PER_CTU = 2
 
 np.seterr(all="raise")
 
+
 @dataclass
 class PaddedBlock:
     padded_block_np: np.ndarray
@@ -28,11 +29,13 @@ class PaddedBlock:
     h: int
     w: int
 
+
 class Solution:
     def __init__(self, method_ids: np.ndarray, target_byteses: np.ndarray) -> None:
         self.method_ids = method_ids
         self.target_byteses = target_byteses
         self.n_ctu = len(self.method_ids)
+
 
 class GASolution(Solution):
     def __init__(self, method_score: np.ndarray, target_byteses: np.ndarray) -> None:
@@ -48,8 +51,11 @@ class GASolution(Solution):
         for i in range(self.n_ctu):
             min_bytes[i] = min_table[self.method_ids[i]][i]
             max_bytes[i] = max_table[self.method_ids[i]][i]
-        
-        self.target_byteses = normalize_to_target(self.target_byteses, min_bytes, max_bytes, total_target)
+
+        self.target_byteses = normalize_to_target(
+            self.target_byteses, min_bytes, max_bytes, total_target
+        )
+
 
 class EngineBase:
     CACHE_DIR = os.path.join(os.path.split(__file__)[0], "../cache")
@@ -86,7 +92,7 @@ class EngineBase:
                 print("Loading model:", group_name)
 
                 method = engine_cls()
-                
+
                 if tool_filter is None:
                     cnt = 1
                 else:
@@ -109,7 +115,7 @@ class EngineBase:
                         method = engine_cls.from_model_name(
                             model_name, self.dtype, self.ctu_size
                         )
-                        
+
                         if tool_filter is None:
                             cnt = 1
                         else:
@@ -124,12 +130,12 @@ class EngineBase:
                                 )
                             )
                             idx += 1
-        
+
         if len(self.methods) == 0:
             raise RuntimeError("No valid coding tool is loaded!")
-    
+
     def _feed_block(method: CodingToolBase, image_block: PaddedBlock, qscale):
-        if method.PLATFORM == 'numpy':
+        if method.PLATFORM == "numpy":
             return method.compress_block(image_block.padded_block_np, qscale)
         else:
             return method.compress_block(image_block.padded_block_cuda, qscale)
@@ -148,7 +154,7 @@ class EngineBase:
 
         bitstream = self._feed_block(method, image_block, max_qs)
         return bitstream, max_qs
-    
+
     def _search_init_qscale(self, method, img_blocks, total_target_bytes):
         # Given method, search a shared qscale for all blocks and return target bytes for each block
         min_qs = float(1e-5)
@@ -212,8 +218,8 @@ class EngineBase:
             ref = self.torch_pseudo_quantize_to_uint8(image_block.padded_block)
             recon_img = self.torch_pseudo_quantize_to_uint8(recon_img)
 
-            ref = ref[:, :image_block.h, :image_block.w, :]
-            recon_img = recon_img[:, :image_block.h, :image_block.w, :]
+            ref = ref[:, : image_block.h, : image_block.w, :]
+            recon_img = recon_img[:, : image_block.h, : image_block.w, :]
 
             sqe = torch.sum((ref - recon_img) ** 2).detach().cpu().numpy()
             sqes.append(sqe)
@@ -239,11 +245,23 @@ class EngineBase:
             self._precomputed_curve[method_idx] = {}
             for i in range(n_ctu):
                 self._precomputed_curve[method_idx][i] = {}
-                cache_dir = os.path.join(self.CACHE_DIR, method_name, img_hash, "-".join([str(self.ctu_size),str(self.mosaic),str(self.num_qscale_samples), str(i)]))
-                b_e_file = os.path.join(cache_dir, 'b_e.npz')
-                b_t_file = os.path.join(cache_dir, 'b_t.npy')
-                b_q_file = os.path.join(cache_dir, 'b_q.npz')
-                min_max_file = os.path.join(cache_dir, 'min_max.npz')
+                cache_dir = os.path.join(
+                    self.CACHE_DIR,
+                    method_name,
+                    img_hash,
+                    "-".join(
+                        [
+                            str(self.ctu_size),
+                            str(self.mosaic),
+                            str(self.num_qscale_samples),
+                            str(i),
+                        ]
+                    ),
+                )
+                b_e_file = os.path.join(cache_dir, "b_e.npz")
+                b_t_file = os.path.join(cache_dir, "b_t.npy")
+                b_q_file = os.path.join(cache_dir, "b_q.npz")
+                min_max_file = os.path.join(cache_dir, "min_max.npz")
 
                 try:
                     # If the caches are complete, load them
@@ -251,8 +269,8 @@ class EngineBase:
                     b_q = LinearInterpolation.load(b_q_file)
                     b_t = np.load(b_t_file)
                     min_max = np.load(min_max_file)
-                    min_t = min_max['min_t']
-                    max_t = min_max['max_t']
+                    min_t = min_max["min_t"]
+                    max_t = min_max["max_t"]
                     print("Loaded cache from:", cache_dir, flush=True)
 
                     for qscale in self.qscale_samples:
@@ -267,7 +285,13 @@ class EngineBase:
                     for qscale in self.qscale_samples:
                         image_block = img_blocks[i]
 
-                        sqe, dec_time, bitstream, __, ___ = self._try_compress_decompress(
+                        (
+                            sqe,
+                            dec_time,
+                            bitstream,
+                            __,
+                            ___,
+                        ) = self._try_compress_decompress(
                             method,
                             image_block,
                             target_bytes=None,
@@ -298,7 +322,7 @@ class EngineBase:
                         print(f"num_bytes={num_bytes}")
                         print(f"sqes={sqes}")
                         raise e
-                    
+
                     min_t = min(num_bytes)
                     max_t = max(num_bytes)
 
@@ -310,8 +334,10 @@ class EngineBase:
                     np.savez(min_max_file, min_t=min_t, max_t=max_t)
                     print("Cache saved to:", cache_dir, flush=True)
 
-                self._precomputed_curve[method_idx][i]["b_e"] = b_e    # interpolate.interp1d; Linear
-                self._precomputed_curve[method_idx][i]["b_t"] = b_t    # Linear fitting
+                self._precomputed_curve[method_idx][i][
+                    "b_e"
+                ] = b_e  # interpolate.interp1d; Linear
+                self._precomputed_curve[method_idx][i]["b_t"] = b_t  # Linear fitting
                 self._minimal_bytes[method_idx][i] = min_t
                 self._maximal_bytes[method_idx][i] = max_t
                 self._precomputed_curve[method_idx][i]["b_q"] = b_q
@@ -335,9 +361,7 @@ class EngineBase:
 
         return solution.method_ids, q_scales, bitstreams
 
-    def _get_score(
-        self, n_ctu, num_pixels, method_ids, target_byteses, total_target
-    ):
+    def _get_score(self, n_ctu, num_pixels, method_ids, target_byteses, total_target):
         # Returns score given method ids and target bytes
         if np.sum(target_byteses) > total_target:
             return -np.inf, -np.inf, np.inf
@@ -361,15 +385,14 @@ class EngineBase:
         psnr = -10 * np.log10(sqe)
         return psnr - self.w_time * global_time, psnr, global_time
 
-
     def _solve(
-            self, 
-            img_blocks,
-            img_size,
-            total_target_bytes,
-            file_io,
-            **kwargs,
-        ):
+        self,
+        img_blocks,
+        img_size,
+        total_target_bytes,
+        file_io,
+        **kwargs,
+    ):
         raise NotImplemented
 
     def read_img(self, img_path):
@@ -394,7 +417,7 @@ class EngineBase:
             value=0,
         )
         return pic_height, pic_width, x_padded
-    
+
     def divide_blocks(self, fileio: FileIO, h, w, padded_img):
         blocks = []
         for i in range(fileio.n_ctu):
@@ -402,15 +425,19 @@ class EngineBase:
             lower_real = min(lower, h)
             right_real = min(right, w)
             print(f"Block #{i}: ({upper}, {left}) ~ ({lower_real}, {right_real})")
-            
+
             # Move to CUDA
             img_patch_np = padded_img[upper:lower, left:right, :]
             img_patch_cuda = torch.from_numpy(img_patch_np).type(self.dtype)
             img_patch_cuda = img_patch_cuda.unsqueeze(0)
             img_patch_cuda = img_patch_cuda.cuda()
 
-            blocks.append(PaddedBlock(img_patch_np, img_patch_cuda, lower_real - upper, right_real - left))
-        
+            blocks.append(
+                PaddedBlock(
+                    img_patch_np, img_patch_cuda, lower_real - upper, right_real - left
+                )
+            )
+
         return blocks
 
     @torch.inference_mode()
@@ -433,9 +460,7 @@ class EngineBase:
 
         total_target_bytes = target_bpp * h * w // 8
         print(f"Image shape: {h}x{w}")
-        print(
-            f"Target={total_target_bytes}B; Target bpp={target_bpp:.4f};"
-        )
+        print(f"Target={total_target_bytes}B; Target bpp={target_bpp:.4f};")
 
         header_bytes = file_io.header_size
         safety_bytes = SAFETY_BYTE_PER_CTU * file_io.n_ctu
@@ -472,7 +497,9 @@ class EngineBase:
             lower_real = min(lower, h)
             right_real = min(right, w)
 
-            recon_img[upper:lower_real, left:right_real, :] = ctu[:lower_real-upper, :right_real-left, :]
+            recon_img[upper:lower_real, left:right_real, :] = ctu[
+                : lower_real - upper, : right_real - left, :
+            ]
         return recon_img
 
     @torch.inference_mode()
@@ -493,7 +520,7 @@ class EngineBase:
                     )
                     torch.cuda.synchronize()
                     ctu = method.decompress_block(
-                        bitstream, lower-upper, right-left, q_scale
+                        bitstream, lower - upper, right - left, q_scale
                     )
                     if isinstance(ctu, torch.Tensor):
                         ctu = ctu[0].permute(1, 2, 0).detach().cpu().numpy()
@@ -503,8 +530,8 @@ class EngineBase:
 
             return recon_img
 
-class SAEngine1(EngineBase):
 
+class SAEngine1(EngineBase):
     @staticmethod
     def _calc_gradient_psnr(sqes: np.ndarray):
         r"""
@@ -513,16 +540,33 @@ class SAEngine1(EngineBase):
 
         return -10 / (sqes.sum() * np.log(10))
 
-
     def _find_optimal_target_bytes(
-        self, file_io: FileIO, n_ctu, num_pixels, method_ids, total_target, learning_rate=1e5, num_steps=1000, init_value=None
+        self,
+        file_io: FileIO,
+        n_ctu,
+        num_pixels,
+        method_ids,
+        total_target,
+        learning_rate=1e5,
+        num_steps=1000,
+        init_value=None,
     ):
         """
         Find the optimal target bytes given CTU methods
         """
 
-        min_bytes = np.zeros([n_ctu,], dtype=np.int32)
-        max_bytes = np.zeros([n_ctu,], dtype=np.int32)
+        min_bytes = np.zeros(
+            [
+                n_ctu,
+            ],
+            dtype=np.int32,
+        )
+        max_bytes = np.zeros(
+            [
+                n_ctu,
+            ],
+            dtype=np.int32,
+        )
 
         for i in range(n_ctu):
             min_bytes[i] = self._minimal_bytes[method_ids[i]][i]
@@ -533,7 +577,7 @@ class SAEngine1(EngineBase):
             ans = file_io.block_num_pixels * bpp
         else:
             ans = init_value
-        
+
         ans = normalize_to_target(ans, min_bytes, max_bytes, total_target)
 
         for step in range(num_steps):
@@ -545,23 +589,27 @@ class SAEngine1(EngineBase):
                 method_id = method_ids[i]
                 precomputed_results = self._precomputed_curve[method_id][i]
                 sqes.append(precomputed_results["b_e"](ans[i]))
-            
+
             sqe_gradient = self._calc_gradient_psnr(np.array(sqes))
-            
+
             for i in range(n_ctu):
                 b_e: LinearInterpolation = self._precomputed_curve[method_id][i]["b_e"]
                 b_t: np.ndarray = self._precomputed_curve[method_id][i]["b_t"]
-                gradients[i] = self.w_time * b_t[0] - sqe_gradient * b_e.derivative(ans[i])
-            
-            # Gradient descent            
+                gradients[i] = self.w_time * b_t[0] - sqe_gradient * b_e.derivative(
+                    ans[i]
+                )
+
+            # Gradient descent
             ans = ans - gradients * learning_rate
             # Normalize
             ans = normalize_to_target(ans, min_bytes, max_bytes, total_target)
-            
-        score, psnr, time = self._get_score(n_ctu, num_pixels, method_ids, ans, total_target)
+
+        score, psnr, time = self._get_score(
+            n_ctu, num_pixels, method_ids, ans, total_target
+        )
 
         return ans, score, psnr, time
-    
+
     def _try_move(self, method_ids: np.ndarray, n_method):
         # Generate a group of new method_ids that move from current state
 
@@ -573,7 +621,9 @@ class SAEngine1(EngineBase):
         new_method_ids[selected] = new_method
         return new_method_ids
 
-    def _show_solution(self, method_ids, target_byteses, total_target_bytes, score, psnr, time):
+    def _show_solution(
+        self, method_ids, target_byteses, total_target_bytes, score, psnr, time
+    ):
         n_ctu = len(method_ids)
         total_bytes = np.sum(target_byteses)
         print(
@@ -595,51 +645,83 @@ class SAEngine1(EngineBase):
 
             print(
                 f"- CTU [{i}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes:.1f}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\tsquared_error={est_sqe:.6f};",
-                flush=True
+                flush=True,
             )
 
-    def _solve(self, img_blocks, img_size, total_target_bytes, file_io, num_steps=1000, T_start=1e-3, T_end=1e-6, ):
+    def _solve(
+        self,
+        img_blocks,
+        img_size,
+        total_target_bytes,
+        file_io,
+        num_steps=1000,
+        T_start=1e-3,
+        T_end=1e-6,
+    ):
         n_ctu = len(img_blocks)
         n_method = len(self.methods)
         h, w = img_size
         num_pixels = h * w
-        alpha = np.power(T_end / T_start, 1. / num_steps)
+        alpha = np.power(T_end / T_start, 1.0 / num_steps)
 
-        ans = np.random.random_integers(0, n_method-1, [n_ctu,])
-        target_byteses, score, psnr, time = self._find_optimal_target_bytes(file_io, n_ctu, num_pixels, ans, total_target_bytes, num_steps=10000)
+        ans = np.random.random_integers(
+            0,
+            n_method - 1,
+            [
+                n_ctu,
+            ],
+        )
+        target_byteses, score, psnr, time = self._find_optimal_target_bytes(
+            file_io, n_ctu, num_pixels, ans, total_target_bytes, num_steps=10000
+        )
 
         T = T_start
 
         # Simulated Annealing
         for step in range(num_steps):
             next_state = self._try_move(ans, n_method)
-            next_target_byteses, next_score, next_psnr, next_time = self._find_optimal_target_bytes(
-                file_io, n_ctu, num_pixels, next_state, total_target_bytes, init_value=target_byteses, num_steps=100)
+            (
+                next_target_byteses,
+                next_score,
+                next_psnr,
+                next_time,
+            ) = self._find_optimal_target_bytes(
+                file_io,
+                n_ctu,
+                num_pixels,
+                next_state,
+                total_target_bytes,
+                init_value=target_byteses,
+                num_steps=100,
+            )
 
             if next_score > score:
                 accept = True
             else:
                 delta = score - next_score
                 p = safe_SA_prob(delta, T)
-                accept = (np.random.rand() < p)
-            
+                accept = np.random.rand() < p
+
             if accept:
                 ans = next_state
                 target_byteses = next_target_byteses
                 score = next_score
                 psnr = next_psnr
                 time = next_time
-            
+
             if step % (num_steps // 20) == 0:
                 print(f"Results for step: {step}; T={T:.6f}")
-                self._show_solution(ans, target_byteses, total_target_bytes, score, psnr, time)
-            
+                self._show_solution(
+                    ans, target_byteses, total_target_bytes, score, psnr, time
+                )
+
             T *= alpha
-        
+
         solution = Solution(ans, target_byteses)
 
         method_ids, q_scales, bitstreams = self._compress_blocks(img_blocks, solution)
         return method_ids, q_scales, bitstreams, []
+
 
 class GAEngine1(EngineBase):
     def _initial_method_score(self, n_ctu, n_method):
@@ -867,5 +949,7 @@ class GAEngine1(EngineBase):
             "gen_time": gen_time,
         }
 
-        method_ids, q_scales, bitstreams = self._compress_blocks(img_blocks, solutions[0])
+        method_ids, q_scales, bitstreams = self._compress_blocks(
+            img_blocks, solutions[0]
+        )
         return method_ids, q_scales, bitstreams, data
