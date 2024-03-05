@@ -22,6 +22,7 @@ class ModelEngine(CodingToolBase):
         # "Scale_EVC_SL": 'Scale_EVC_SL_MDRRL.pth.tar',
         # "Scale_EVC_SS": 'Scale_EVC_SS_MDRRL.pth.tar',
     }
+    PLATFORM = 'torch'
 
     def __init__(self, model_name, dtype, ctu_size) -> None:
         super().__init__(model_name, dtype, ctu_size)

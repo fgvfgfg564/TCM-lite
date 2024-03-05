@@ -33,6 +33,7 @@ class ModelEngine(CodingToolBase):
     MODELS2 = {f"TCM_VBR2_{i}": f"vcip_vbr2_{i}_best.pth.tar" for i in [2]}
     # MODELS = copy.copy(MODELS1)
     MODELS = MODELS2
+    PLATFORM = 'torch'
 
     def __init__(self, model_name, dtype, ctu_size) -> None:
         super().__init__(model_name, dtype, ctu_size)

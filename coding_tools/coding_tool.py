@@ -62,3 +62,7 @@ class CodingToolBase(nn.Module):
             decoder_app.cuda()
             decoder_app.preheat()
         return decoder_app
+
+    @property
+    def PLATFORM(self):
+        raise ValueError("PLATFORM not defined. Should be one of ['numpy', 'torch'].")
