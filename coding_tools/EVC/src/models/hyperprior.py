@@ -2,7 +2,6 @@
 # Licensed under the MIT License.
 
 from torch import nn
-from coding_tools.utils.tensorrt_support import maybe_tensorrt
 
 
 class DepthConv(nn.Module):
@@ -106,9 +105,9 @@ def get_hyperprior(channel=192):
         DepthConvBlock(N * 2, N * 3),
     )
     return (
-        maybe_tensorrt(hyper_enc),
-        maybe_tensorrt(hyper_dec),
-        maybe_tensorrt(y_prior_fusion),
+        hyper_enc,
+        hyper_dec,
+        y_prior_fusion,
     )
 
 
@@ -119,4 +118,4 @@ def get_dualprior(channel=192):
         DepthConvBlock(N * 3, N * 2),
         DepthConvBlock(N * 2, N * 2),
     )
-    return maybe_tensorrt(y_spatial_prior)
+    return y_spatial_prior

@@ -15,7 +15,6 @@ from PIL import Image
 from ..models.tcm import TCM_vbr, TCM_vbr2
 
 from .utils import *
-from ...utils.tensorrt_support import *
 
 from ...coding_tool import CodingToolBase
 
@@ -39,7 +38,7 @@ class ModelEngine(CodingToolBase):
         super().__init__(model_name, dtype, ctu_size)
 
         # load model
-        model_path, compiled_path = self.get_model_path(model_name)
+        model_path = self.get_model_path(model_name)
 
         i_state_dict = get_state_dict(model_path, device="cuda")
         if model_name in self.MODELS1:
@@ -88,5 +87,4 @@ class ModelEngine(CodingToolBase):
         model_path = cls.MODELS[model_name]
         file_folder = os.path.split(__file__)[0]
         model_path = os.path.join(file_folder, "../checkpoints", model_path)
-        compiled_path = model_path + ".trt"
-        return model_path, compiled_path
+        return model_path

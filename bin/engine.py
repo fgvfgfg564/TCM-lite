@@ -72,16 +72,12 @@ class EngineBase:
         num_qscale_samples=20,
         tool_groups=TOOL_GROUPS.keys(),
         tool_filter=None,
-        ignore_tensorrt=False,
         dtype=torch.half,
     ) -> None:
         self.ctu_size = ctu_size
         self.mosaic = mosaic
         self.methods = []
-        self.ignore_tensorrt = ignore_tensorrt
 
-        if not ignore_tensorrt and dtype is torch.float32:
-            raise ValueError("TensorRT supports float16 only.")
         self.dtype = dtype
 
         self._load_models(tool_groups, tool_filter)
@@ -102,7 +98,7 @@ class EngineBase:
                     print("Loading model:", model_name)
 
                     method = engine_cls.from_model_name(
-                        model_name, self.ignore_tensorrt, self.dtype, self.ctu_size
+                        model_name, self.dtype, self.ctu_size
                     )
                     
                     if tool_filter is None:
@@ -224,18 +220,6 @@ class EngineBase:
         
         return blocks
 
-    def join_blocks(self, decoded_ctus, file_io: FileIO):
-        h = file_io.h
-        w = file_io.w
-        recon_img = torch.zeros(size=(3, h, w), device=decoded_ctus[0].device)
-        for i, ctu in enumerate(decoded_ctus):
-            upper, left, lower, right = file_io.block_indexes[i]
-            lower_real = min(lower, h)
-            right_real = min(right, w)
-
-            recon_img[:, upper:lower_real, left:right_real] = ctu[:, :, :lower_real-upper, :right_real-left]
-        return recon_img
-
     def _precompute_score(self, img_blocks, img_size, img_hash):
         h, w = img_size
         n_ctu = len(img_blocks)
@@ -348,34 +332,6 @@ class EngineBase:
 
         return solution.method_ids, q_scales, bitstreams
 
-    def read_img(self, img_path):
-        if not os.path.exists(img_path):
-            raise FileNotFoundError(img_path)
-
-        rgb = Image.open(img_path).convert("RGB")
-        rgb = np.asarray(rgb)
-        img_hash = hash_numpy_array(rgb)
-        rgb = rgb.astype("float32").transpose(2, 0, 1)
-        rgb = rgb / 255.0
-        rgb = torch.from_numpy(rgb).type(self.dtype)
-        rgb = rgb.unsqueeze(0)
-        rgb = rgb.cuda()
-        return rgb, img_hash
-
-    def pad_img(self, x):
-        pic_height = x.shape[2]
-        pic_width = x.shape[3]
-        padding_l, padding_r, padding_t, padding_b = get_padding_size(
-            pic_height, pic_width, self.ctu_size
-        )
-        x_padded = F.pad(
-            x,
-            (padding_l, padding_r, padding_t, padding_b),
-            mode="constant",
-            value=0,
-        )
-        return pic_height, pic_width, x_padded
-
     def _get_score(
         self, n_ctu, num_pixels, method_ids, target_byteses, total_target
     ):
@@ -413,6 +369,35 @@ class EngineBase:
         ):
         raise NotImplemented
 
+    def read_img(self, img_path):
+        if not os.path.exists(img_path):
+            raise FileNotFoundError(img_path)
+
+        rgb = Image.open(img_path).convert("RGB")
+        rgb = np.asarray(rgb)
+        img_hash = hash_numpy_array(rgb)
+        rgb = rgb.astype("float32").transpose(2, 0, 1)
+        rgb = rgb / 255.0
+        rgb = torch.from_numpy(rgb).type(self.dtype)
+        rgb = rgb.unsqueeze(0)
+        rgb = rgb.cuda()
+        return rgb, img_hash
+
+    def pad_img(self, x):
+        pic_height = x.shape[2]
+        pic_width = x.shape[3]
+        padding_l, padding_r, padding_t, padding_b = get_padding_size(
+            pic_height, pic_width, self.ctu_size
+        )
+        x_padded = F.pad(
+            x,
+            (padding_l, padding_r, padding_t, padding_b),
+            mode="constant",
+            value=0,
+        )
+        return pic_height, pic_width, x_padded
+
+    @torch.inference_mode()
     def encode(
         self,
         input_pth,
@@ -472,7 +457,23 @@ class EngineBase:
         }
         return data
 
+    def join_blocks(self, decoded_ctus, file_io: FileIO):
+        h = file_io.h
+        w = file_io.w
+        recon_img = np.zeros(size=(h, w, 3), dtype=np.float32)
+        for i, ctu in enumerate(decoded_ctus):
+            upper, left, lower, right = file_io.block_indexes[i]
+            lower_real = min(lower, h)
+            right_real = min(right, w)
+
+            recon_img[upper:lower_real, left:right_real, :] = ctu[:lower_real-upper, :right_real-left, :]
+        return recon_img
+
+    @torch.inference_mode()
     def decode(self, file_io: FileIO):
+        """
+        Decode into NumPy array with range 0-1
+        """
         with torch.no_grad():
             decoded_ctus = []
             with timer.Timer("Decode_CTU"):
@@ -488,6 +489,8 @@ class EngineBase:
                     ctu = method.decompress_block(
                         bitstream, lower-upper, right-left, q_scale
                     )
+                    if isinstance(ctu, torch.Tensor):
+                        ctu = ctu[0].permute(1, 2, 0).detach().cpu().numpy()
                     decoded_ctus.append(ctu)
             with timer.Timer("Reconstruct&save"):
                 recon_img = self.join_blocks(decoded_ctus, file_io)

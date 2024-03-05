@@ -18,7 +18,6 @@ import torch
 from timm.models.layers import trunc_normal_, DropPath
 import numpy as np
 import math
-from coding_tools.utils.tensorrt_support import maybe_tensorrt
 
 SCALES_MIN = 0.11
 SCALES_MAX = 256
@@ -989,14 +988,12 @@ class TCM_vbr(CompressionModel):
             + self.m_down3
         )
 
-        self.g_s = maybe_tensorrt(
-            nn.Sequential(
+        self.g_s = nn.Sequential(
                 *[ResidualBlockUpsample(M, 2 * N, 2)]
                 + self.m_up1
                 + self.m_up2
                 + self.m_up3
             )
-        )
 
         self.ha_down1 = [
             ConvTransBlock(N, N, 32, 4, 0, "W" if not i % 2 else "SW")

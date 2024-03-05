@@ -12,7 +12,6 @@ import time
 import warnings
 from pytorch_msssim import ms_ssim
 from PIL import Image
-import torch_tensorrt
 
 warnings.filterwarnings("ignore")
 

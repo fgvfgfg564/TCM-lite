@@ -45,7 +45,6 @@ if __name__ == "__main__":
         ctu_size=args.ctu_size,
         tool_groups=args.tools,
         tool_filter=args.tool_filter,
-        ignore_tensorrt=True,
         dtype=torch.float32,
     )
     

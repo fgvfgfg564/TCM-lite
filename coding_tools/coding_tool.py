@@ -12,7 +12,6 @@ import numpy as np
 from PIL import Image
 
 from .utils.timer import Timer
-from .utils.tensorrt_support import *
 
 class CodingToolBase(nn.Module):
     MODELS = None
@@ -30,9 +29,6 @@ class CodingToolBase(nn.Module):
         qs = self.q_scale_min + q_scale_0_1 * (self.q_scale_max - self.q_scale_min)
         return qs
 
-    def compile(self, output_dir):
-        compile(self.i_frame_net, output_dir)
-
     def compress_block(self, img_block, q_scale):
         raise NotImplemented
 
@@ -40,19 +36,13 @@ class CodingToolBase(nn.Module):
         raise NotImplemented
 
     @classmethod
-    def get_model_path(cls, model_name):
-        raise NotImplemented
-
-    @classmethod
-    def _load_from_weight(cls, model_name, compiled_path, dtype, ctu_size, compile=True):
+    def _load_from_weight(cls, model_name, dtype, ctu_size):
         decoder_app = cls(model_name, dtype, ctu_size)
         torch.cuda.synchronize()
         dummy_input = torch.zeros(
             [1, 3, ctu_size, ctu_size], device="cuda", dtype=dtype
         )
         decoder_app.i_frame_net(dummy_input, 0.5)
-        if compile:
-            decoder_app.compile(compiled_path)
         return decoder_app
 
     def preheat(self):
@@ -65,35 +55,10 @@ class CodingToolBase(nn.Module):
             _ = self.decompress_block(bitstream, self.ctu_size, self.ctu_size, q_scale)
 
     @classmethod
-    def _load_from_compiled(cls, model_name, compiled_path, dtype, ctu_size):
-        print("Load from compiled model")
-        with InitTRTModelWithPlaceholder():
-            decoder_app = cls(model_name, dtype, ctu_size)
-        load_weights(decoder_app.i_frame_net, compiled_path)
-
-        dummy_input = torch.zeros(
-            [1, 3, ctu_size, ctu_size], device="cuda", dtype=dtype
-        )
-        decoder_app.i_frame_net(dummy_input, 0.5)
-        return decoder_app
-
-    @classmethod
-    def from_model_name(cls, model_name, ignore_tensorrt, dtype, ctu_size):
+    def from_model_name(cls, model_name, dtype, ctu_size):
         with Timer("Loading"):
-            model_path, compiled_path = cls.get_model_path(model_name)
-            if not ignore_tensorrt and os.path.isdir(compiled_path):
-                try:
-                    decoder_app = cls._load_from_compiled(
-                        model_name, compiled_path, dtype
-                    )
-                except FileNotFoundError:
-                    decoder_app = cls._load_from_weight(
-                        model_name, compiled_path, dtype, ctu_size, not ignore_tensorrt
-                    )
-            else:
-                decoder_app = cls._load_from_weight(
-                    model_name, compiled_path, dtype, ctu_size, not ignore_tensorrt
-                )
+            decoder_app = cls._load_from_weight(
+                model_name, dtype, ctu_size)
             decoder_app.cuda()
             decoder_app.preheat()
         return decoder_app

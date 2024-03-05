@@ -6,7 +6,7 @@ import numpy as np
 
 from bin.engine import GAEngine1
 from bin.fileio import FileIO
-from bin.utils import dump_torch_image
+from bin.utils import dump_image
 
 
 def parse_args():
@@ -42,7 +42,7 @@ def main():
     print(f"Decode time: {time_end - time_start:.4f}s")
 
     # Save image
-    out_img = dump_torch_image(out_img)
+    out_img = dump_image(out_img)
     Image.fromarray(out_img).save(args.output)
 
 

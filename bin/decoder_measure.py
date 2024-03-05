@@ -7,7 +7,7 @@ import numpy as np
 
 from bin.engine import GAEngine1
 from bin.fileio import FileIO
-from bin.utils import dump_torch_image
+from bin.utils import dump_image
 
 
 def parse_args():
@@ -54,7 +54,7 @@ def main():
     t_dec = time_end - time_start
 
     # Save image
-    out_img = dump_torch_image(out_img)
+    out_img = dump_image(out_img)
     Image.fromarray(out_img).save(args.output)
 
     PSNR = psnr(args.output, args.original)

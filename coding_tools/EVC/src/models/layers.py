@@ -16,8 +16,6 @@ import torch
 from torch import nn
 from torch.autograd import Function
 
-from coding_tools.utils.tensorrt_support import maybe_tensorrt
-
 
 # pylint: disable=W0221
 class LowerBound(Function):
@@ -257,4 +255,4 @@ def get_enc_dec_models(input_channel, output_channel, channels=[64, 64, 128, 192
         DepthConvBlock(channel_2x, channel_2x),
         subpel_conv1x1(channel_2x, output_channel, 2),
     )
-    return maybe_tensorrt(enc), maybe_tensorrt(dec)
+    return enc, dec

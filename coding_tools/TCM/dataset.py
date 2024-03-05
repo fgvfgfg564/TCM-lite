@@ -5,7 +5,52 @@ import glob
 from PIL import Image
 import random
 from tqdm import tqdm
+import os
 
+class LIU4KPatches(Dataset):
+    """
+    Patch size = 256
+    """
+    GLOB = os.path.expanduser('~/dataset/LIU4K_patch/*/*.png')
+
+    def __init__(self):
+        self.image_list = glob.glob(self.GLOB)
+        self.len_image_list = len(self.image_list)
+        self.patch_size = 256
+    
+    def __len__(self):
+        return self.len_image_list
+    
+    def __getitem__(self, idx):
+        filename = self.image_list[idx]
+        img = Image.open(filename)
+        img = ToTensor()(img)
+        return img
+
+class Kodak(Dataset):
+    """
+    Randomized image patchifier with a buffer
+    If stable: return image centers
+    """
+
+    def __init__(self, patch_size=None) -> None:
+        super().__init__()
+        dataset_glob = os.path.expanduser('~/dataset/kodak/*.png')
+        self.image_list = glob.glob(dataset_glob)
+        self.len_image_list = len(self.image_list)
+        self.patch_size = patch_size
+
+    def __len__(self):
+        return self.len_image_list
+
+    def __getitem__(self, index):
+        img = Image.open(self.image_list[index])
+        img = ToTensor()(img)
+
+        if self.patch_size is not None:
+            cropper = CenterCrop(self.patch_size)
+            img = cropper(img)
+        return img
 
 class VCIP_Training(Dataset):
     """

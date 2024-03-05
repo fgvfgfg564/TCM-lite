@@ -104,7 +104,7 @@ def test_single_image(
         time_dec_meter.update(time_dec)
 
     # Save image
-    out_img = dump_torch_image(out_img)
+    out_img = dump_image(out_img)
     Image.fromarray(out_img).save(orec)
 
     n_bytes = os.path.getsize(obin)
@@ -236,7 +236,6 @@ if __name__ == "__main__":
             mosaic=args.mosaic,
             tool_groups=args.tools,
             tool_filter=args.tool_filter,
-            ignore_tensorrt=True,
             dtype=torch.float32,
         )
 
@@ -260,7 +259,6 @@ if __name__ == "__main__":
             mosaic=args.mosaic,
             tool_groups=args.tools,
             tool_filter=args.tool_filter,
-            ignore_tensorrt=True,
             dtype=torch.float32,
         )
 

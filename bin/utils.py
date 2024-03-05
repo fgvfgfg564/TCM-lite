@@ -73,8 +73,9 @@ def is_strictly_increasing(arr):
     return True
 
 
-def dump_torch_image(img):
-    img = img.permute(1, 2, 0).detach().cpu().numpy()
+def dump_image(img):
+    if isinstance(img, torch.Tensor):
+        img = img.permute(1, 2, 0).detach().cpu().numpy()
     img = np.clip(np.rint(img * 255), 0, 255).astype(np.uint8)
     return img
 

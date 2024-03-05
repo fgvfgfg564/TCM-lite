@@ -18,7 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 import os
 from datetime import datetime
 
-from dataset import VCIP_Training, VCIP_Validation
+from dataset import LIU4KPatches, Kodak
 
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
@@ -227,13 +227,13 @@ def parse_args(argv):
         default=1,
         help="Test batch size (default: %(default)s)",
     )
-    parser.add_argument(
-        "--patch_size",
-        type=int,
-        nargs=2,
-        default=(256, 256),
-        help="Size of the patches to be cropped (default: %(default)s)",
-    )
+    # parser.add_argument(
+    #     "--patch_size",
+    #     type=int,
+    #     nargs=2,
+    #     default=(256, 256),
+    #     help="Size of the patches to be cropped (default: %(default)s)",
+    # )
     parser.add_argument(
         "--save", action="store_true", default=True, help="Save model to disk"
     )
@@ -283,8 +283,8 @@ def main(argv):
         dd.strftime(r"%Y/%M/%d %H:%M:%S")
         print(f"[{dd}]", " ".join(sys.argv), file=f)
 
-    train_dataset = VCIP_Training(patch_size=args.patch_size)
-    test_dataset = VCIP_Validation(patch_size=args.patch_size)
+    train_dataset = LIU4KPatches()
+    test_dataset = Kodak()
 
     device = "cuda"
 

@@ -27,7 +27,7 @@ class ModelEngine(CodingToolBase):
         super().__init__(model_name, dtype, ctu_size)
 
         # load model
-        model_path, compiled_path = self.get_model_path(model_name)
+        model_path = self.get_model_path(model_name)
 
         i_state_dict = get_state_dict(model_path)
         i_frame_net = build_model(model_name[:6], ec_thread=True)
@@ -61,5 +61,4 @@ class ModelEngine(CodingToolBase):
         model_path = cls.MODELS[model_name]
         file_folder = os.path.split(__file__)[0]
         model_path = os.path.join(file_folder, "../checkpoints", model_path)
-        compiled_path = model_path + ".trt"
-        return model_path, compiled_path
+        return model_path
