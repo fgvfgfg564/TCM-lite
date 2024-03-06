@@ -6,6 +6,7 @@ import torch
 import torch.nn.functional as F
 from dataclasses import dataclass
 import concurrent.futures
+from scipy.optimize import minimize
 
 import tqdm
 import copy
@@ -379,8 +380,8 @@ class EngineBase:
 
     def _get_score(self, n_ctu, num_pixels, method_ids, target_byteses, total_target):
         # Returns score given method ids and target bytes
-        if np.sum(target_byteses) > total_target:
-            return -np.inf, -np.inf, np.inf
+        # if np.sum(target_byteses) > total_target:
+        #     return -np.inf, -np.inf, np.inf
 
         sqe = 0
         global_time = 0
@@ -586,55 +587,87 @@ class SAEngine1(EngineBase):
             dtype=np.int32,
         )
 
+        bounds = []
+
         for i in range(n_ctu):
             min_bytes[i] = self._minimal_bytes[method_ids[i]][i]
             max_bytes[i] = self._maximal_bytes[method_ids[i]][i]
+            bounds.append((min_bytes[i], max_bytes[i]))
 
         if init_value is None:
-            bpp = total_target / num_pixels
-            ans = file_io.block_num_pixels * bpp
-        else:
-            ans = init_value
+            bpp = total_target / num_pixels * 0.99
+            init_value = file_io.block_num_pixels * 0.0
 
-        ans = normalize_to_target(ans, min_bytes, max_bytes, total_target)
+        init_value = normalize_to_target(init_value, min_bytes, max_bytes, total_target)
 
-        for step in range(num_steps):
-            # if step == 0:
-            #     score, psnr, time = self._get_score(
-            #         n_ctu, num_pixels, method_ids, ans, total_target
-            #     )
-            #     print("start", ans, "score =", score)
-            gradients = np.zeros_like(ans)
+        def objective_func(target_bytes):
+            result = -self._get_score(
+                n_ctu, num_pixels, method_ids, target_bytes, total_target
+            )[0]
+            return result
+
+        def grad(target_bytes):
+            gradients = np.zeros_like(target_bytes)
 
             # Gradient item on sqe
-            def _process_sqes(i):
+            sqes = []
+            for i in range(n_ctu):
                 method_id = method_ids[i]
                 precomputed_results = self._precomputed_curve[method_id][i]
-                return precomputed_results["b_e"](ans[i])
-
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                sqes = np.asarray(list(executor.map(_process_sqes, list(range(n_ctu)))))
+                sqes.append(precomputed_results["b_e"](target_bytes[i]))
+            sqes = np.asarray(sqes)
 
             sqe_gradient = self._calc_gradient_psnr(np.array(sqes))
 
-            def _process_grads(i):
+            gradients = []
+            for i in range(n_ctu):
                 method_id = method_ids[i]
                 b_e: LinearInterpolation = self._precomputed_curve[method_id][i]["b_e"]
                 b_t: np.ndarray = self._precomputed_curve[method_id][i]["b_t"]
-                return self.w_time * b_t[0] - sqe_gradient * b_e.derivative(ans[i])
+                gradients.append(
+                    self.w_time * b_t[0]
+                    - sqe_gradient * b_e.derivative(target_bytes[i])
+                )
 
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                gradients = np.asarray(list(executor.map(_process_grads, range(n_ctu))))
+            return gradients
 
-            # Gradient descent
-            ans = ans - gradients * learning_rate
-            # Normalize
-            ans = normalize_to_target(ans, min_bytes, max_bytes, total_target)
-            # if step == 0:
-            #     score, psnr, time = self._get_score(
-            #         n_ctu, num_pixels, method_ids, ans, total_target
-            #     )
-            #     print("end", ans, gradients, learning_rate, "score =", score)
+        def ineq_constraint(target_bytes):
+            # print(target_bytes)
+            return total_target - target_bytes.sum()
+
+        constraint = {"type": "ineq", "fun": ineq_constraint}
+
+        result = minimize(
+            objective_func,
+            init_value,
+            jac=grad,
+            method="SLSQP",
+            bounds=bounds,
+            constraints=[constraint],
+            options={
+                "ftol": 1e-12,
+                "maxiter": num_steps,
+            },
+        )
+
+        # for step in range(num_steps):
+        #     # if step == 0:
+        #     #     score, psnr, time = self._get_score(
+        #     #         n_ctu, num_pixels, method_ids, ans, total_target
+        #     #     )
+        #     #     print("start", ans, "score =", score)
+
+        #     # Gradient descent
+        #     ans = ans - gradients * learning_rate
+        #     # Normalize
+        #     ans = normalize_to_target(ans, min_bytes, max_bytes, total_target)
+        #     # if step == 0:
+        #     #     score, psnr, time = self._get_score(
+        #     #         n_ctu, num_pixels, method_ids, ans, total_target
+        #     #     )
+        #     #     print("end", ans, gradients, learning_rate, "score =", score)
+
+        ans = result.x
 
         score, psnr, time = self._get_score(
             n_ctu, num_pixels, method_ids, ans, total_target
@@ -705,7 +738,7 @@ class SAEngine1(EngineBase):
             ],
         )
         target_byteses, score, psnr, time = self._find_optimal_target_bytes(
-            file_io, n_ctu, num_pixels, ans, total_target_bytes, num_steps=10000
+            file_io, n_ctu, num_pixels, ans, total_target_bytes, num_steps=10
         )
 
         T = T_start
@@ -733,7 +766,7 @@ class SAEngine1(EngineBase):
                 next_state,
                 total_target_bytes,
                 init_value=target_byteses,
-                num_steps=100,
+                num_steps=10,
             )
 
             if next_score > score:
