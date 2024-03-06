@@ -1,46 +1,30 @@
 import numpy as np
+from scipy.interpolate import PchipInterpolator
 
 
 def is_sorted(arr):
     return np.array_equal(arr, np.sort(arr))
 
 
-class LinearInterpolation:
+class WarppedPchipInterpolator:
     def __init__(self, X, Y):
-        self.X = np.asarray(X)
-        self.Y = np.asarray(Y)
-        self.n_samples = len(X)
-        self.check_input()
-
-    def check_input(self):
-        if len(self.X) != len(self.Y):
-            raise ValueError("X and Y must have the same length.")
-        if not is_sorted(self.X):
-            raise ValueError(f"X must be sorted. Found: {self.X}")
+        self.X = X
+        self.Y = Y
+        self.curve = PchipInterpolator(
+            X,
+            Y,
+            extrapolate=True,
+        )
+        self.d = self.curve.derivative()
 
     def __call__(self, x):
         return self.interpolate(x)
 
     def interpolate(self, x):
-        idx = np.searchsorted(self.X, x)
-        idx = np.clip(idx, 1, self.n_samples - 1)  # Ensure idx is within bounds
-
-        x0, x1 = self.X[idx - 1], self.X[idx]
-        y0, y1 = self.Y[idx - 1], self.Y[idx]
-
-        slope = (y1 - y0) / (x1 - x0)
-        interpolated_y = y0 + slope * (x - x0)
-        return interpolated_y
+        return self.curve(x)
 
     def derivative(self, x):
-        idx = np.searchsorted(self.X, x)
-        idx = np.clip(idx, 1, self.n_samples - 1)  # Ensure idx is within bounds
-
-        x0, x1 = self.X[idx - 1], self.X[idx]
-        y0, y1 = self.Y[idx - 1], self.Y[idx]
-
-        slope = (y1 - y0) / (x1 - x0)
-        return slope
+        return self.d(x)
 
     def dump(self, filename):
         np.savez_compressed(filename, X=self.X, Y=self.Y)

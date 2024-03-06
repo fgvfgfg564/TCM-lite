@@ -282,8 +282,8 @@ class EngineBase:
 
                 try:
                     # If the caches are complete, load them
-                    b_e = LinearInterpolation.load(b_e_file)
-                    b_q = LinearInterpolation.load(b_q_file)
+                    b_e = WarppedPchipInterpolator.load(b_e_file)
+                    b_q = WarppedPchipInterpolator.load(b_q_file)
                     b_t = np.load(b_t_file)
                     min_max = np.load(min_max_file)
                     min_t = min_max["min_t"]
@@ -330,10 +330,10 @@ class EngineBase:
                         )
 
                     try:
-                        b_e = LinearInterpolation(num_bytes, sqes)
+                        b_e = WarppedPchipInterpolator(num_bytes, sqes)
                         # b_t = interpolate.interp1d(num_bytes, times, kind='linear')
                         b_t = np.polyfit(num_bytes, times, 1)
-                        b_q = LinearInterpolation(num_bytes, qscales)
+                        b_q = WarppedPchipInterpolator(num_bytes, qscales)
                     except ValueError as e:
                         print(f"Interpolation error!")
                         print(f"num_bytes={num_bytes}")
@@ -596,7 +596,7 @@ class SAEngine1(EngineBase):
 
         if init_value is None:
             bpp = total_target / num_pixels * 0.99
-            init_value = file_io.block_num_pixels * 0.0
+            init_value = file_io.block_num_pixels * bpp
 
         init_value = normalize_to_target(init_value, min_bytes, max_bytes, total_target)
 
@@ -622,7 +622,9 @@ class SAEngine1(EngineBase):
             gradients = []
             for i in range(n_ctu):
                 method_id = method_ids[i]
-                b_e: LinearInterpolation = self._precomputed_curve[method_id][i]["b_e"]
+                b_e: WarppedPchipInterpolator = self._precomputed_curve[method_id][i][
+                    "b_e"
+                ]
                 b_t: np.ndarray = self._precomputed_curve[method_id][i]["b_t"]
                 gradients.append(
                     self.w_time * b_t[0]
@@ -645,7 +647,7 @@ class SAEngine1(EngineBase):
             bounds=bounds,
             constraints=[constraint],
             options={
-                "ftol": 1e-12,
+                "ftol": 1e-8,
                 "maxiter": num_steps,
             },
         )
@@ -738,7 +740,7 @@ class SAEngine1(EngineBase):
             ],
         )
         target_byteses, score, psnr, time = self._find_optimal_target_bytes(
-            file_io, n_ctu, num_pixels, ans, total_target_bytes, num_steps=10
+            file_io, n_ctu, num_pixels, ans, total_target_bytes, num_steps=100
         )
 
         T = T_start
@@ -765,8 +767,8 @@ class SAEngine1(EngineBase):
                 num_pixels,
                 next_state,
                 total_target_bytes,
-                init_value=target_byteses,
-                num_steps=10,
+                # init_value=target_byteses,
+                num_steps=100,
             )
 
             if next_score > score:

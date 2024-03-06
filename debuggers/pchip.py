@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 class PCHIPInterpolator:
@@ -12,7 +13,7 @@ class PCHIPInterpolator:
         delta = np.diff(y) / h
         delta_s = np.diff(delta)
         m = np.zeros_like(y)
-        m[1:-1] = (delta_s[1:] * h[:-1] + delta_s[:-1] * h[1:]) / (h[:-1] + h[1:])
+        m[1:-1] = (delta_s * h[:-1] + delta_s * h[1:]) / (h[:-1] + h[1:])
         m[0] = self._edge_slope(h[0], delta[0], delta_s[0])
         m[-1] = self._edge_slope(h[-1], delta[-1], delta_s[-1])
         return m
@@ -44,3 +45,9 @@ slope_new = interpolator.derivative(x_new)
 
 print("Interpolated values:", y_new)
 print("Slopes:", slope_new)
+
+plt.plot(x_new, y_new, label="f")
+plt.plot(x_new, slope_new, label="slope")
+plt.scatter(x, y, label="data")
+plt.legend()
+plt.savefig("./debuggers/pchip.png", dpi=300)
