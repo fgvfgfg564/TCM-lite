@@ -566,7 +566,7 @@ class SAEngine1(EngineBase):
         num_pixels,
         method_ids,
         total_target,
-        learning_rate=1e6,
+        learning_rate=1e3,
         num_steps=1000,
         init_value=None,
     ):
@@ -604,7 +604,7 @@ class SAEngine1(EngineBase):
             result = -self._get_score(
                 n_ctu, num_pixels, method_ids, target_bytes, total_target
             )[0]
-            return result
+            return result * learning_rate
 
         def grad(target_bytes):
             gradients = np.zeros_like(target_bytes)
@@ -631,7 +631,7 @@ class SAEngine1(EngineBase):
                     - sqe_gradient * b_e.derivative(target_bytes[i])
                 )
 
-            return gradients
+            return np.asarray(gradients) * learning_rate
 
         def ineq_constraint(target_bytes):
             # print(target_bytes)
@@ -647,7 +647,7 @@ class SAEngine1(EngineBase):
             bounds=bounds,
             constraints=[constraint],
             options={
-                "ftol": 1e-8,
+                "ftol": 1e-8 * learning_rate,
                 "maxiter": num_steps,
             },
         )
@@ -793,6 +793,9 @@ class SAEngine1(EngineBase):
 
             T *= alpha
 
+        target_byteses, score, psnr, time = self._find_optimal_target_bytes(
+            file_io, n_ctu, num_pixels, ans, total_target_bytes, num_steps=10000
+        )
         solution = Solution(ans, target_byteses)
 
         method_ids, q_scales, bitstreams = self._compress_blocks(img_blocks, solution)
