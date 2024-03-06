@@ -10,6 +10,9 @@ def PSNR(x, y):
 class TraditionalCodingToolBase(CodingToolBase):
     PLATFORM = 'numpy'
 
+    def __init__(self):
+        pass
+
     def compress_block(self, img_block: torch.Tensor, q_scale: float) -> bytes:
         """
         输入:

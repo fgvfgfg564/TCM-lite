@@ -15,7 +15,7 @@ import coding_tools.utils.timer as timer
 from .utils import *
 from .fileio import FileIO, get_padding_size
 from .math import *
-from ..coding_tools import TOOL_GROUPS
+from coding_tools import TOOL_GROUPS
 
 SAFETY_BYTE_PER_CTU = 2
 
@@ -24,8 +24,8 @@ np.seterr(all="raise")
 
 @dataclass
 class PaddedBlock:
-    padded_block_np: np.ndarray
-    padded_block_cuda: torch.Tensor
+    padded_block_np: np.ndarray # 0 - 255
+    padded_block_cuda: torch.Tensor # 0 - 1
     h: int
     w: int
 
@@ -134,7 +134,7 @@ class EngineBase:
         if len(self.methods) == 0:
             raise RuntimeError("No valid coding tool is loaded!")
 
-    def _feed_block(method: CodingToolBase, image_block: PaddedBlock, qscale):
+    def _feed_block(self, method: CodingToolBase, image_block: PaddedBlock, qscale):
         if method.PLATFORM == "numpy":
             return method.compress_block(image_block.padded_block_np, qscale)
         else:
@@ -184,6 +184,12 @@ class EngineBase:
         x = torch.round(x)
         x = x.to(torch.uint8)
         return x
+    
+    @classmethod
+    def torch_float_to_np_uint8(cls, x):
+        x = cls.torch_to_uint8(x)
+        x = x[0].permute(1, 2, 0).detach().cpu().numpy()
+        return x
 
     def torch_pseudo_quantize_to_uint8(self, x):
         x = self.torch_to_uint8(x)
@@ -200,29 +206,39 @@ class EngineBase:
     ):
         times = []
         sqes = []
-        _, c, h, w = image_block.padded_block.shape
+        _, c, h, w = image_block.padded_block_cuda.shape
         for i in range(repeat):
             if q_scale is None:
                 bitstream, q_scale = self._compress_with_target(
-                    method, image_block.padded_block, target_bytes
+                    method, image_block, target_bytes
                 )
             else:
                 bitstream = self._feed_block(method, image_block, q_scale)
             time0 = time.time()
             recon_img = method.decompress_block(bitstream, h, w, q_scale)
-            recon_img = torch.clamp(recon_img, 0, 1)
 
             torch.cuda.synchronize()
             times.append(time.time() - time0)
 
-            ref = self.torch_pseudo_quantize_to_uint8(image_block.padded_block)
-            recon_img = self.torch_pseudo_quantize_to_uint8(recon_img)
+            if method.PLATFORM == 'torch':
+                ref = self.torch_pseudo_quantize_to_uint8(image_block.padded_block_cuda)
+                recon_img = self.torch_pseudo_quantize_to_uint8(recon_img)
 
-            ref = ref[:, : image_block.h, : image_block.w, :]
-            recon_img = recon_img[:, : image_block.h, : image_block.w, :]
+                ref = ref[:, : image_block.h, : image_block.w, :]
+                recon_img = recon_img[:, : image_block.h, : image_block.w, :]
 
-            sqe = torch.sum((ref - recon_img) ** 2).detach().cpu().numpy()
-            sqes.append(sqe)
+                sqe = torch.sum((ref - recon_img) ** 2).detach().cpu().numpy()
+                sqes.append(sqe)
+            else:
+                ref = image_block.padded_block_np.astype(np.float32)
+                recon_img = recon_img.astype(np.float32)
+
+                ref = ref[:image_block.h, : image_block.w, :]
+                recon_img = recon_img[:image_block.h, : image_block.w, :]
+
+                sqe = np.sum((ref - recon_img) ** 2) / (255. ** 2)
+                sqes.append(sqe)
+
 
         sqe = np.mean(sqes)
         psnr = -10 * np.log10(sqe)
@@ -414,7 +430,7 @@ class EngineBase:
             x,
             ((padding_t, padding_b), (padding_l, padding_r), (0, 0)),
             mode="constant",
-            value=0,
+            constant_values=0,
         )
         return pic_height, pic_width, x_padded
 
@@ -428,7 +444,7 @@ class EngineBase:
 
             # Move to CUDA
             img_patch_np = padded_img[upper:lower, left:right, :]
-            img_patch_cuda = torch.from_numpy(img_patch_np).type(self.dtype)
+            img_patch_cuda = torch.from_numpy(img_patch_np).permute(2, 0, 1).type(self.dtype) / 255.
             img_patch_cuda = img_patch_cuda.unsqueeze(0)
             img_patch_cuda = img_patch_cuda.cuda()
 
@@ -491,7 +507,7 @@ class EngineBase:
     def join_blocks(self, decoded_ctus, file_io: FileIO):
         h = file_io.h
         w = file_io.w
-        recon_img = np.zeros(size=(h, w, 3), dtype=np.float32)
+        recon_img = np.zeros((h, w, 3), dtype=np.uint8)
         for i, ctu in enumerate(decoded_ctus):
             upper, left, lower, right = file_io.block_indexes[i]
             lower_real = min(lower, h)
@@ -523,7 +539,7 @@ class EngineBase:
                         bitstream, lower - upper, right - left, q_scale
                     )
                     if isinstance(ctu, torch.Tensor):
-                        ctu = ctu[0].permute(1, 2, 0).detach().cpu().numpy()
+                        ctu = self.torch_float_to_np_uint8(ctu)
                     decoded_ctus.append(ctu)
             with timer.Timer("Reconstruct&save"):
                 recon_img = self.join_blocks(decoded_ctus, file_io)
@@ -657,6 +673,7 @@ class SAEngine1(EngineBase):
         num_steps=1000,
         T_start=1e-3,
         T_end=1e-6,
+        use_attempt=False,
     ):
         n_ctu = len(img_blocks)
         n_method = len(self.methods)
@@ -680,6 +697,14 @@ class SAEngine1(EngineBase):
         # Simulated Annealing
         for step in range(num_steps):
             next_state = self._try_move(ans, n_method)
+
+            if use_attempt:
+                # Attempt to only change the methods. If no improvement, then reject it with probability
+                attempt_score, _, _ = self._get_score(
+                    n_ctu, num_pixels, method_ids, ans, total_target_bytes
+                )
+                # TODO
+
             (
                 next_target_byteses,
                 next_score,

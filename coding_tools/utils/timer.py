@@ -4,7 +4,7 @@ import torch
 __all__ = ["timing_decorator", "Timer"]
 
 LEVEL = 0
-ENABLE = True
+ENABLE = False
 
 
 def timing_decorator(name):

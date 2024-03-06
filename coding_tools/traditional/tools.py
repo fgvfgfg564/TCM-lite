@@ -1,6 +1,6 @@
 from coding_tools.traditional.tool_base import TraditionalCodingToolBase, PSNR
 import os
-import PIL
+from PIL import Image
 import io
 import math
 import torch
@@ -96,73 +96,45 @@ class VTMTool(TraditionalCodingToolBase):
         rec = transforms.ToTensor()(rec).unsqueeze(0)
 
         return rec
+    
+class PILTool(TraditionalCodingToolBase):
+    fmt = None
+
+    def compress_block(self, img_block: np.ndarray, q_scale: float) -> bytes:
+        q_scale = 100 * (1 - q_scale)
+        if not 0.0 <= q_scale <= 100.0:
+            raise ValueError(f"Invalid quality value: {q_scale} (0,100)")
+        img = Image.fromarray(img_block)
+        # Encode
+        tmp = io.BytesIO()
+        img.save(tmp, format=self.fmt, quality=int(q_scale))
+        tmp.seek(0)
+        bit_stream = tmp.read()
+
+        return bit_stream
+
+    def decompress_block(
+        self, bit_stream: bytes, h: int, w: int, q_scale: float
+    ) -> np.ndarray:
+        with Timer("bytesio"):
+            image_bytes = io.BytesIO(bit_stream)
+        # Decode
+        with Timer("open"):
+            rec_img = Image.open(image_bytes, formats=(self.fmt,))
+        with Timer("load"):
+            rec_img.load()
+            rec_img = np.asarray(rec_img)
+
+        return rec_img
 
 @register_tool('WebP')
-class WebPTool(TraditionalCodingToolBase):
-    def __init__(self):
-        self.fmt = "webp"
+class WebPTool(PILTool):
+    fmt = 'webp'
 
-    def compress_block(self, img_block: torch.Tensor, q_scale: float) -> bytes:
-        q_scale = 100 * (1 - q_scale)
-        if not 0.0 <= q_scale <= 100.0:
-            raise ValueError(f"Invalid quality value: {q_scale} (0,100)")
-        img = transforms.ToPILImage()(img_block.squeeze(0))
-        # Encode
-        tmp = io.BytesIO()
-        img.save(tmp, format=self.fmt, quality=int(q_scale))
-        tmp.seek(0)
-        bit_stream = tmp.read()
-
-        return bit_stream
-
-    def decompress_block(
-        self, bit_stream: bytes, h: int, w: int, q_scale: float
-    ) -> torch.Tensor:
-        with Timer("bytesio"):
-            image_bytes = io.BytesIO(bit_stream)
-        # Decode
-        with Timer("open"):
-            rec_img = Image.open(image_bytes, formats=(self.fmt,))
-        with Timer("load"):
-            rec_img.load()
-        with Timer("totensor"):
-            rec = transforms.ToTensor()(rec_img).unsqueeze(0)
-
-        return rec
 
 @register_tool('JPEG')
-class JPEGTool(TraditionalCodingToolBase):
-    def __init__(self):
-        self.fmt = "jpeg"
-
-    def compress_block(self, img_block: torch.Tensor, q_scale: float) -> bytes:
-        q_scale = 100 * (1 - q_scale)
-        if not 0.0 <= q_scale <= 100.0:
-            raise ValueError(f"Invalid quality value: {q_scale} (0,100)")
-        img = transforms.ToPILImage()(img_block.squeeze(0))
-        # Encode
-        tmp = io.BytesIO()
-        img.save(tmp, format=self.fmt, quality=int(q_scale))
-        tmp.seek(0)
-        bit_stream = tmp.read()
-
-        return bit_stream
-
-    def decompress_block(
-        self, bit_stream: bytes, h: int, w: int, q_scale: float
-    ) -> torch.Tensor:
-        with Timer("bytesio"):
-            image_bytes = io.BytesIO(bit_stream)
-        # Decode
-        with Timer("open"):
-            rec_img = Image.open(image_bytes, formats=(self.fmt,))
-        with Timer("load"):
-            rec_img.load()
-        with Timer("totensor"):
-            rec = transforms.ToTensor()(rec_img).unsqueeze(0)
-
-        return rec
-
+class JPEGTool(PILTool):
+    fmt = 'jpeg'
 
 if __name__ == "__main__":
     quality = 0.5

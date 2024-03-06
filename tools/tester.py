@@ -10,6 +10,7 @@ import time
 
 from bin.engine import *
 from bin.utils import *
+from coding_tools.register import TOOL_GROUPS
 
 
 def parse_args():
@@ -26,7 +27,7 @@ def parse_args():
 
     # Engine args
     parser.add_argument(
-        "--tools", nargs="+", type=str, default=GAEngine1.TOOL_GROUPS.keys()
+        "--tools", nargs="+", type=str, default=TOOL_GROUPS.keys()
     )
     parser.add_argument("--tool_filter", nargs="+", type=str, default=None)
     parser.add_argument("--ctu_size", type=int, default=512)
