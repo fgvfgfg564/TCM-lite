@@ -5,6 +5,7 @@ from PIL import Image
 import torch
 import torch.nn.functional as F
 from dataclasses import dataclass
+import concurrent.futures
 
 import tqdm
 import copy
@@ -24,8 +25,8 @@ np.seterr(all="raise")
 
 @dataclass
 class PaddedBlock:
-    padded_block_np: np.ndarray # 0 - 255
-    padded_block_cuda: torch.Tensor # 0 - 1
+    padded_block_np: np.ndarray  # 0 - 255
+    padded_block_cuda: torch.Tensor  # 0 - 1
     h: int
     w: int
 
@@ -184,7 +185,7 @@ class EngineBase:
         x = torch.round(x)
         x = x.to(torch.uint8)
         return x
-    
+
     @classmethod
     def torch_float_to_np_uint8(cls, x):
         x = cls.torch_to_uint8(x)
@@ -220,7 +221,7 @@ class EngineBase:
             torch.cuda.synchronize()
             times.append(time.time() - time0)
 
-            if method.PLATFORM == 'torch':
+            if method.PLATFORM == "torch":
                 ref = self.torch_pseudo_quantize_to_uint8(image_block.padded_block_cuda)
                 recon_img = self.torch_pseudo_quantize_to_uint8(recon_img)
 
@@ -233,12 +234,11 @@ class EngineBase:
                 ref = image_block.padded_block_np.astype(np.float32)
                 recon_img = recon_img.astype(np.float32)
 
-                ref = ref[:image_block.h, : image_block.w, :]
-                recon_img = recon_img[:image_block.h, : image_block.w, :]
+                ref = ref[: image_block.h, : image_block.w, :]
+                recon_img = recon_img[: image_block.h, : image_block.w, :]
 
-                sqe = np.sum((ref - recon_img) ** 2) / (255. ** 2)
+                sqe = np.sum((ref - recon_img) ** 2) / (255.0**2)
                 sqes.append(sqe)
-
 
         sqe = np.mean(sqes)
         psnr = -10 * np.log10(sqe)
@@ -444,7 +444,9 @@ class EngineBase:
 
             # Move to CUDA
             img_patch_np = padded_img[upper:lower, left:right, :]
-            img_patch_cuda = torch.from_numpy(img_patch_np).permute(2, 0, 1).type(self.dtype) / 255.
+            img_patch_cuda = (
+                torch.from_numpy(img_patch_np).permute(2, 0, 1).type(self.dtype) / 255.0
+            )
             img_patch_cuda = img_patch_cuda.unsqueeze(0)
             img_patch_cuda = img_patch_cuda.cuda()
 
@@ -563,7 +565,7 @@ class SAEngine1(EngineBase):
         num_pixels,
         method_ids,
         total_target,
-        learning_rate=1e5,
+        learning_rate=1e6,
         num_steps=1000,
         init_value=None,
     ):
@@ -597,28 +599,42 @@ class SAEngine1(EngineBase):
         ans = normalize_to_target(ans, min_bytes, max_bytes, total_target)
 
         for step in range(num_steps):
+            # if step == 0:
+            #     score, psnr, time = self._get_score(
+            #         n_ctu, num_pixels, method_ids, ans, total_target
+            #     )
+            #     print("start", ans, "score =", score)
             gradients = np.zeros_like(ans)
 
             # Gradient item on sqe
-            sqes = []
-            for i in range(n_ctu):
+            def _process_sqes(i):
                 method_id = method_ids[i]
                 precomputed_results = self._precomputed_curve[method_id][i]
-                sqes.append(precomputed_results["b_e"](ans[i]))
+                return precomputed_results["b_e"](ans[i])
+
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                sqes = np.asarray(list(executor.map(_process_sqes, list(range(n_ctu)))))
 
             sqe_gradient = self._calc_gradient_psnr(np.array(sqes))
 
-            for i in range(n_ctu):
+            def _process_grads(i):
+                method_id = method_ids[i]
                 b_e: LinearInterpolation = self._precomputed_curve[method_id][i]["b_e"]
                 b_t: np.ndarray = self._precomputed_curve[method_id][i]["b_t"]
-                gradients[i] = self.w_time * b_t[0] - sqe_gradient * b_e.derivative(
-                    ans[i]
-                )
+                return self.w_time * b_t[0] - sqe_gradient * b_e.derivative(ans[i])
+
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                gradients = np.asarray(list(executor.map(_process_grads, range(n_ctu))))
 
             # Gradient descent
             ans = ans - gradients * learning_rate
             # Normalize
             ans = normalize_to_target(ans, min_bytes, max_bytes, total_target)
+            # if step == 0:
+            #     score, psnr, time = self._get_score(
+            #         n_ctu, num_pixels, method_ids, ans, total_target
+            #     )
+            #     print("end", ans, gradients, learning_rate, "score =", score)
 
         score, psnr, time = self._get_score(
             n_ctu, num_pixels, method_ids, ans, total_target
@@ -698,12 +714,12 @@ class SAEngine1(EngineBase):
         for step in range(num_steps):
             next_state = self._try_move(ans, n_method)
 
-            if use_attempt:
-                # Attempt to only change the methods. If no improvement, then reject it with probability
-                attempt_score, _, _ = self._get_score(
-                    n_ctu, num_pixels, method_ids, ans, total_target_bytes
-                )
-                # TODO
+            # if use_attempt:
+            #     # Attempt to only change the methods. If no improvement, then reject it with probability
+            #     attempt_score, _, _ = self._get_score(
+            #         n_ctu, num_pixels, method_ids, ans, total_target_bytes
+            #     )
+            #     # TODO
 
             (
                 next_target_byteses,

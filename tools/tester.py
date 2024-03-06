@@ -11,6 +11,7 @@ import time
 from bin.engine import *
 from bin.utils import *
 from coding_tools.register import TOOL_GROUPS
+from pyinstrument import Profiler
 
 
 def parse_args():
@@ -23,15 +24,15 @@ def parse_args():
     parser.add_argument("--target_bpp", nargs="+", type=float, default=[1.0])
     parser.add_argument("--save_image", action="store_true")
 
-    parser.add_argument("-a", "--algorithm", type=str, choices=['GA', 'SAv1'], required=True)
+    parser.add_argument(
+        "-a", "--algorithm", type=str, choices=["GA", "SAv1"], required=True
+    )
 
     # Engine args
-    parser.add_argument(
-        "--tools", nargs="+", type=str, default=TOOL_GROUPS.keys()
-    )
+    parser.add_argument("--tools", nargs="+", type=str, default=TOOL_GROUPS.keys())
     parser.add_argument("--tool_filter", nargs="+", type=str, default=None)
     parser.add_argument("--ctu_size", type=int, default=512)
-    parser.add_argument('--mosaic', action='store_true', default=False)
+    parser.add_argument("--mosaic", action="store_true", default=False)
 
     # Encoder config args (GA)
     parser.add_argument("-N", nargs="+", type=int, default=[1000])
@@ -58,9 +59,9 @@ def test_single_image(
 ):
     output_dir = os.path.join(
         output_dir,
-        "target_bpp="+str(target_bpp),
-        "w_time="+str(w_time),
-        *([str(k)+"="+str(v) for k, v in kwargs.items()]),
+        "target_bpp=" + str(target_bpp),
+        "w_time=" + str(w_time),
+        *([str(k) + "=" + str(v) for k, v in kwargs.items()]),
     )
     if save_image:
         os.makedirs(output_dir, exist_ok=True)
@@ -215,10 +216,12 @@ def test_multiple_configs(
             target_bpp=target_bpp,
             w_time=w_time,
             save_image=save_image,
-            **kwargs
+            **kwargs,
         )
 
-    configs = [("target_bpp", target_bpp), ("w_time", w_time)] + [(k, v) for k, v in kwargs.items()]
+    configs = [("target_bpp", target_bpp), ("w_time", w_time)] + [
+        (k, v) for k, v in kwargs.items()
+    ]
     results = _config_mapper(configs, _test_glob)
     return results
 
@@ -231,7 +234,10 @@ if __name__ == "__main__":
 
     args = parse_args()
 
-    if args.algorithm == 'GA':
+    profiler = Profiler()
+    profiler.start()
+
+    if args.algorithm == "GA":
         engine = GAEngine1(
             ctu_size=args.ctu_size,
             mosaic=args.mosaic,
@@ -254,7 +260,7 @@ if __name__ == "__main__":
             method_sigma=args.method_sigma,
             bytes_sigma=args.bytes_sigma,
         )
-    elif args.algorithm == 'SAv1':
+    elif args.algorithm == "SAv1":
         engine = SAEngine1(
             ctu_size=args.ctu_size,
             mosaic=args.mosaic,
@@ -271,8 +277,13 @@ if __name__ == "__main__":
             args.w_time,
             args.save_image,
         )
+    profiler.stop()
 
     os.makedirs(args.output_dir, exist_ok=True)
     result_filename = os.path.join(args.output_dir, "results.json")
     with open(result_filename, "w") as f:
         json.dump(results, f, indent=4, sort_keys=True)
+
+    profile_filename = os.path.join(args.output_dir, "profile.html")
+    with open(profile_filename, "w") as f:
+        print(profiler.output_html(timeline=False, show_all=False), file=f)

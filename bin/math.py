@@ -9,6 +9,7 @@ class LinearInterpolation:
     def __init__(self, X, Y):
         self.X = np.asarray(X)
         self.Y = np.asarray(Y)
+        self.n_samples = len(X)
         self.check_input()
 
     def check_input(self):
@@ -22,7 +23,7 @@ class LinearInterpolation:
 
     def interpolate(self, x):
         idx = np.searchsorted(self.X, x)
-        idx = np.clip(idx, 1, len(self.X) - 1)  # Ensure idx is within bounds
+        idx = np.clip(idx, 1, self.n_samples - 1)  # Ensure idx is within bounds
 
         x0, x1 = self.X[idx - 1], self.X[idx]
         y0, y1 = self.Y[idx - 1], self.Y[idx]
@@ -33,7 +34,7 @@ class LinearInterpolation:
 
     def derivative(self, x):
         idx = np.searchsorted(self.X, x)
-        idx = np.clip(idx, 1, len(self.X) - 1)  # Ensure idx is within bounds
+        idx = np.clip(idx, 1, self.n_samples - 1)  # Ensure idx is within bounds
 
         x0, x1 = self.X[idx - 1], self.X[idx]
         y0, y1 = self.Y[idx - 1], self.Y[idx]
@@ -88,7 +89,7 @@ def safe_SA_prob(delta, T):
 #         return self.slope
 
 
-def waterfill(X, k):
+def waterfill(X, k):  # O(N)
     if k <= 0:
         return np.zeros_like(X)
 
