@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from dataclasses import dataclass
 import concurrent.futures
 from scipy.optimize import minimize
+from typing import List
 
 import tqdm
 import copy
@@ -46,7 +47,7 @@ class GASolution(Solution):
         self.target_byteses = target_byteses
         self.n_ctu = len(self.method_ids)
 
-    def normalize_target_byteses(self, min_table, max_table, total_target):
+    def normalize_target_byteses(self, min_table, max_table, b_t):
         min_bytes = np.zeros_like(self.target_byteses, dtype=np.int32)
         max_bytes = np.zeros_like(self.target_byteses, dtype=np.int32)
 
@@ -55,7 +56,7 @@ class GASolution(Solution):
             max_bytes[i] = max_table[self.method_ids[i]][i]
 
         self.target_byteses = normalize_to_target(
-            self.target_byteses, min_bytes, max_bytes, total_target
+            self.target_byteses, min_bytes, max_bytes, b_t
         )
 
 
@@ -157,7 +158,7 @@ class EngineBase:
         bitstream = self._feed_block(method, image_block, max_qs)
         return bitstream, max_qs
 
-    def _search_init_qscale(self, method, img_blocks, total_target_bytes):
+    def _search_init_qscale(self, method, img_blocks, b_t):
         # Given method, search a shared qscale for all blocks and return target bytes for each block
         min_qs = float(1e-5)
         max_qs = float(1.0)
@@ -172,7 +173,7 @@ class EngineBase:
                 len_bytes = len(bitstream)
                 target_bytes[i] = len_bytes
                 total_bytes += len_bytes
-            if total_bytes <= total_target_bytes:
+            if total_bytes <= b_t:
                 max_qs = mid_qs
             else:
                 min_qs = mid_qs
@@ -378,9 +379,9 @@ class EngineBase:
 
         return solution.method_ids, q_scales, bitstreams
 
-    def _get_score(self, n_ctu, num_pixels, method_ids, target_byteses, total_target):
+    def _get_score(self, n_ctu, num_pixels, method_ids, target_byteses, b_t):
         # Returns score given method ids and target bytes
-        # if np.sum(target_byteses) > total_target:
+        # if np.sum(target_byteses) > b_t:
         #     return -np.inf, -np.inf, np.inf
 
         sqe = 0
@@ -406,7 +407,7 @@ class EngineBase:
         self,
         img_blocks,
         img_size,
-        total_target_bytes,
+        b_t,
         file_io,
         **kwargs,
     ):
@@ -435,7 +436,7 @@ class EngineBase:
         )
         return pic_height, pic_width, x_padded
 
-    def divide_blocks(self, fileio: FileIO, h, w, padded_img):
+    def divide_blocks(self, fileio: FileIO, h, w, padded_img) -> List[PaddedBlock]:
         blocks = []
         for i in range(fileio.n_ctu):
             upper, left, lower, right = fileio.block_indexes[i]
@@ -477,15 +478,15 @@ class EngineBase:
         # Set loss
         self.w_time = w_time
 
-        total_target_bytes = target_bpp * h * w // 8
+        b_t = target_bpp * h * w // 8
         print(f"Image shape: {h}x{w}")
-        print(f"Target={total_target_bytes}B; Target bpp={target_bpp:.4f};")
+        print(f"Target={b_t}B; Target bpp={target_bpp:.4f};")
 
         header_bytes = file_io.header_size
         safety_bytes = SAFETY_BYTE_PER_CTU * file_io.n_ctu
-        total_target_bytes -= header_bytes + safety_bytes
+        b_t -= header_bytes + safety_bytes
         print(
-            f"Header bytes={header_bytes}; Safety_bytes={safety_bytes}; CTU bytes={total_target_bytes}"
+            f"Header bytes={header_bytes}; Safety_bytes={safety_bytes}; CTU bytes={b_t}"
         )
 
         img_blocks = self.divide_blocks(file_io, h, w, padded_img)
@@ -496,7 +497,7 @@ class EngineBase:
         method_ids, q_scales, bitstreams, data = self._solve(
             img_blocks,
             img_size,
-            total_target_bytes,
+            b_t,
             file_io,
             **kwargs,
         )
@@ -565,7 +566,7 @@ class SAEngine1(EngineBase):
         n_ctu,
         num_pixels,
         method_ids,
-        total_target,
+        b_t,
         learning_rate=1e3,
         num_steps=1000,
         init_value=None,
@@ -595,15 +596,15 @@ class SAEngine1(EngineBase):
             bounds.append((min_bytes[i], max_bytes[i]))
 
         if init_value is None:
-            bpp = total_target / num_pixels * 0.99
+            bpp = b_t / num_pixels * 0.99
             init_value = file_io.block_num_pixels * bpp
 
-        init_value = normalize_to_target(init_value, min_bytes, max_bytes, total_target)
+        init_value = normalize_to_target(init_value, min_bytes, max_bytes, b_t)
 
         def objective_func(target_bytes):
-            result = -self._get_score(
-                n_ctu, num_pixels, method_ids, target_bytes, total_target
-            )[0]
+            result = -self._get_score(n_ctu, num_pixels, method_ids, target_bytes, b_t)[
+                0
+            ]
             return result * learning_rate
 
         def grad(target_bytes):
@@ -635,7 +636,7 @@ class SAEngine1(EngineBase):
 
         def ineq_constraint(target_bytes):
             # print(target_bytes)
-            return total_target - target_bytes.sum()
+            return b_t - target_bytes.sum()
 
         constraint = {"type": "ineq", "fun": ineq_constraint}
 
@@ -647,7 +648,7 @@ class SAEngine1(EngineBase):
             bounds=bounds,
             constraints=[constraint],
             options={
-                "ftol": 1e-8 * learning_rate,
+                "ftol": 1e-8,
                 "maxiter": num_steps,
             },
         )
@@ -655,25 +656,23 @@ class SAEngine1(EngineBase):
         # for step in range(num_steps):
         #     # if step == 0:
         #     #     score, psnr, time = self._get_score(
-        #     #         n_ctu, num_pixels, method_ids, ans, total_target
+        #     #         n_ctu, num_pixels, method_ids, ans, b_t
         #     #     )
         #     #     print("start", ans, "score =", score)
 
         #     # Gradient descent
         #     ans = ans - gradients * learning_rate
         #     # Normalize
-        #     ans = normalize_to_target(ans, min_bytes, max_bytes, total_target)
+        #     ans = normalize_to_target(ans, min_bytes, max_bytes, b_t)
         #     # if step == 0:
         #     #     score, psnr, time = self._get_score(
-        #     #         n_ctu, num_pixels, method_ids, ans, total_target
+        #     #         n_ctu, num_pixels, method_ids, ans, b_t
         #     #     )
         #     #     print("end", ans, gradients, learning_rate, "score =", score)
 
         ans = result.x
 
-        score, psnr, time = self._get_score(
-            n_ctu, num_pixels, method_ids, ans, total_target
-        )
+        score, psnr, time = self._get_score(n_ctu, num_pixels, method_ids, ans, b_t)
 
         return ans, score, psnr, time
 
@@ -688,13 +687,11 @@ class SAEngine1(EngineBase):
         new_method_ids[selected] = new_method
         return new_method_ids
 
-    def _show_solution(
-        self, method_ids, target_byteses, total_target_bytes, score, psnr, time
-    ):
+    def _show_solution(self, method_ids, target_byteses, b_t, score, psnr, time):
         n_ctu = len(method_ids)
         total_bytes = np.sum(target_byteses)
         print(
-            f"score={score}; total_bytes=[{total_bytes}/{total_target_bytes}]({100.0*total_bytes/total_target_bytes:.4f}%); PSNR={psnr:.3f}; time={time:.3f}s",
+            f"score={score}; total_bytes=[{total_bytes}/{b_t}]({100.0*total_bytes/b_t:.4f}%); PSNR={psnr:.3f}; time={time:.3f}s",
             flush=True,
         )
         for i in range(n_ctu):
@@ -715,16 +712,46 @@ class SAEngine1(EngineBase):
                 flush=True,
             )
 
+    def _adaptive_init(self, img_blocks: List[PaddedBlock], n_ctu, n_method, b_t):
+        ans = np.zeros(
+            [
+                n_ctu,
+            ],
+            dtype=np.int32,
+        )
+        b = b_t / n_ctu
+        for ctu_id in range(n_ctu):
+            max_score = -float("inf")
+            best_method = None
+            num_pixels = img_blocks[ctu_id].h * img_blocks[ctu_id].w
+            for method_id in range(n_method):
+                precomputed_results = self._precomputed_curve[method_id][ctu_id]
+                if (
+                    b >= self._minimal_bytes[method_id][ctu_id]
+                    and b <= self._maximal_bytes[method_id][ctu_id]
+                ):
+                    sqe = precomputed_results["b_e"](b) / num_pixels
+                    score = -10 * np.log10(sqe) - self.w_time * n_ctu * np.polyval(
+                        precomputed_results["b_t"], b
+                    )
+                    if score > max_score:
+                        max_score = score
+                        best_method = method_id
+            if best_method is None:
+                best_method = np.random.randint(n_method)
+            ans[ctu_id] = best_method
+        return ans
+
     def _solve(
         self,
-        img_blocks,
+        img_blocks: List[PaddedBlock],
         img_size,
-        total_target_bytes,
+        b_t,
         file_io,
         num_steps=1000,
         T_start=1e-3,
         T_end=1e-6,
-        use_attempt=False,
+        adaptive_init=True,
     ):
         n_ctu = len(img_blocks)
         n_method = len(self.methods)
@@ -732,15 +759,18 @@ class SAEngine1(EngineBase):
         num_pixels = h * w
         alpha = np.power(T_end / T_start, 1.0 / num_steps)
 
-        ans = np.random.random_integers(
-            0,
-            n_method - 1,
-            [
-                n_ctu,
-            ],
-        )
+        if adaptive_init:
+            ans = self._adaptive_init(img_blocks, n_ctu, n_method, b_t)
+        else:
+            ans = np.random.random_integers(
+                0,
+                n_method - 1,
+                [
+                    n_ctu,
+                ],
+            )
         target_byteses, score, psnr, time = self._find_optimal_target_bytes(
-            file_io, n_ctu, num_pixels, ans, total_target_bytes, num_steps=100
+            file_io, n_ctu, num_pixels, ans, b_t, num_steps=100
         )
 
         T = T_start
@@ -752,7 +782,7 @@ class SAEngine1(EngineBase):
             # if use_attempt:
             #     # Attempt to only change the methods. If no improvement, then reject it with probability
             #     attempt_score, _, _ = self._get_score(
-            #         n_ctu, num_pixels, method_ids, ans, total_target_bytes
+            #         n_ctu, num_pixels, method_ids, ans, b_t
             #     )
             #     # TODO
 
@@ -766,9 +796,10 @@ class SAEngine1(EngineBase):
                 n_ctu,
                 num_pixels,
                 next_state,
-                total_target_bytes,
+                b_t,
+                learning_rate=1e5,
                 # init_value=target_byteses,
-                num_steps=100,
+                num_steps=10,
             )
 
             if next_score > score:
@@ -786,15 +817,13 @@ class SAEngine1(EngineBase):
                 time = next_time
 
             if step % (num_steps // 20) == 0:
-                print(f"Results for step: {step}; T={T:.6f}")
-                self._show_solution(
-                    ans, target_byteses, total_target_bytes, score, psnr, time
-                )
+                print(f"Results for step: {step}; w_time={self.w_time:.6f}; T={T:.6f}")
+                self._show_solution(ans, target_byteses, b_t, score, psnr, time)
 
             T *= alpha
 
         target_byteses, score, psnr, time = self._find_optimal_target_bytes(
-            file_io, n_ctu, num_pixels, ans, total_target_bytes, num_steps=10000
+            file_io, n_ctu, num_pixels, ans, b_t, num_steps=10000
         )
         solution = Solution(ans, target_byteses)
 
@@ -819,7 +848,7 @@ class GAEngine1(EngineBase):
         result.astype(a.dtype)
         return result
 
-    def _hybrid(self, header1: GASolution, header2: GASolution, total_target_bytes, p):
+    def _hybrid(self, header1: GASolution, header2: GASolution, b_t, p):
         new_method_score = self.arithmetic_crossover(
             header1.method_score, header2.method_score
         )
@@ -828,7 +857,7 @@ class GAEngine1(EngineBase):
         )
         new_header = GASolution(new_method_score, new_target)
         new_header.normalize_target_byteses(
-            self._minimal_bytes, self._maximal_bytes, total_target_bytes
+            self._minimal_bytes, self._maximal_bytes, b_t
         )
 
         return new_header
@@ -836,7 +865,7 @@ class GAEngine1(EngineBase):
     def _mutate(
         self,
         header: GASolution,
-        total_target_bytes,
+        b_t,
         method_mutate_sigma,
         byte_mutate_sigma,
         inplace=True,
@@ -857,16 +886,14 @@ class GAEngine1(EngineBase):
 
         header.__init__(new_score, new_target)
 
-        header.normalize_target_byteses(
-            self._minimal_bytes, self._maximal_bytes, total_target_bytes
-        )
+        header.normalize_target_byteses(self._minimal_bytes, self._maximal_bytes, b_t)
 
         return header
 
-    def _show_solution(self, solution: GASolution, total_target_bytes):
+    def _show_solution(self, solution: GASolution, b_t):
         total_bytes = np.sum(solution.target_byteses)
         print(
-            f"score={solution.score}; total_bytes=[{total_bytes}/{total_target_bytes}]({100.0*total_bytes/total_target_bytes:.4f}%); PSNR={solution.psnr:.3f}; time={solution.time:.3f}s",
+            f"score={solution.score}; total_bytes=[{total_bytes}/{b_t}]({100.0*total_bytes/b_t:.4f}%); PSNR={solution.psnr:.3f}; time={solution.time:.3f}s",
             flush=True,
         )
         for i in range(solution.n_ctu):
@@ -888,9 +915,9 @@ class GAEngine1(EngineBase):
 
     def _solve(
         self,
-        img_blocks,
+        img_blocks: List,
         img_size,
-        total_target_bytes,
+        b_t,
         file_io,
         N,
         num_gen,
@@ -913,7 +940,7 @@ class GAEngine1(EngineBase):
 
         print("Initializing qscale")
         default_qscale, default_target_bytes = self._search_init_qscale(
-            self.methods[DEFAULT_METHOD][0], img_blocks, total_target_bytes
+            self.methods[DEFAULT_METHOD][0], img_blocks, b_t
         )
 
         if no_allocation:
@@ -930,19 +957,19 @@ class GAEngine1(EngineBase):
             method = GASolution(method_scores, target_byteses)
             self._mutate(
                 method,
-                total_target_bytes,
+                b_t,
                 method_sigma,
                 bytes_sigma,
             )
             method.normalize_target_byteses(
-                self._minimal_bytes, self._maximal_bytes, total_target_bytes
+                self._minimal_bytes, self._maximal_bytes, b_t
             )
             method.score, method.psnr, method.time = self._get_score(
                 n_ctu,
                 num_pixels,
                 method.method_ids,
                 method.target_byteses,
-                total_target_bytes,
+                b_t,
             )
             solutions.append(method)
 
@@ -961,7 +988,7 @@ class GAEngine1(EngineBase):
             gen_time.append(best_time)
 
             print(f"Best Solution before Gen.{k}:")
-            self._show_solution(best_solution, total_target_bytes)
+            self._show_solution(best_solution, b_t)
             print(flush=True)
 
             G = num_gen
@@ -998,12 +1025,12 @@ class GAEngine1(EngineBase):
                 newborn = self._hybrid(
                     breedable[parent_id1],
                     breedable[parent_id2],
-                    total_target_bytes,
+                    b_t,
                     T * 0.5,
                 )
                 self._mutate(
                     newborn,
-                    total_target_bytes,
+                    b_t,
                     T * method_sigma,
                     T * bytes_sigma,
                 )
@@ -1012,7 +1039,7 @@ class GAEngine1(EngineBase):
                     num_pixels,
                     newborn.method_ids,
                     newborn.target_byteses,
-                    total_target_bytes,
+                    b_t,
                 )
                 solutions.append(newborn)
                 if max_score is None or max_score < newborn.score:

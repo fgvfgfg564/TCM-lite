@@ -28,6 +28,9 @@ def parse_args():
         "-a", "--algorithm", type=str, choices=["GA", "SAv1"], required=True
     )
 
+    # Profiler args
+    parser.add_argument("--profile", action="store_true")
+
     # Engine args
     parser.add_argument("--tools", nargs="+", type=str, default=TOOL_GROUPS.keys())
     parser.add_argument("--tool_filter", nargs="+", type=str, default=None)
@@ -234,8 +237,9 @@ if __name__ == "__main__":
 
     args = parse_args()
 
-    profiler = Profiler()
-    profiler.start()
+    if args.profile:
+        profiler = Profiler()
+        profiler.start()
 
     if args.algorithm == "GA":
         engine = GAEngine1(
@@ -277,13 +281,14 @@ if __name__ == "__main__":
             args.w_time,
             args.save_image,
         )
-    profiler.stop()
 
     os.makedirs(args.output_dir, exist_ok=True)
     result_filename = os.path.join(args.output_dir, "results.json")
     with open(result_filename, "w") as f:
         json.dump(results, f, indent=4, sort_keys=True)
 
-    profile_filename = os.path.join(args.output_dir, "profile.html")
-    with open(profile_filename, "w") as f:
-        print(profiler.output_html(timeline=False, show_all=False), file=f)
+    if args.profile:
+        profiler.stop()
+        profile_filename = os.path.join(args.output_dir, "profile.html")
+        with open(profile_filename, "w") as f:
+            print(profiler.output_html(timeline=False, show_all=False), file=f)
