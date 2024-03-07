@@ -564,7 +564,6 @@ class SAEngine1(EngineBase):
         self,
         file_io: FileIO,
         n_ctu,
-        num_pixels,
         method_ids,
         b_t,
         learning_rate=1e3,
@@ -596,15 +595,15 @@ class SAEngine1(EngineBase):
             bounds.append((min_bytes[i], max_bytes[i]))
 
         if init_value is None:
-            bpp = b_t / num_pixels * 0.99
+            bpp = b_t / file_io.num_pixels * 0.99
             init_value = file_io.block_num_pixels * bpp
 
         init_value = normalize_to_target(init_value, min_bytes, max_bytes, b_t)
 
         def objective_func(target_bytes):
-            result = -self._get_score(n_ctu, num_pixels, method_ids, target_bytes, b_t)[
-                0
-            ]
+            result = -self._get_score(
+                n_ctu, file_io.num_pixels, method_ids, target_bytes, b_t
+            )[0]
             return result * learning_rate
 
         def grad(target_bytes):
@@ -672,7 +671,9 @@ class SAEngine1(EngineBase):
 
         ans = result.x
 
-        score, psnr, time = self._get_score(n_ctu, num_pixels, method_ids, ans, b_t)
+        score, psnr, time = self._get_score(
+            n_ctu, file_io.num_pixels, method_ids, ans, b_t
+        )
 
         return ans, score, psnr, time
 
@@ -712,34 +713,38 @@ class SAEngine1(EngineBase):
                 flush=True,
             )
 
-    def _adaptive_init(self, img_blocks: List[PaddedBlock], n_ctu, n_method, b_t):
+    def _adaptive_init(self, file_io: FileIO, n_ctu, n_method, b_t):
         ans = np.zeros(
             [
                 n_ctu,
             ],
             dtype=np.int32,
         )
-        b = b_t / n_ctu
-        for ctu_id in range(n_ctu):
-            max_score = -float("inf")
-            best_method = None
-            num_pixels = img_blocks[ctu_id].h * img_blocks[ctu_id].w
-            for method_id in range(n_method):
+        best_score = np.zeros_like(ans) - np.infty
+        for method_id in range(n_method):
+            tmpans = np.zeros_like(ans) + method_id
+            target_bytes = self._find_optimal_target_bytes(
+                file_io,
+                n_ctu,
+                tmpans,
+                b_t,
+                num_steps=1000,
+            )[0]
+            for ctu_id in range(n_ctu):
+                b = target_bytes[ctu_id]
+                num_ctu_pixels = file_io.block_num_pixels[ctu_id]
                 precomputed_results = self._precomputed_curve[method_id][ctu_id]
                 if (
                     b >= self._minimal_bytes[method_id][ctu_id]
                     and b <= self._maximal_bytes[method_id][ctu_id]
                 ):
-                    sqe = precomputed_results["b_e"](b) / num_pixels
+                    sqe = precomputed_results["b_e"](b) / num_ctu_pixels
                     score = -10 * np.log10(sqe) - self.w_time * n_ctu * np.polyval(
                         precomputed_results["b_t"], b
                     )
-                    if score > max_score:
-                        max_score = score
-                        best_method = method_id
-            if best_method is None:
-                best_method = np.random.randint(n_method)
-            ans[ctu_id] = best_method
+                    if score > best_score[ctu_id]:
+                        best_score[ctu_id] = score
+                        ans[ctu_id] = method_id
         return ans
 
     def _solve(
@@ -760,7 +765,7 @@ class SAEngine1(EngineBase):
         alpha = np.power(T_end / T_start, 1.0 / num_steps)
 
         if adaptive_init:
-            ans = self._adaptive_init(img_blocks, n_ctu, n_method, b_t)
+            ans = self._adaptive_init(file_io, n_ctu, n_method, b_t)
         else:
             ans = np.random.random_integers(
                 0,
@@ -770,7 +775,7 @@ class SAEngine1(EngineBase):
                 ],
             )
         target_byteses, score, psnr, time = self._find_optimal_target_bytes(
-            file_io, n_ctu, num_pixels, ans, b_t, num_steps=100
+            file_io, n_ctu, ans, b_t, num_steps=100
         )
 
         T = T_start
@@ -794,7 +799,6 @@ class SAEngine1(EngineBase):
             ) = self._find_optimal_target_bytes(
                 file_io,
                 n_ctu,
-                num_pixels,
                 next_state,
                 b_t,
                 learning_rate=1e5,
@@ -823,7 +827,7 @@ class SAEngine1(EngineBase):
             T *= alpha
 
         target_byteses, score, psnr, time = self._find_optimal_target_bytes(
-            file_io, n_ctu, num_pixels, ans, b_t, num_steps=10000
+            file_io, n_ctu, ans, b_t, num_steps=10000
         )
         solution = Solution(ans, target_byteses)
 

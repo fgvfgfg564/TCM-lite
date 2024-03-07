@@ -1,15 +1,15 @@
 """
 HEADER format:
 
-IMAGE_H     H   1
-IMAGE_W     H   1
+IMAGE_H     H   2
+IMAGE_W     H   2
 
 for all CTU:
     METHOD_ID   B   2
     NUM_BYTES   I   4
     Q_SCALE     f   4
 
-total: (3 + 10*n_ctu) bytes
+total: (4 + 10*n_ctu) bytes
 """
 
 import struct
@@ -46,6 +46,7 @@ class FileIO:
     ) -> None:
         self.h = h
         self.w = w
+        self.num_pixels = h * w
         self.ctu_size = ctu_size
         self.mosaic = mosaic
         self.block_indexes = []
