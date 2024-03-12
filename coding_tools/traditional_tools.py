@@ -1,4 +1,3 @@
-from coding_tools.traditional.tool_base import TraditionalCodingToolBase, PSNR
 import os
 from PIL import Image
 import io
@@ -10,13 +9,16 @@ from torchvision import transforms
 from coding_tools.TCM.models import rgb2yuv, yuv2rgb, run_command
 from coding_tools.utils.timer import Timer
 import time
-from ..register import register_tool
+from .register import register_tool
+from .coding_tool import TraditionalCodingToolBase
 
 from PIL import Image
+import abc
 
 # 实现的传统编码工具放在这里
 
-@register_tool('VTM')
+
+@register_tool("VTM")
 class VTMTool(TraditionalCodingToolBase):
     def __init__(self):
         self.encoder_path = "../third_party/VVCSoftware_VTM/bin/EncoderAppStatic"
@@ -72,9 +74,7 @@ class VTMTool(TraditionalCodingToolBase):
 
         return bit_stream
 
-    def decompress_block(
-        self, bit_stream: bytes, h: int, w: int, q_scale: float
-    ) -> torch.Tensor:
+    def decompress_block(self, bit_stream: bytes, h: int, w: int) -> torch.Tensor:
         bitdepth = 8
         fd, yuv_path = mkstemp(suffix=".yuv")
         out_filepath = os.path.splitext(yuv_path)[0] + ".bin"
@@ -96,9 +96,14 @@ class VTMTool(TraditionalCodingToolBase):
         rec = transforms.ToTensor()(rec).unsqueeze(0)
 
         return rec
-    
+
+
 class PILTool(TraditionalCodingToolBase):
-    fmt = None
+    @abc.abstractproperty
+    def fmt(self):
+        """
+        Format of PIL traditional codec
+        """
 
     def compress_block(self, img_block: np.ndarray, q_scale: float) -> bytes:
         q_scale = 100 * (1 - q_scale)
@@ -113,9 +118,7 @@ class PILTool(TraditionalCodingToolBase):
 
         return bit_stream
 
-    def decompress_block(
-        self, bit_stream: bytes, h: int, w: int, q_scale: float
-    ) -> np.ndarray:
+    def decompress_block(self, bit_stream: bytes, h: int, w: int) -> np.ndarray:
         with Timer("bytesio"):
             image_bytes = io.BytesIO(bit_stream)
         # Decode
@@ -127,32 +130,12 @@ class PILTool(TraditionalCodingToolBase):
 
         return rec_img
 
-@register_tool('WebP')
+
+@register_tool("WebP")
 class WebPTool(PILTool):
-    fmt = 'webp'
+    fmt = "webp"
 
 
-@register_tool('JPEG')
+@register_tool("JPEG")
 class JPEGTool(PILTool):
-    fmt = 'jpeg'
-
-if __name__ == "__main__":
-    quality = 0.5
-    img_block = Image.open(
-        "/backup1/xyhang/dataset/NIC_Dataset/test/ClassA_6K/DOG_4507.png"
-    ).convert("RGB")
-    img_block = transforms.ToTensor()(img_block)
-    img_block = img_block.unsqueeze(0)
-    h, w = img_block.size(2), img_block.size(3)
-    codec = WebPTool()
-    bit_stream = codec.compress_block(img_block, quality)
-    bpp = len(bit_stream) * 8 / (h * w)
-    print(bpp)
-
-    time0 = time.time()
-    rec = codec.decompress_block(bit_stream, h, w, quality)
-    time1 = time.time()
-    psnr = PSNR(img_block, rec)
-    print("PSNR", psnr)
-    dec_time = time1 - time0
-    print("Dec time:", dec_time)
+    fmt = "jpeg"

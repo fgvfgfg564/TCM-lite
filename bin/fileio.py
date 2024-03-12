@@ -7,9 +7,7 @@ IMAGE_W     H   2
 for all CTU:
     METHOD_ID   B   2
     NUM_BYTES   I   4
-    Q_SCALE     f   4
 
-total: (4 + 10*n_ctu) bytes
 """
 
 import struct
@@ -18,21 +16,9 @@ import numpy as np
 import io
 
 
-def get_padding_size(height, width, p=768):
-    new_h = (height + p - 1) // p * p
-    new_w = (width + p - 1) // p * p
-    # padding_left = (new_w - width) // 2
-    padding_left = 0
-    padding_right = new_w - width - padding_left
-    # padding_top = (new_h - height) // 2
-    padding_top = 0
-    padding_bottom = new_h - height - padding_top
-    return padding_left, padding_right, padding_top, padding_bottom
-
-
 class FileIO:
     meta_str = "HH"
-    ctu_str = "BIf"
+    ctu_str = "BI"
 
     def __init__(
         self,
@@ -41,7 +27,6 @@ class FileIO:
         ctu_size: int,
         mosaic: bool,
         method_id=None,
-        q_scale=None,
         bitstreams=None,
     ) -> None:
         self.h = h
@@ -65,7 +50,6 @@ class FileIO:
             if bitstreams is None
             else np.array([len(bitstreams[i] for i in range(self.n_ctu))])
         )
-        self.q_scale = q_scale
 
         self._adjacencyMatrix = None
         self._adjacencyTable = None
@@ -127,9 +111,9 @@ class FileIO:
 
         for i in range(n_ctu):
             upper, left, lower, right = self._block_bb(self.h, self.w, i)
-            lower_real = min(lower, self.h)
-            right_real = min(right, self.w)
-            if upper < lower_real and left < right_real:
+            lower = min(lower, self.h)
+            right = min(right, self.w)
+            if upper < lower and left < right:
                 self.block_indexes.append((upper, left, lower, right))
                 self.block_num_pixels.append((lower - upper) * (right - left))
 
@@ -146,7 +130,6 @@ class FileIO:
             for i in range(self.n_ctu):
                 items.append(self.method_id[i])
                 items.append(len(self.bitstreams[i]))
-                items.append(self.q_scale[i])
 
             bits = struct.pack(self.format_str, *items)
             fd.write(bits)
@@ -171,14 +154,12 @@ class FileIO:
         file_io = cls(h, w, mosaic=mosaic, ctu_size=ctu_size)
 
         file_io.method_id = np.zeros([file_io.n_ctu], dtype=np.uint8)
-        file_io.q_scale = np.zeros([file_io.n_ctu], dtype=np.float32)
         num_bytes = np.zeros([file_io.n_ctu], dtype=np.uint32)
 
         # read CTU header
         for i in range(file_io.n_ctu):
-            _method_id, _num_bytes, _q_scale = cls._read_with_format(cls.ctu_str, fd)
+            _method_id, _num_bytes = cls._read_with_format(cls.ctu_str, fd)
             file_io.method_id[i] = _method_id
-            file_io.q_scale[i] = _q_scale
             num_bytes[i] = _num_bytes
         file_io.num_bytes = num_bytes
 
@@ -230,9 +211,6 @@ class FileIO:
             n_ctu_h = (h - 1) // (self.ctu_size * 3) + 1
             n_ctu_w = (w - 1) // (self.ctu_size * 3) + 1
 
-            padded_h = (self.h + self.ctu_size - 1) // self.ctu_size * self.ctu_size
-            padded_w = (self.w + self.ctu_size - 1) // self.ctu_size * self.ctu_size
-
             id_h = metablk_id // n_ctu_w
             id_w = metablk_id % n_ctu_w
 
@@ -254,7 +232,7 @@ class FileIO:
             lower += bias[miniblk_id][2] * self.ctu_size
             right += bias[miniblk_id][3] * self.ctu_size
 
-            lower = min(lower, padded_h)
-            right = min(right, padded_w)
+            lower = min(lower, h)
+            right = min(right, w)
 
             return upper, left, lower, right

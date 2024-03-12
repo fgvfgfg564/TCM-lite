@@ -1,14 +1,15 @@
 import os
 import torch
 
-from ...coding_tool import CodingToolBase
+from ...coding_tool import LICToolBase
 from ...register import register_tool
 
 from ..src.models import build_model, image_model
 from ..src.utils.stream_helper import get_state_dict
 
-@register_tool('EVC')
-class ModelEngine(CodingToolBase):
+
+@register_tool("EVC")
+class ModelEngine(LICToolBase):
     MODELS = {
         "EVC_LS": "EVC_LS_MD.pth.tar",
         "EVC_LS_large": "EVC_LS_large.pth.tar",
@@ -23,7 +24,7 @@ class ModelEngine(CodingToolBase):
         # "Scale_EVC_SL": 'Scale_EVC_SL_MDRRL.pth.tar',
         # "Scale_EVC_SS": 'Scale_EVC_SS_MDRRL.pth.tar',
     }
-    PLATFORM = 'torch'
+    MIN_CTU_SIZE = 256
 
     def __init__(self, model_name, dtype, ctu_size) -> None:
         super().__init__(model_name, dtype, ctu_size)
@@ -44,14 +45,14 @@ class ModelEngine(CodingToolBase):
         self.q_scale_max = self.q_scales[0]
         self.cuda()
 
-    def compress_block(self, img_block, q_scale):
+    def lic_compress(self, img_block, q_scale):
         self.eval()
         with torch.no_grad():
             q_scale = self._q_scale_mapping(q_scale).to(img_block.device)
             bit_stream = self.i_frame_net.compress(img_block, q_scale)["bit_stream"]
             return bit_stream
 
-    def decompress_block(self, bit_stream, h, w, q_scale):
+    def lic_decompress(self, bit_stream, h, w, q_scale):
         self.eval()
         with torch.no_grad():
             q_scale = self._q_scale_mapping(q_scale).cuda()

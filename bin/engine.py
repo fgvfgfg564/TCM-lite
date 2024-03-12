@@ -16,7 +16,7 @@ from coding_tools.coding_tool import CodingToolBase
 import coding_tools.utils.timer as timer
 
 from .utils import *
-from .fileio import FileIO, get_padding_size
+from .fileio import FileIO
 from .math import *
 from coding_tools import TOOL_GROUPS
 
@@ -26,11 +26,9 @@ np.seterr(all="raise")
 
 
 @dataclass
-class PaddedBlock:
-    padded_block_np: np.ndarray  # 0 - 255
-    padded_block_cuda: torch.Tensor  # 0 - 1
-    h: int
-    w: int
+class ImageBlock:
+    np: np.ndarray  # 0 - 255
+    cuda: torch.Tensor  # 0 - 1
 
 
 class Solution:
@@ -137,13 +135,13 @@ class EngineBase:
         if len(self.methods) == 0:
             raise RuntimeError("No valid coding tool is loaded!")
 
-    def _feed_block(self, method: CodingToolBase, image_block: PaddedBlock, qscale):
+    def _feed_block(self, method: CodingToolBase, image_block: ImageBlock, qscale):
         if method.PLATFORM == "numpy":
-            return method.compress_block(image_block.padded_block_np, qscale)
+            return method.compress_block(image_block.np, qscale)
         else:
-            return method.compress_block(image_block.padded_block_cuda, qscale)
+            return method.compress_block(image_block.cuda, qscale)
 
-    def _compress_with_target(self, method, image_block: PaddedBlock, target_bytes):
+    def _compress_with_target(self, method, image_block: ImageBlock, target_bytes):
         min_qs = float(1e-5)
         max_qs = float(1.0)
         while min_qs < max_qs - 1e-6:
@@ -202,14 +200,14 @@ class EngineBase:
     def _try_compress_decompress(
         self,
         method: CodingToolBase,
-        image_block: PaddedBlock,
+        image_block: ImageBlock,
         target_bytes=None,
         q_scale=None,
         repeat=1,
     ):
         times = []
         sqes = []
-        _, c, h, w = image_block.padded_block_cuda.shape
+        _, c, h, w = image_block.cuda.shape
         for i in range(repeat):
             if q_scale is None:
                 bitstream, q_scale = self._compress_with_target(
@@ -218,26 +216,20 @@ class EngineBase:
             else:
                 bitstream = self._feed_block(method, image_block, q_scale)
             time0 = time.time()
-            recon_img = method.decompress_block(bitstream, h, w, q_scale)
+            recon_img = method.decompress_block(bitstream, h, w)
 
             torch.cuda.synchronize()
             times.append(time.time() - time0)
 
             if method.PLATFORM == "torch":
-                ref = self.torch_pseudo_quantize_to_uint8(image_block.padded_block_cuda)
+                ref = self.torch_pseudo_quantize_to_uint8(image_block.cuda)
                 recon_img = self.torch_pseudo_quantize_to_uint8(recon_img)
-
-                ref = ref[:, : image_block.h, : image_block.w, :]
-                recon_img = recon_img[:, : image_block.h, : image_block.w, :]
 
                 sqe = torch.sum((ref - recon_img) ** 2).detach().cpu().numpy()
                 sqes.append(sqe)
             else:
-                ref = image_block.padded_block_np.astype(np.float32)
+                ref = image_block.np.astype(np.float32)
                 recon_img = recon_img.astype(np.float32)
-
-                ref = ref[: image_block.h, : image_block.w, :]
-                recon_img = recon_img[: image_block.h, : image_block.w, :]
 
                 sqe = np.sum((ref - recon_img) ** 2) / (255.0**2)
                 sqes.append(sqe)
@@ -422,41 +414,21 @@ class EngineBase:
         img_hash = hash_numpy_array(rgb_np)
         return rgb_np, img_hash
 
-    def pad_img(self, x):
-        pic_height = x.shape[0]
-        pic_width = x.shape[1]
-        padding_l, padding_r, padding_t, padding_b = get_padding_size(
-            pic_height, pic_width, self.ctu_size
-        )
-        x_padded = np.pad(
-            x,
-            ((padding_t, padding_b), (padding_l, padding_r), (0, 0)),
-            mode="constant",
-            constant_values=0,
-        )
-        return pic_height, pic_width, x_padded
-
-    def divide_blocks(self, fileio: FileIO, h, w, padded_img) -> List[PaddedBlock]:
+    def divide_blocks(self, fileio: FileIO, h, w, img) -> List[ImageBlock]:
         blocks = []
         for i in range(fileio.n_ctu):
             upper, left, lower, right = fileio.block_indexes[i]
-            lower_real = min(lower, h)
-            right_real = min(right, w)
-            print(f"Block #{i}: ({upper}, {left}) ~ ({lower_real}, {right_real})")
+            print(f"Block #{i}: ({upper}, {left}) ~ ({lower}, {right})")
 
             # Move to CUDA
-            img_patch_np = padded_img[upper:lower, left:right, :]
+            img_patch_np = img[upper:lower, left:right, :]
             img_patch_cuda = (
                 torch.from_numpy(img_patch_np).permute(2, 0, 1).type(self.dtype) / 255.0
             )
             img_patch_cuda = img_patch_cuda.unsqueeze(0)
             img_patch_cuda = img_patch_cuda.cuda()
 
-            blocks.append(
-                PaddedBlock(
-                    img_patch_np, img_patch_cuda, lower_real - upper, right_real - left
-                )
-            )
+            blocks.append(ImageBlock(img_patch_np, img_patch_cuda))
 
         return blocks
 
@@ -470,7 +442,7 @@ class EngineBase:
         **kwargs,
     ):
         input_img, img_hash = self.read_img(input_pth)
-        h, w, padded_img = self.pad_img(input_img)
+        h, w, c = input_img.shape
         img_size = (h, w)
 
         file_io = FileIO(h, w, self.ctu_size, self.mosaic)
@@ -489,7 +461,7 @@ class EngineBase:
             f"Header bytes={header_bytes}; Safety_bytes={safety_bytes}; CTU bytes={b_t}"
         )
 
-        img_blocks = self.divide_blocks(file_io, h, w, padded_img)
+        img_blocks = self.divide_blocks(file_io, h, w, input_img)
 
         print("Precompute all scorees", flush=True)
         self._precompute_score(img_blocks, img_size, img_hash)
@@ -514,11 +486,9 @@ class EngineBase:
         recon_img = np.zeros((h, w, 3), dtype=np.uint8)
         for i, ctu in enumerate(decoded_ctus):
             upper, left, lower, right = file_io.block_indexes[i]
-            lower_real = min(lower, h)
-            right_real = min(right, w)
 
-            recon_img[upper:lower_real, left:right_real, :] = ctu[
-                : lower_real - upper, : right_real - left, :
+            recon_img[upper:lower, left:right, :] = ctu[
+                : lower - upper, : right - left, :
             ]
         return recon_img
 
@@ -532,15 +502,14 @@ class EngineBase:
             with timer.Timer("Decode_CTU"):
                 for i, (upper, left, lower, right) in enumerate(file_io.block_indexes):
                     method_id = file_io.method_id[i]
-                    q_scale = file_io.q_scale[i]
                     bitstream = file_io.bitstreams[i]
                     method, method_name, _ = self.methods[method_id]
                     print(
-                        f"Decoding CTU #{i}: ({upper}, {left}) ~ ({lower}, {right})  method #{method_id}('{method_name}'); q_scale={q_scale:.6f}; len_bitstream={len(bitstream)}B"
+                        f"Decoding CTU #{i}: ({upper}, {left}) ~ ({lower}, {right})  method #{method_id}('{method_name}'); len_bitstream={len(bitstream)}B"
                     )
                     torch.cuda.synchronize()
                     ctu = method.decompress_block(
-                        bitstream, lower - upper, right - left, q_scale
+                        bitstream, lower - upper, right - left
                     )
                     if isinstance(ctu, torch.Tensor):
                         ctu = self.torch_float_to_np_uint8(ctu)
@@ -749,7 +718,7 @@ class SAEngine1(EngineBase):
 
     def _solve(
         self,
-        img_blocks: List[PaddedBlock],
+        img_blocks: List[ImageBlock],
         img_size,
         b_t,
         file_io,
