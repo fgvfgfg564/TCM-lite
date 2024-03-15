@@ -32,6 +32,11 @@ def get_state_dict(model_path, device):
 @register_tool("TCM")
 class ModelEngine(LICToolBase):
     MODELS = {f"TCM_VBR2_{i}": f"vcip_vbr2_{i}_best.pth.tar" for i in [2]}
+    MODELS.update(
+        {
+            "TCM_VBR2_ALL": "vbr2_all_best.pth.tar"
+        }
+    )
     MIN_CTU_SIZE = 256
 
     def __init__(self, model_name, dtype, ctu_size) -> None:
