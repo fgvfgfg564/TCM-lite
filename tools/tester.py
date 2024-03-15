@@ -55,15 +55,11 @@ def test_single_image(
     engine: EngineBase,
     input_filename,
     output_dir,
-    target_bpp,
-    w_time,
     save_image,
     **kwargs,
 ):
     output_dir = os.path.join(
         output_dir,
-        "target_bpp=" + str(target_bpp),
-        "w_time=" + str(w_time),
         *([str(k) + "=" + str(v) for k, v in kwargs.items()]),
     )
     if save_image:
@@ -81,8 +77,6 @@ def test_single_image(
     genetic_statistic = engine.encode(
         input_filename,
         obin,
-        target_bpp,
-        w_time=w_time,
         **kwargs,
     )
     torch.cuda.synchronize()
@@ -136,8 +130,6 @@ def test_glob(
     engine,
     input_pattern,
     output_dir,
-    target_bpp,
-    w_time,
     save_image,
     **kwargs,
 ):
@@ -155,8 +147,6 @@ def test_glob(
             engine,
             filename,
             output_dir,
-            target_bpp=target_bpp,
-            w_time=w_time,
             save_image=save_image,
             **kwargs,
         )
@@ -200,29 +190,23 @@ def test_multiple_configs(
     engine,
     input_pattern,
     output_dir,
-    target_bpp,
-    w_time,
     save_image,
     **kwargs,
 ):
     output_dir = os.path.join(output_dir, "results")
 
     def _test_glob(
-        target_bpp,
-        w_time,
         **kwargs,
     ):
         return test_glob(
             engine,
             input_pattern,
             output_dir,
-            target_bpp=target_bpp,
-            w_time=w_time,
             save_image=save_image,
             **kwargs,
         )
 
-    configs = [("target_bpp", target_bpp), ("w_time", w_time)] + [
+    configs = [
         (k, v) for k, v in kwargs.items()
     ]
     results = _config_mapper(configs, _test_glob)
@@ -252,11 +236,11 @@ if __name__ == "__main__":
 
         results = test_multiple_configs(
             engine,
-            args.input,
-            args.output_dir,
-            args.target_bpp,
-            args.w_time,
-            args.save_image,
+            input_pattern=args.input,
+            output_dir=args.output_dir,
+            target_bpp=args.target_bpp,
+            w_time=args.w_time,
+            save_image=args.save_image,
             N=args.N,
             num_gen=args.num_gen,
             no_allocation=args.no_allocation,
