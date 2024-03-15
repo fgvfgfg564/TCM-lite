@@ -1,4 +1,5 @@
 import os
+import random
 import numpy as np
 import time
 from PIL import Image
@@ -645,17 +646,58 @@ class SAEngine1(EngineBase):
         )
 
         return ans, score, psnr, time
+    
+    W1 = 1000
+    W2 = 250
+    Wa = [5, 15, 45, 100]
 
-    def _try_move(self, method_ids: np.ndarray, n_method):
+    def _try_move(self, file_io: FileIO, last_ans: np.ndarray, n_method, adaptive_search):
         # Generate a group of new method_ids that move from current state
+        n_ctu = len(last_ans)
 
-        # Pure random
-        n_ctu = len(method_ids)
-        selected = np.random.random_integers(0, n_ctu - 1)
-        new_method = np.random.random_integers(0, n_method - 1)
-        new_method_ids = method_ids.copy()
-        new_method_ids[selected] = new_method
-        return new_method_ids
+        if adaptive_search:
+            # Initialize change matrix
+            P = np.ones([n_ctu, n_method], dtype=np.float32)
+            if self.last_valid_step is not None:
+                (last_changed_block, last_old_method, last_new_method) = self.last_valid_step
+                # 1. If adjacent block of last move is in the same color, it's likely to be an improvement.
+                for blk_id in file_io.adjacencyTable[last_changed_block]:
+                    if last_ans[blk_id] == last_old_method:
+                        P[blk_id, last_new_method] = self.W1
+                # 2. Non-adjacent likely to be an improvement.
+                for blk_id in range(n_ctu):
+                    if last_ans[blk_id] == last_old_method:
+                        P[blk_id, last_new_method] = np.maximum(P[blk_id, last_new_method], self.W2)
+            
+            # 3. Blocks are likely to change into the method of its adjacent ones.
+            for blk_id in range(n_ctu):
+                count_adjacent = np.zeros([n_method, ], dtype=np.int32)
+                for adj_blk_id in file_io.adjacencyTable[blk_id]:
+                    count_adjacent[last_ans[adj_blk_id]] += 1
+                count_adjacent = np.minimum(count_adjacent, 4)
+                for i in range(n_method):
+                    if count_adjacent[i] >= 1:
+                        P[blk_id, i] = np.maximum(P[blk_id, i], self.Wa[count_adjacent[i] - 1])
+            
+            # Normalize and select
+            P /= P.sum()
+            select_list = []
+            P_list = []
+            for blk_id in range(n_ctu):
+                for method_id in range(n_method):
+                    select_list.append((blk_id, method_id))
+                    p = P[blk_id, method_id]
+                    if last_ans[blk_id] == method_id:
+                        p = 0
+                    P_list.append(p)
+            
+            selected = random.choices(select_list, weights=P_list, k=1)[0]
+            return selected
+        else:
+            # Pure random
+            selected = np.random.random_integers(0, n_ctu - 1)
+            new_method = np.random.random_integers(0, n_method - 1)
+        return selected, new_method
 
     def _show_solution(self, method_ids, target_byteses, b_t, score, psnr, time):
         n_ctu = len(method_ids)
@@ -726,6 +768,7 @@ class SAEngine1(EngineBase):
         T_start=1e-3,
         T_end=1e-6,
         adaptive_init=True,
+        adaptive_search=True,
     ):
         n_ctu = len(img_blocks)
         n_method = len(self.methods)
@@ -743,6 +786,10 @@ class SAEngine1(EngineBase):
                     n_ctu,
                 ],
             )
+
+        if adaptive_search:
+            self.last_valid_step = None
+
         target_byteses, score, psnr, time = self._find_optimal_target_bytes(
             file_io, n_ctu, ans, b_t, num_steps=100
         )
@@ -751,7 +798,9 @@ class SAEngine1(EngineBase):
 
         # Simulated Annealing
         for step in range(num_steps):
-            next_state = self._try_move(ans, n_method)
+            changed_block, new_method = self._try_move(file_io, ans, n_method, adaptive_search)
+            next_state = ans.copy()
+            next_state[changed_block] = new_method
 
             # if use_attempt:
             #     # Attempt to only change the methods. If no improvement, then reject it with probability
@@ -777,10 +826,12 @@ class SAEngine1(EngineBase):
 
             if next_score > score:
                 accept = True
+                self.last_valid_step = (changed_block, ans[changed_block], new_method)
             else:
                 delta = score - next_score
                 p = safe_SA_prob(delta, T)
                 accept = np.random.rand() < p
+                self.last_valid_step = None
 
             if accept:
                 ans = next_state
