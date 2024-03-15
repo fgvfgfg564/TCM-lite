@@ -19,6 +19,7 @@ import coding_tools.utils.timer as timer
 from .utils import *
 from .fileio import FileIO
 from .math import *
+from .baseline import CodecBase
 from coding_tools import TOOL_GROUPS
 
 SAFETY_BYTE_PER_CTU = 2
@@ -59,7 +60,7 @@ class GASolution(Solution):
         )
 
 
-class EngineBase:
+class EngineBase(CodecBase):
     CACHE_DIR = os.path.join(os.path.split(__file__)[0], "../cache")
 
     def __init__(
@@ -494,10 +495,16 @@ class EngineBase:
         return recon_img
 
     @torch.inference_mode()
-    def decode(self, file_io: FileIO):
+    def decode(self, input_pth):
         """
         Decode into NumPy array with range 0-1
         """
+        fd = open(input_pth, "rb")
+        bitstream = fd.read()
+        fd.close()
+
+        # Decoding process; generate recon image
+        file_io: FileIO = FileIO.load(bitstream, self.mosaic, self.ctu_size)
         with torch.no_grad():
             decoded_ctus = []
             with timer.Timer("Decode_CTU"):
@@ -570,6 +577,12 @@ class SAEngine1(EngineBase):
 
         init_value = normalize_to_target(init_value, min_bytes, max_bytes, b_t)
 
+        if init_value.sum() > b_t:
+            score = -float("inf")
+            psnr = score
+            time = -score
+            return init_value, score, psnr, time
+
         def objective_func(target_bytes):
             result = -self._get_score(
                 n_ctu, file_io.num_pixels, method_ids, target_bytes, b_t
@@ -604,7 +617,6 @@ class SAEngine1(EngineBase):
             return np.asarray(gradients) * learning_rate
 
         def ineq_constraint(target_bytes):
-            # print(target_bytes)
             return b_t - target_bytes.sum()
 
         constraint = {"type": "ineq", "fun": ineq_constraint}
@@ -617,27 +629,10 @@ class SAEngine1(EngineBase):
             bounds=bounds,
             constraints=[constraint],
             options={
-                "ftol": 1e-8,
+                "ftol": 1e-12,
                 "maxiter": num_steps,
             },
         )
-
-        # for step in range(num_steps):
-        #     # if step == 0:
-        #     #     score, psnr, time = self._get_score(
-        #     #         n_ctu, num_pixels, method_ids, ans, b_t
-        #     #     )
-        #     #     print("start", ans, "score =", score)
-
-        #     # Gradient descent
-        #     ans = ans - gradients * learning_rate
-        #     # Normalize
-        #     ans = normalize_to_target(ans, min_bytes, max_bytes, b_t)
-        #     # if step == 0:
-        #     #     score, psnr, time = self._get_score(
-        #     #         n_ctu, num_pixels, method_ids, ans, b_t
-        #     #     )
-        #     #     print("end", ans, gradients, learning_rate, "score =", score)
 
         ans = result.x
 
@@ -646,12 +641,14 @@ class SAEngine1(EngineBase):
         )
 
         return ans, score, psnr, time
-    
+
     W1 = 1000
     W2 = 250
     Wa = [5, 15, 45, 100]
 
-    def _try_move(self, file_io: FileIO, last_ans: np.ndarray, n_method, adaptive_search):
+    def _try_move(
+        self, file_io: FileIO, last_ans: np.ndarray, n_method, adaptive_search
+    ):
         # Generate a group of new method_ids that move from current state
         n_ctu = len(last_ans)
 
@@ -659,7 +656,9 @@ class SAEngine1(EngineBase):
             # Initialize change matrix
             P = np.ones([n_ctu, n_method], dtype=np.float32)
             if self.last_valid_step is not None:
-                (last_changed_block, last_old_method, last_new_method) = self.last_valid_step
+                (last_changed_block, last_old_method, last_new_method) = (
+                    self.last_valid_step
+                )
                 # 1. If adjacent block of last move is in the same color, it's likely to be an improvement.
                 for blk_id in file_io.adjacencyTable[last_changed_block]:
                     if last_ans[blk_id] == last_old_method:
@@ -667,18 +666,27 @@ class SAEngine1(EngineBase):
                 # 2. Non-adjacent likely to be an improvement.
                 for blk_id in range(n_ctu):
                     if last_ans[blk_id] == last_old_method:
-                        P[blk_id, last_new_method] = np.maximum(P[blk_id, last_new_method], self.W2)
-            
+                        P[blk_id, last_new_method] = np.maximum(
+                            P[blk_id, last_new_method], self.W2
+                        )
+
             # 3. Blocks are likely to change into the method of its adjacent ones.
             for blk_id in range(n_ctu):
-                count_adjacent = np.zeros([n_method, ], dtype=np.int32)
+                count_adjacent = np.zeros(
+                    [
+                        n_method,
+                    ],
+                    dtype=np.int32,
+                )
                 for adj_blk_id in file_io.adjacencyTable[blk_id]:
                     count_adjacent[last_ans[adj_blk_id]] += 1
                 count_adjacent = np.minimum(count_adjacent, 4)
                 for i in range(n_method):
                     if count_adjacent[i] >= 1:
-                        P[blk_id, i] = np.maximum(P[blk_id, i], self.Wa[count_adjacent[i] - 1])
-            
+                        P[blk_id, i] = np.maximum(
+                            P[blk_id, i], self.Wa[count_adjacent[i] - 1]
+                        )
+
             # Normalize and select
             P /= P.sum()
             select_list = []
@@ -690,7 +698,7 @@ class SAEngine1(EngineBase):
                     if last_ans[blk_id] == method_id:
                         p = 0
                     P_list.append(p)
-            
+
             selected = random.choices(select_list, weights=P_list, k=1)[0]
             return selected
         else:
@@ -776,75 +784,86 @@ class SAEngine1(EngineBase):
         num_pixels = h * w
         alpha = np.power(T_end / T_start, 1.0 / num_steps)
 
-        if adaptive_init:
-            ans = self._adaptive_init(file_io, n_ctu, n_method, b_t)
+        if n_method == 1:
+            ans = np.zeros([n_ctu], dtype=np.int32)
         else:
-            ans = np.random.random_integers(
-                0,
-                n_method - 1,
-                [
-                    n_ctu,
-                ],
-            )
-
-        if adaptive_search:
-            self.last_valid_step = None
-
-        target_byteses, score, psnr, time = self._find_optimal_target_bytes(
-            file_io, n_ctu, ans, b_t, num_steps=100
-        )
-
-        T = T_start
-
-        # Simulated Annealing
-        for step in range(num_steps):
-            changed_block, new_method = self._try_move(file_io, ans, n_method, adaptive_search)
-            next_state = ans.copy()
-            next_state[changed_block] = new_method
-
-            # if use_attempt:
-            #     # Attempt to only change the methods. If no improvement, then reject it with probability
-            #     attempt_score, _, _ = self._get_score(
-            #         n_ctu, num_pixels, method_ids, ans, b_t
-            #     )
-            #     # TODO
-
-            (
-                next_target_byteses,
-                next_score,
-                next_psnr,
-                next_time,
-            ) = self._find_optimal_target_bytes(
-                file_io,
-                n_ctu,
-                next_state,
-                b_t,
-                learning_rate=1e5,
-                # init_value=target_byteses,
-                num_steps=10,
-            )
-
-            if next_score > score:
-                accept = True
-                self.last_valid_step = (changed_block, ans[changed_block], new_method)
+            if adaptive_init:
+                ans = self._adaptive_init(file_io, n_ctu, n_method, b_t)
             else:
-                delta = score - next_score
-                p = safe_SA_prob(delta, T)
-                accept = np.random.rand() < p
+                ans = np.random.random_integers(
+                    0,
+                    n_method - 1,
+                    [
+                        n_ctu,
+                    ],
+                )
+
+            if adaptive_search:
                 self.last_valid_step = None
 
-            if accept:
-                ans = next_state
-                target_byteses = next_target_byteses
-                score = next_score
-                psnr = next_psnr
-                time = next_time
+            target_byteses, score, psnr, time = self._find_optimal_target_bytes(
+                file_io, n_ctu, ans, b_t, num_steps=100
+            )
 
-            if step % (num_steps // 20) == 0:
-                print(f"Results for step: {step}; w_time={self.w_time:.6f}; T={T:.6f}")
-                self._show_solution(ans, target_byteses, b_t, score, psnr, time)
+            T = T_start
 
-            T *= alpha
+            # Simulated Annealing
+            for step in range(num_steps):
+                changed_block, new_method = self._try_move(
+                    file_io, ans, n_method, adaptive_search
+                )
+                next_state = ans.copy()
+                next_state[changed_block] = new_method
+
+                # if use_attempt:
+                #     # Attempt to only change the methods. If no improvement, then reject it with probability
+                #     attempt_score, _, _ = self._get_score(
+                #         n_ctu, num_pixels, method_ids, ans, b_t
+                #     )
+                #     # TODO
+
+                (
+                    next_target_byteses,
+                    next_score,
+                    next_psnr,
+                    next_time,
+                ) = self._find_optimal_target_bytes(
+                    file_io,
+                    n_ctu,
+                    next_state,
+                    b_t,
+                    learning_rate=1e5,
+                    # init_value=target_byteses,
+                    num_steps=10,
+                )
+
+                if next_score > score:
+                    accept = True
+                    self.last_valid_step = (
+                        changed_block,
+                        ans[changed_block],
+                        new_method,
+                    )
+                else:
+                    delta = score - next_score
+                    p = safe_SA_prob(delta, T)
+                    accept = np.random.rand() < p
+                    self.last_valid_step = None
+
+                if accept:
+                    ans = next_state
+                    target_byteses = next_target_byteses
+                    score = next_score
+                    psnr = next_psnr
+                    time = next_time
+
+                if step % (num_steps // 20) == 0:
+                    print(
+                        f"Results for step: {step}; w_time={self.w_time:.6f}; T={T:.6f}"
+                    )
+                    self._show_solution(ans, target_byteses, b_t, score, psnr, time)
+
+                T *= alpha
 
         target_byteses, score, psnr, time = self._find_optimal_target_bytes(
             file_io, n_ctu, ans, b_t, num_steps=10000
