@@ -1,3 +1,4 @@
+import enum
 import argparse
 from pyinstrument import Profiler
 import torch
@@ -5,7 +6,19 @@ import json
 
 from coding_tools.register import TOOL_GROUPS
 from bin.engine import *
+from coding_tools.baseline import BPG, WebP, JPEG
 from tester_utils import test_multiple_configs
+
+
+class AlgorithmType(enum.Enum):
+    GA = enum.auto()
+    SAv1 = enum.auto()
+    BPG = enum.auto()
+    WebP = enum.auto()
+    JPEG = enum.auto()
+
+
+ALGORITHMS = AlgorithmType.__members__.keys()
 
 
 def parse_args():
@@ -19,7 +32,11 @@ def parse_args():
     parser.add_argument("--save_image", action="store_true")
 
     parser.add_argument(
-        "-a", "--algorithm", type=str, choices=["GA", "SAv1"], required=True
+        "-a",
+        "--algorithm",
+        type=str,
+        choices=ALGORITHMS,
+        required=True,
     )
 
     # Profiler args
@@ -41,6 +58,12 @@ def parse_args():
 
     # Encoder config args (SA)
 
+    # Encoder config args (BPG)
+    parser.add_argument("--qp", nargs="+", type=int, default=None)
+    parser.add_argument("--level", nargs="+", type=int, default=None)
+    # Encoder config args (WebP, JPEG)
+    parser.add_argument("--quality", nargs="+", type=float, default=None)
+
     args = parser.parse_args()
     return args
 
@@ -57,7 +80,9 @@ if __name__ == "__main__":
         profiler = Profiler()
         profiler.start()
 
-    if args.algorithm == "GA":
+    algorithm: AlgorithmType = getattr(AlgorithmType, args.algorithm)
+
+    if algorithm == AlgorithmType.GA:
         engine = GAEngine1(
             ctu_size=args.ctu_size,
             mosaic=args.mosaic,
@@ -80,7 +105,7 @@ if __name__ == "__main__":
             method_sigma=args.method_sigma,
             bytes_sigma=args.bytes_sigma,
         )
-    elif args.algorithm == "SAv1":
+    elif algorithm == AlgorithmType.SAv1:
         engine = SAEngine1(
             ctu_size=args.ctu_size,
             mosaic=args.mosaic,
@@ -96,6 +121,28 @@ if __name__ == "__main__":
             args.save_image,
             target_bpp=args.target_bpp,
             w_time=args.w_time,
+        )
+    elif algorithm == AlgorithmType.BPG:
+        engine = BPG()
+        results = test_multiple_configs(
+            engine,
+            args.input,
+            args.output_dir,
+            args.save_image,
+            qp=args.qp,
+            level=args.level,
+        )
+    elif algorithm in [AlgorithmType.JPEG, AlgorithmType.WebP]:
+        if algorithm == AlgorithmType.JPEG:
+            engine = JPEG()
+        else:
+            engine = WebP()
+        results = test_multiple_configs(
+            engine,
+            args.input,
+            args.output_dir,
+            args.save_image,
+            quality=args.quality,
         )
 
     os.makedirs(args.output_dir, exist_ok=True)

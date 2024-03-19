@@ -896,7 +896,7 @@ class SAEngine1(EngineBase):
         solution = Solution(ans, target_byteses)
 
         method_ids, q_scales, bitstreams = self._compress_blocks(img_blocks, solution)
-        return method_ids, q_scales, bitstreams, []
+        return method_ids, q_scales, bitstreams, None
 
 
 class GAEngine1(EngineBase):

@@ -3,6 +3,7 @@ import os
 import json
 import pathlib
 import glob
+from collections.abc import Iterable
 
 import torch
 import time
@@ -34,21 +35,22 @@ def test_single_image(
 
     ## Encode
     time0 = time.time()
-    genetic_statistic = engine.encode(
+    encoder_returns = engine.encode(
         input_filename,
         obin,
         **kwargs,
     )
     torch.cuda.synchronize()
 
-    with open(osta, "w") as f:
-        json.dump(genetic_statistic, f)
+    if encoder_returns is not None:
+        with open(osta, "w") as f:
+            json.dump(encoder_returns, f)
 
     time_enc = time.time() - time0
 
     # Decoding process; generate recon image
     time_dec_meter = AverageMeter()
-    for i in range(10):
+    for i in range(3):
         time_start = time.time()
         out_img = engine.decode(obin, orec)  # Decoded image; shape=[3, H, W]
         torch.cuda.synchronize()
@@ -122,6 +124,13 @@ def _config_mapper(config_list, f):
     config_name, configs = config_list[0]
     config_list = config_list[1:]
     result = {}
+
+    # Make sure config is iterable
+    if not isinstance(configs, Iterable):
+        raise TypeError(
+            f"Config '{config_name}' should be an iterable. Found '{configs}'"
+        )
+
     for config in configs:
 
         def fnew(**kwargs):
