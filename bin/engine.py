@@ -1,3 +1,6 @@
+from typing import List
+from .type import *
+
 import os
 import random
 import numpy as np
@@ -8,18 +11,16 @@ import torch.nn.functional as F
 from dataclasses import dataclass
 import concurrent.futures
 from scipy.optimize import minimize
-from typing import List
 
 import tqdm
 import copy
 
 from coding_tools.coding_tool import CodingToolBase
 import coding_tools.utils.timer as timer
-
 from .utils import *
 from .fileio import FileIO
 from .math import *
-from .baseline import CodecBase
+from coding_tools.baseline import CodecBase
 from coding_tools import TOOL_GROUPS
 
 SAFETY_BYTE_PER_CTU = 2
@@ -246,7 +247,7 @@ class EngineBase(CodecBase):
         n_ctu = len(img_blocks)
         n_methods = len(self.methods)
 
-        self._precomputed_curve = {}
+        self._precomputed_curve: ImgCurves = {}
         self._minimal_bytes = np.zeros([n_methods, n_ctu], dtype=np.int32)
         self._maximal_bytes = np.zeros([n_methods, n_ctu], dtype=np.int32)
 
@@ -495,7 +496,7 @@ class EngineBase(CodecBase):
         return recon_img
 
     @torch.inference_mode()
-    def decode(self, input_pth):
+    def decode(self, input_pth, output_pth):
         """
         Decode into NumPy array with range 0-1
         """
@@ -524,8 +525,8 @@ class EngineBase(CodecBase):
                     decoded_ctus.append(ctu)
             with timer.Timer("Reconstruct&save"):
                 recon_img = self.join_blocks(decoded_ctus, file_io)
-
-            return recon_img
+                out_img = dump_image(recon_img)
+                Image.fromarray(out_img).save(output_pth)
 
 
 class SAEngine1(EngineBase):
@@ -732,7 +733,7 @@ class SAEngine1(EngineBase):
                 flush=True,
             )
 
-    def _adaptive_init(self, file_io: FileIO, n_ctu, n_method, b_t):
+    def _adaptive_init(self, file_io: FileIO, n_ctu: int, n_method: int, b_t: int):
         ans = np.zeros(
             [
                 n_ctu,
@@ -764,6 +765,30 @@ class SAEngine1(EngineBase):
                     if score > best_score[ctu_id]:
                         best_score[ctu_id] = score
                         ans[ctu_id] = method_id
+
+        # Random walk until find an available starting
+        current_min = 0
+        current_max = 0
+        for i in range(n_ctu):
+            current_min += self._minimal_bytes[ans[i]][i]
+            current_max += self._maximal_bytes[ans[i]][i]
+
+        cost = max(current_min - b_t, 0) + max(b_t - current_max, 0)
+        for i in range(n_ctu):
+            for j in range(n_method):
+                delta_min = self._minimal_bytes[j][i] - self._minimal_bytes[ans[i]][i]
+                delta_max = self._maximal_bytes[j][i] - self._maximal_bytes[ans[i]][i]
+                new_min = current_min - delta_min
+                new_max = current_max - delta_max
+                new_cost = max(new_min - b_t, 0) + max(b_t - new_max, 0)
+                print(cost, new_cost)
+
+                if new_cost < cost:
+                    ans[i] = j
+                    current_min = new_min
+                    current_max = new_max
+                    cost = new_cost
+
         return ans
 
     def _solve(
