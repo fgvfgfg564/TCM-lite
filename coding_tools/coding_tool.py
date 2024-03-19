@@ -3,6 +3,7 @@ import argparse
 import struct
 import time
 import tempfile
+from typing_extensions import Self
 
 import torch
 import torch.nn as nn
@@ -18,7 +19,7 @@ import abc
 import struct
 
 
-class CodingToolBase(nn.Module, abc.ABC):
+class CodingToolBase(abc.ABC):
     @abc.abstractproperty
     def MODELS(self):
         pass
@@ -81,7 +82,7 @@ class TraditionalCodingToolBase(CodingToolBase):
     MODELS = None
 
 
-class LICToolBase(CodingToolBase):
+class LICToolBase(CodingToolBase, nn.Module):
     PLATFORM = "torch"
 
     def __init__(self, model_name, dtype, ctu_size) -> None:
@@ -103,7 +104,7 @@ class LICToolBase(CodingToolBase):
     @staticmethod
     def _unpack_qscale(buffer):
         return struct.unpack("f", buffer)[0]
-    
+
     @property
     def _ctu_header_size(self):
         return struct.calcsize("f")
@@ -129,7 +130,7 @@ class LICToolBase(CodingToolBase):
 
     def decompress_block(self, bit_stream, h, w):
         padded_h, padded_w = get_padded_hw(h, w, self.MIN_CTU_SIZE)
-        q_scale = self._unpack_qscale(bit_stream[:self._ctu_header_size])
-        bit_stream = bit_stream[self._ctu_header_size:]
+        q_scale = self._unpack_qscale(bit_stream[: self._ctu_header_size])
+        bit_stream = bit_stream[self._ctu_header_size :]
         padded_block = self.lic_decompress(bit_stream, padded_h, padded_w, q_scale)
         return padded_block[:, :, :h, :w]
