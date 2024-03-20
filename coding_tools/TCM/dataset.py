@@ -7,25 +7,28 @@ import random
 from tqdm import tqdm
 import os
 
+
 class LIU4KPatches(Dataset):
     """
     Patch size = 256
     """
-    GLOB = os.path.expanduser('~/dataset/LIU4K_patch/*/*.png')
+
+    GLOB = os.path.expanduser("~/dataset/LIU4K_patch/*/*.png")
 
     def __init__(self):
         self.image_list = glob.glob(self.GLOB)
         self.len_image_list = len(self.image_list)
         self.patch_size = 256
-    
+
     def __len__(self):
         return self.len_image_list
-    
+
     def __getitem__(self, idx):
         filename = self.image_list[idx]
         img = Image.open(filename)
         img = ToTensor()(img)
         return img
+
 
 class Kodak(Dataset):
     """
@@ -35,7 +38,7 @@ class Kodak(Dataset):
 
     def __init__(self, patch_size=None) -> None:
         super().__init__()
-        dataset_glob = os.path.expanduser('~/dataset/kodak/*.png')
+        dataset_glob = os.path.expanduser("~/dataset/kodak/*.png")
         self.image_list = glob.glob(dataset_glob)
         self.len_image_list = len(self.image_list)
         self.patch_size = patch_size
@@ -51,6 +54,7 @@ class Kodak(Dataset):
             cropper = CenterCrop(self.patch_size)
             img = cropper(img)
         return img
+
 
 class VCIP_Training(Dataset):
     """

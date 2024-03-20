@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import pytorch_msssim
 
 from torch.utils.data import DataLoader
 from torchvision import transforms
@@ -54,6 +55,28 @@ class RateDistortionLoss(nn.Module):
         out["mse_loss"] = torch.mean(out["mse_loss"])
         out["loss"] = dloss + out["bpp_loss"]
         out["psnr_loss"] = -10 * torch.log10(out["mse_loss"])
+
+        return out
+
+
+class RateDistortionLoss_MSSSIM(nn.Module):
+    """Custom rate distortion loss (MS-SSIM) with a Lagrangian parameter."""
+
+    def forward(self, output, target, lmbda):
+        N, _, H, W = target.size()
+        out = {}
+        num_pixels = N * H * W
+
+        out["bpp_loss"] = torch.mean(output["bpp"])
+        out["bpp_y_loss"] = torch.mean(output["bpp_y"])
+        out["bpp_z_loss"] = torch.mean(output["bpp_z"])
+
+        out["msssim_loss"] = 1.0 - pytorch_msssim.ms_ssim(
+            output["x_hat"], target, data_range=1.0, size_average=False
+        )
+        dloss = 255**2 * torch.mean(torch.mul(lmbda, out["msssim_loss"]))
+        out["msssim_loss"] = torch.mean(out["msssim_loss"])
+        out["loss"] = dloss + out["bpp_loss"]
 
         return out
 
@@ -136,9 +159,9 @@ def train_one_epoch(
                 f"Train epoch {epoch}: ["
                 f"{i*len(d)}/{len(train_dataloader.dataset)}"
                 f" ({100. * i / len(train_dataloader):.0f}%)]"
-                f'\tLoss: {out_criterion["loss"].item():.6f} |'
-                f'\tMSE loss: {out_criterion["mse_loss"].item():.6f} |'
-                f'\tBpp loss: {out_criterion["bpp_loss"].item():.4f}'
+                + " | ".join(
+                    [f"\t{k}: {v.item():.6f} |" for k, v in out_criterion.items()]
+                )
             )
 
 
@@ -194,6 +217,13 @@ def parse_args(argv):
         type=float,
         help="lambdas for training",
         required=True,
+    )
+    parser.add_argument(
+        "--criterion",
+        type=str,
+        default="mse",
+        choices=["mse", "ms-ssim"],
+        help="Quality criterion",
     )
     parser.add_argument(
         "-e",
@@ -310,7 +340,9 @@ def main(argv):
         optimizer, milestones, gamma=0.2, last_epoch=-1
     )
 
-    criterion = RateDistortionLoss()
+    criterion = (
+        RateDistortionLoss() if args.criterion == "mse" else RateDistortionLoss_MSSSIM()
+    )
 
     last_epoch = 0
     if args.checkpoint:  # load from previous checkpoint
@@ -352,9 +384,11 @@ def main(argv):
             save_checkpoint(
                 {
                     "epoch": epoch,
-                    "state_dict": net.module.state_dict()
-                    if torch.cuda.device_count() > 1
-                    else net.state_dict(),
+                    "state_dict": (
+                        net.module.state_dict()
+                        if torch.cuda.device_count() > 1
+                        else net.state_dict()
+                    ),
                     "loss": loss,
                     "optimizer": optimizer.state_dict(),
                     "lr_scheduler": lr_scheduler.state_dict(),

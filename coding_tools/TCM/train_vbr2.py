@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import pytorch_msssim
 
 from torch.utils.data import DataLoader
 from torchvision import transforms
@@ -52,6 +53,29 @@ class RateDistortionLoss(nn.Module):
         out["mse_loss"] = torch.mean(out["mse_loss"])
         out["loss"] = dloss + out["bpp_loss"]
         out["psnr_loss"] = -10 * torch.log10(out["mse_loss"])
+
+        return out
+
+
+class RateDistortionLoss_MSSSIM(nn.Module):
+    """Custom rate distortion loss (MS-SSIM) with a Lagrangian parameter."""
+
+    def forward(self, output, target, lmbda):
+        N, _, H, W = target.size()
+        out = {}
+        num_pixels = N * H * W
+
+        out["bpp_loss"] = sum(
+            (torch.log(likelihoods).sum() / (-math.log(2) * num_pixels))
+            for likelihoods in output["likelihoods"].values()
+        )
+
+        out["msssim_loss"] = 1.0 - pytorch_msssim.ms_ssim(
+            output["x_hat"], target, data_range=1.0, size_average=False
+        )
+        dloss = 255**2 * torch.mean(torch.mul(lmbda, out["msssim_loss"]))
+        out["msssim_loss"] = torch.mean(out["msssim_loss"])
+        out["loss"] = dloss + out["bpp_loss"]
 
         return out
 
@@ -103,7 +127,6 @@ def train_one_epoch(
     optimizer,
     epoch,
     clip_max_norm,
-    type="mse",
 ):
     model.train()
     device = next(model.parameters()).device
@@ -134,9 +157,9 @@ def train_one_epoch(
                 f"Train epoch {epoch}: ["
                 f"{i*len(d)}/{len(train_dataloader.dataset)}"
                 f" ({100. * i / len(train_dataloader):.0f}%)]"
-                f'\tLoss: {out_criterion["loss"].item():.6f} |'
-                f'\tMSE loss: {out_criterion["mse_loss"].item():.6f} |'
-                f'\tBpp loss: {out_criterion["bpp_loss"].item():.4f}'
+                + " | ".join(
+                    [f"\t{k}: {v.item():.6f} |" for k, v in out_criterion.items()]
+                )
             )
 
 
@@ -193,6 +216,13 @@ def parse_args(argv):
         required=True,
     )
     parser.add_argument(
+        "--criterion",
+        type=str,
+        default="mse",
+        choices=["mse", "ms-ssim"],
+        help="Quality criterion",
+    )
+    parser.add_argument(
         "-e",
         "--epochs",
         default=1000,
@@ -227,13 +257,13 @@ def parse_args(argv):
         default=1,
         help="Test batch size (default: %(default)s)",
     )
-    # parser.add_argument(
-    #     "--patch_size",
-    #     type=int,
-    #     nargs=2,
-    #     default=(256, 256),
-    #     help="Size of the patches to be cropped (default: %(default)s)",
-    # )
+    parser.add_argument(
+        "--patch_size",
+        type=int,
+        nargs=2,
+        default=(256, 256),
+        help="Size of the patches to be cropped (default: %(default)s)",
+    )
     parser.add_argument(
         "--save", action="store_true", default=True, help="Save model to disk"
     )
@@ -250,9 +280,6 @@ def parse_args(argv):
         help="gradient clipping max norm (default: %(default)s",
     )
     parser.add_argument("--checkpoint", type=str, help="Path to a checkpoint")
-    parser.add_argument(
-        "--type", type=str, default="mse", help="loss type", choices=["mse", "ms-ssim"]
-    )
     parser.add_argument("--save_path", type=str, default="./", help="save_path")
     parser.add_argument("--lr_epoch", nargs="+", type=int, default=[])
     parser.add_argument("--continue_train", action="store_true", default=False)
@@ -264,7 +291,6 @@ def main(argv):
     args = parse_args(argv)
     for arg in vars(args):
         print(arg, ":", getattr(args, arg))
-    type = args.type
     save_path = os.path.join(args.save_path)
     tb_path = os.path.join(save_path, "tensorboard/")
     cmd_path = os.path.join(save_path, "cmd.log")
@@ -314,7 +340,9 @@ def main(argv):
         optimizer, milestones, gamma=0.2, last_epoch=-1
     )
 
-    criterion = RateDistortionLoss()
+    criterion = (
+        RateDistortionLoss() if args.criterion == "mse" else RateDistortionLoss_MSSSIM()
+    )
 
     last_epoch = 0
     if args.checkpoint:  # load from previous checkpoint
@@ -342,7 +370,6 @@ def main(argv):
             optimizer,
             epoch,
             args.clip_max_norm,
-            type,
         )
         loss = test_epoch(epoch, test_dataloader, lmbdas, net, criterion, writer)
         writer.add_scalar("test_loss", loss, epoch)
@@ -355,9 +382,11 @@ def main(argv):
             save_checkpoint(
                 {
                     "epoch": epoch,
-                    "state_dict": net.module.state_dict()
-                    if torch.cuda.device_count() > 1
-                    else net.state_dict(),
+                    "state_dict": (
+                        net.module.state_dict()
+                        if torch.cuda.device_count() > 1
+                        else net.state_dict()
+                    ),
                     "loss": loss,
                     "optimizer": optimizer.state_dict(),
                     "lr_scheduler": lr_scheduler.state_dict(),
