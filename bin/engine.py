@@ -374,7 +374,7 @@ class EngineBase(CodecBase):
 
         return solution.method_ids, q_scales, bitstreams
 
-    def _get_score(self, n_ctu, num_pixels, method_ids, target_byteses, b_t):
+    def _get_score(self, n_ctu, file_io: FileIO, method_ids, target_byteses, b_t):
         # Returns score given method ids and target bytes
         # if np.sum(target_byteses) > b_t:
         #     return -np.inf, -np.inf, np.inf
@@ -394,7 +394,7 @@ class EngineBase(CodecBase):
             global_time += t
             sqe += ctu_sqe
 
-        sqe /= num_pixels * 3
+        sqe /= file_io.num_pixels * 3
         psnr = -10 * np.log10(sqe)
         return psnr - self.w_time * global_time, psnr, global_time
 
@@ -585,9 +585,7 @@ class SAEngine1(EngineBase):
             return init_value, score, psnr, time
 
         def objective_func(target_bytes):
-            result = -self._get_score(
-                n_ctu, file_io.num_pixels, method_ids, target_bytes, b_t
-            )[0]
+            result = -self._get_score(n_ctu, file_io, method_ids, target_bytes, b_t)[0]
             return result * learning_rate
 
         def grad(target_bytes):
@@ -637,9 +635,7 @@ class SAEngine1(EngineBase):
 
         ans = result.x
 
-        score, psnr, time = self._get_score(
-            n_ctu, file_io.num_pixels, method_ids, ans, b_t
-        )
+        score, psnr, time = self._get_score(n_ctu, file_io, method_ids, ans, b_t)
 
         return ans, score, psnr, time
 
@@ -1034,7 +1030,7 @@ class GAEngine1(EngineBase):
             )
             method.score, method.psnr, method.time = self._get_score(
                 n_ctu,
-                num_pixels,
+                file_io,
                 method.method_ids,
                 method.target_byteses,
                 b_t,
@@ -1104,7 +1100,7 @@ class GAEngine1(EngineBase):
                 )
                 newborn.score, newborn.psnr, newborn.time = self._get_score(
                     n_ctu,
-                    num_pixels,
+                    file_io,
                     newborn.method_ids,
                     newborn.target_byteses,
                     b_t,

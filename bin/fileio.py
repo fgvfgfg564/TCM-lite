@@ -34,8 +34,6 @@ class FileIO:
         self.num_pixels = h * w
         self.ctu_size = ctu_size
         self.mosaic = mosaic
-        self.block_indexes = []
-        self.block_num_pixels = []
         self._build_block_partition()
 
         self.format_str = [self.meta_str]
@@ -109,16 +107,18 @@ class FileIO:
             n_ctu_h, n_ctu_w = self._n_ctu_hw(self.h, self.w, self.ctu_size * 3)
             n_ctu = n_ctu_h * n_ctu_w * 5
 
+        self.block_indexes = []
+        block_num_pixels = []
         for i in range(n_ctu):
             upper, left, lower, right = self._block_bb(self.h, self.w, i)
             lower = min(lower, self.h)
             right = min(right, self.w)
             if upper < lower and left < right:
                 self.block_indexes.append((upper, left, lower, right))
-                self.block_num_pixels.append((lower - upper) * (right - left))
+                block_num_pixels.append((lower - upper) * (right - left))
 
         self.n_ctu = len(self.block_indexes)
-        self.block_num_pixels = np.array(self.block_num_pixels)
+        self.block_num_pixels = np.array(block_num_pixels)
 
     @property
     def header_size(self):
