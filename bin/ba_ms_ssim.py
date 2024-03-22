@@ -48,7 +48,7 @@ def ba_gaussian_filter(input: Tensor, win: Tensor, boundary: BoundaryInfo) -> Te
     C = input.shape[1]
 
     # Pad image
-    pd_size = win.shape[3] // 4
+    pd_size = win.shape[3] - 1
     out = F.pad(input=input, pad=boundary.get_padding(pd_size), mode="reflect")
 
     for i, s in enumerate(input.shape[2:]):
@@ -112,12 +112,13 @@ def _ba_ssim(
     valid_pixels = (
         torch.ones(X.shape[2:]).unsqueeze(0).unsqueeze(0).to(X.device, dtype=X.dtype)
     )
-    pd_size = win_size // 4
+    pd_size = win_size - 1
     valid_pixels = F.pad(
         valid_pixels, pad=boundary.get_padding(pd_size), mode="constant", value=0
     )
     weight_kernel = torch.ones_like(win)
     weight_map = ba_gaussian_filter(valid_pixels, weight_kernel, BoundaryInfo())
+    weight_map = (weight_map / (win_size**2)) ** 4
     weight_map = weight_map / weight_map.sum()
 
     ssim_per_channel = torch.sum(ssim_map * weight_map, axis=[2, 3])

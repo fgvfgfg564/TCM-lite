@@ -179,7 +179,7 @@ def plot(images, func, title):
     print(f"{title}: R^2 = {r2:.8f}")
 
     mse = np.mean((gt - patched) ** 2)
-    print(f"{title}: MSE = {r2:.8f}")
+    print(f"{title}: MSE = {mse:.8f}")
 
 
 if __name__ == "__main__":
