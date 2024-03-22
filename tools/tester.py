@@ -5,7 +5,7 @@ import torch
 import json
 
 from coding_tools.register import TOOL_GROUPS
-from bin.engine import *
+from src.engine import *
 from coding_tools.baseline import BPG, WebP, JPEG
 from tester_utils import test_multiple_configs
 

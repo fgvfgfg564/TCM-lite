@@ -1,5 +1,5 @@
 from typing import List
-from .type import *
+from ..type import *
 
 import os
 import random
@@ -17,9 +17,9 @@ import copy
 
 from coding_tools.coding_tool import CodingToolBase
 import coding_tools.utils.timer as timer
-from .utils import *
-from .fileio import FileIO
-from .math import *
+from ..utils import *
+from ..fileio import FileIO
+from ..math import *
 from coding_tools.baseline import CodecBase
 from coding_tools import TOOL_GROUPS
 

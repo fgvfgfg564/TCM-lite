@@ -1,7 +1,7 @@
 import torch
 import argparse
 
-from bin.engine import GAEngine1
+from src.engine import GAEngine1
 
 
 def parse_args():

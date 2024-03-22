@@ -11,8 +11,8 @@ import time
 import matplotlib.pyplot as plt
 import numpy as np
 
-from bin.engine import GAEngine1
-from bin.utils import *
+from src.engine import GAEngine1
+from src.utils import *
 import einops
 
 

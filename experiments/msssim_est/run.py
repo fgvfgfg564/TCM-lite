@@ -9,7 +9,7 @@ from io import BytesIO
 import os
 import matplotlib.pyplot as plt
 import math
-from bin.ba_ms_ssim import ba_ms_ssim, BoundaryInfo
+from src.ba_ms_ssim import ba_ms_ssim, BoundaryInfo
 import glob
 
 ROOTDIR = os.path.dirname(__file__)

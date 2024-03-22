@@ -1,4 +1,4 @@
-from bin.fileio import FileIO
+from src.fileio import FileIO
 
 fio = FileIO(1080, 1920, 512, True)
 

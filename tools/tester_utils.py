@@ -8,8 +8,8 @@ from collections.abc import Iterable
 import torch
 import time
 
-from bin.engine import *
-from bin.utils import *
+from src.engine import *
+from src.utils import *
 
 
 def test_single_image(

@@ -9,8 +9,8 @@ import torch
 import time
 import cv2
 
-from bin.engine import *
-from bin.utils import *
+from src.engine import *
+from src.utils import *
 
 import matplotlib.pyplot as plt
 from matplotlib import colors
