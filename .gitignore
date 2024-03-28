@@ -153,4 +153,4 @@ output/
 *.pdf
 *.jpg
 cache/
-minimize_checkpoint.json5
+*.json5
