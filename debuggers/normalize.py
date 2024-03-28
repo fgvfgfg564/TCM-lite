@@ -1,4 +1,4 @@
-from src.math import normalize_to_target
+from src.math_utils import normalize_to_target
 import numpy as np
 # [2033.33333333 2033.33333333 2033.33333333 2033.33333333 2033.33333333
 #  2033.33333333] [1359 1191 1083 1135 1355 1239] [3263 3095 3071 3215 4051 4183] 12200.0

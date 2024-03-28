@@ -1,21 +1,45 @@
 import numpy as np
 from scipy.interpolate import PchipInterpolator
+from typing_extensions import Callable
 
 
 def is_sorted(arr):
     return np.array_equal(arr, np.sort(arr))
 
+# class LinearRegression:
+#     def __init__(self, X, Y):
+#         self.X = np.asarray(X)
+#         self.Y = np.asarray(Y)
+#         self.check_input()
 
-class WarppedPchipInterpolator:
-    def __init__(self, X, Y):
-        self.X = X
-        self.Y = Y
-        self.curve = PchipInterpolator(
+#     def check_input(self):
+#         if len(self.X) != len(self.Y):
+#             raise ValueError("X and Y must have the same length.")
+
+#     def fit(self):
+#         # Compute linear regression parameters (slope and intercept)
+#         self.slope, self.intercept = np.polyfit(self.X, self.Y, 1)
+
+#     def interpolate(self, x):
+#         # Linear interpolation function
+#         return self.slope * x + self.intercept
+
+#     def derivative(self, x):
+#         # Derivative of the linear regression function (constant slope)
+#         return self.slope
+
+class WarppedInterpolator:
+    def __init__(self, X: np.ndarray, Y: np.ndarray) -> None:
+        self.X = np.asarray(X)
+        self.Y = np.asarray(Y)
+        self.curve = interp1d(
             X,
             Y,
             extrapolate=True,
         )
-        self.d = self.curve.derivative()
+        self.X_min = self.X.min()
+        self.X_max = self.X.max()
+        self.d = self.curve.
 
     def __call__(self, x):
         return self.interpolate(x)
@@ -23,7 +47,7 @@ class WarppedPchipInterpolator:
     def interpolate(self, x):
         return self.curve(x)
 
-    def derivative(self, x):
+    def derivative(self, x: float) -> float:
         return self.d(x)
 
     def dump(self, filename):
@@ -50,27 +74,29 @@ def safe_SA_prob(delta, T):
     return p
 
 
-# class LinearRegression:
-#     def __init__(self, X, Y):
-#         self.X = np.asarray(X)
-#         self.Y = np.asarray(Y)
-#         self.check_input()
-
-#     def check_input(self):
-#         if len(self.X) != len(self.Y):
-#             raise ValueError("X and Y must have the same length.")
-
-#     def fit(self):
-#         # Compute linear regression parameters (slope and intercept)
-#         self.slope, self.intercept = np.polyfit(self.X, self.Y, 1)
-
-#     def interpolate(self, x):
-#         # Linear interpolation function
-#         return self.slope * x + self.intercept
-
-#     def derivative(self, x):
-#         # Derivative of the linear regression function (constant slope)
-#         return self.slope
+def binary_search(
+    f: Callable[[float], float],
+    target: float,
+    x_min: float,
+    x_max: float,
+    epsilon: float,
+    debug: bool = False,
+) -> float:
+    """
+    Binary search on an ascending function
+    """
+    l = x_min
+    r = x_max
+    while l < r - epsilon:
+        mid = (l + r) / 2
+        u = f(mid)
+        if u <= target:
+            l = mid
+        else:
+            r = mid
+        if debug:
+            print(f"l={l}; r={r}")
+    return l
 
 
 def waterfill(X, k):  # O(N)

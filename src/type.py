@@ -1,14 +1,18 @@
-from typing import TypedDict, Dict
+from typing import TypedDict, Dict, Literal, Union
 from typing_extensions import TypeAlias
-
-from .math import *
 import numpy as np
+
+from .math_utils import WarppedInterpolator
 
 
 class CTUCurves(TypedDict):
-    b_e: WarppedPchipInterpolator
-    b_q: WarppedPchipInterpolator
+    b_e: WarppedInterpolator
+    b_q: WarppedInterpolator
     b_t: np.array
 
 
-ImgCurves: TypeAlias = Dict[int, Dict[int, CTUCurves]]
+MethodIdx: TypeAlias = int
+CTUIdx: TypeAlias = int
+ImgCurves: TypeAlias = Dict[MethodIdx, Dict[CTUIdx, CTUCurves]]
+
+WorkerConfig: TypeAlias = Union[int, Literal["AUTO"]]
