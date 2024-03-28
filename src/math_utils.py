@@ -6,6 +6,22 @@ from typing_extensions import Callable
 def is_sorted(arr):
     return np.array_equal(arr, np.sort(arr))
 
+
+class PolyValWrapper:
+    def __init__(self, curve):
+        self.curve = curve
+
+    def __call__(self, x):
+        return np.polyval(self.curve, x)
+
+    def derivative(self):
+        return PolyValWrapper(np.polyder(self.curve))
+
+
+def fit4d(X, Y):
+    return PolyValWrapper(np.polyfit(X, Y, 4))
+
+
 # class LinearRegression:
 #     def __init__(self, X, Y):
 #         self.X = np.asarray(X)
@@ -28,18 +44,18 @@ def is_sorted(arr):
 #         # Derivative of the linear regression function (constant slope)
 #         return self.slope
 
+
 class WarppedInterpolator:
     def __init__(self, X: np.ndarray, Y: np.ndarray) -> None:
         self.X = np.asarray(X)
         self.Y = np.asarray(Y)
-        self.curve = interp1d(
+        self.curve = fit4d(
             X,
             Y,
-            extrapolate=True,
         )
         self.X_min = self.X.min()
         self.X_max = self.X.max()
-        self.d = self.curve.
+        self.d = self.curve.derivative()
 
     def __call__(self, x):
         return self.interpolate(x)

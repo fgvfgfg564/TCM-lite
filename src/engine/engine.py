@@ -384,8 +384,8 @@ class EngineBase(CodecBase):
 
     def _get_score(self, n_ctu, file_io: FileIO, method_ids, target_byteses, b_t):
         # Returns score given method ids and target bytes
-        # if np.sum(target_byteses) > b_t:
-        #     return -np.inf, -np.inf, np.inf
+        if np.sum(target_byteses) > b_t:
+            return -np.inf, -np.inf, np.inf
 
         sqe = 0
         global_time = 0
