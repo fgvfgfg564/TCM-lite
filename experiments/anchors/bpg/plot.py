@@ -56,7 +56,7 @@ ax.grid()
 ax.set_xlabel("Dec. Time / s")
 ax.set_ylabel("PSNR / dB")
 # ax.set_title("DOG_4507.png")
-ax.set_xlim(0.0)
+# ax.set_xlim(0.)
 plt.tight_layout()
 plt.savefig(os.path.join(folder, "d-t.png"), dpi=300)
 plt.savefig(os.path.join(folder, "d-t.pdf"))
@@ -79,7 +79,7 @@ for bpg_qp, wdt_data in data.items():
 
 for w_time in D.keys():
     ax.plot(
-        R[w_time], D[w_time], label=f"$\\alpha={w_time}$", marker=".", linewidth=0.7
+        R[w_time], D[w_time], label=f"$level={w_time[6:]}$", marker=".", linewidth=0.7
     )
 
 ax.legend(fontsize=10)
