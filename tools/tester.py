@@ -27,7 +27,7 @@ def parse_args():
     # tester args
     parser.add_argument("output_dir", type=str)
     parser.add_argument("-i", "--input", type=str, required=True, help="input glob")
-    parser.add_argument("--w_time", nargs="+", type=float, default=[1.0])
+    parser.add_argument("--target_time", nargs="+", type=float, default=[float("inf")])
     parser.add_argument("--target_bpp", nargs="+", type=float, default=[1.0])
     parser.add_argument("--save_image", action="store_true")
 
@@ -96,7 +96,7 @@ if __name__ == "__main__":
             input_pattern=args.input,
             output_dir=args.output_dir,
             target_bpp=args.target_bpp,
-            w_time=args.w_time,
+            target_time=args.target_time,
             save_image=args.save_image,
             N=args.N,
             num_gen=args.num_gen,
@@ -120,7 +120,7 @@ if __name__ == "__main__":
             args.output_dir,
             args.save_image,
             target_bpp=args.target_bpp,
-            w_time=args.w_time,
+            target_time=args.target_time,
         )
     elif algorithm == AlgorithmType.BPG:
         engine = BPG()

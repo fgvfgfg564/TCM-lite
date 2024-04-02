@@ -4,6 +4,8 @@ import abc
 import os
 from functools import partial
 from scipy.optimize import minimize
+from concurrent.futures import ProcessPoolExecutor
+from time import time
 
 from ..async_ops import async_map
 from ..type import *
@@ -20,12 +22,13 @@ class SolverBase(abc.ABC):
         method_ids,
         target_byteses,
         r_limit=None,
-        w_time=None,
-        time_limit=None,
-    ):
+        t_limit=None,
+    ) -> Tuple[LossType, float, float]:
         # Returns score given method ids and target bytes
         if r_limit is not None and np.sum(target_byteses) > r_limit:
-            return -np.inf, -np.inf, np.inf
+            r_exceed = np.sum(target_byteses) > r_limit
+        else:
+            r_exceed = 0
 
         sqe = 0
         global_time = 0
@@ -44,12 +47,12 @@ class SolverBase(abc.ABC):
 
         sqe /= file_io.num_pixels * 3
         psnr = -10 * np.log10(sqe)
-        if time_limit is None:
-            return psnr - w_time * global_time, psnr, global_time
+        if t_limit is not None and global_time > t_limit:
+            t_exceed = global_time - t_limit
         else:
-            if time_limit is not None and global_time > time_limit:
-                return -np.inf, -np.inf, np.inf
-            return psnr, psnr, global_time
+            t_exceed = 0
+        loss = LossType((r_exceed, t_exceed, -psnr))
+        return loss, psnr, global_time
 
     @abc.abstractmethod
     def find_optimal_target_bytes(
@@ -60,7 +63,7 @@ class SolverBase(abc.ABC):
         method_ids,
         r_limit,
         t_limit,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    ) -> Tuple[np.ndarray, LossType, float, float]:
         pass
 
 
@@ -121,15 +124,15 @@ class SLSQPSolver(SolverBase):
             time = -score
             return init_value, score, psnr, time
 
-        def objective_func(target_bytes):
-            result = -self._get_score(
+        def objective_func(target_bytes) -> LossType:
+            result = self._get_score(
                 precomputed_curve,
                 n_ctu,
                 file_io,
                 method_ids,
                 target_bytes,
             )[0]
-            return result * learning_rate
+            return (result[0], result[1], result[2] * learning_rate)
 
         def grad(target_bytes):
             gradients = np.zeros_like(target_bytes)
@@ -160,7 +163,7 @@ class SLSQPSolver(SolverBase):
             return r_limit - target_bytes.sum()
 
         def ineq_constraint_t(target_bytes):
-            _, __, t = -self._get_score(
+            _, __, t = self._get_score(
                 precomputed_curve,
                 n_ctu,
                 file_io,
@@ -196,17 +199,30 @@ class LagrangeMultiplierSolver(SolverBase):
     def __init__(self, num_workers: WorkerConfig = "AUTO") -> None:
         super().__init__()
         if num_workers == "AUTO":
-            self.num_workers = min(os.cpu_count() * 2, 24)
+            self.num_workers = os.cpu_count() * 2
         else:
             self.num_workers = num_workers
+        self.batch_size = 32
+        self.PPE = ProcessPoolExecutor(max_workers=self.num_workers)
 
     @classmethod
-    def _bs_inner_loop(cls, target_d: float, curve: Warpped4DFitter) -> float:
-        fdx = curve.curve.derivative().copy()
-        fdx[-1] -= target_d
-        root = fdx.posroot()
-        root = np.clip(root, curve.X_min, curve.X_max)
-        return root
+    def _bs_inner_loop(cls, target_d: float, curves: List[Warpped4DFitter]) -> float:
+        roots = []
+        for curve in curves:
+            fdx = curve.curve.derivative().copy()
+            fdx[-1] -= target_d
+            root = fdx.posroot()
+            root = np.clip(root, curve.X_min, curve.X_max)
+            roots.append(root)
+        return roots
+
+    @classmethod
+    def separate_into_sublists(cls, lst, length):
+        return [lst[i : i + length] for i in range(0, len(lst), length)]
+
+    @classmethod
+    def join_lists(cls, lists):
+        return list([element for sublist in lists for element in sublist])
 
     def get_ctu_results(self, precomputed_curve, target_d: float, method_ids, n_ctu):
         _f = partial(self._bs_inner_loop, target_d)
@@ -214,8 +230,9 @@ class LagrangeMultiplierSolver(SolverBase):
         curves_list = list(
             [precomputed_curve[method_ids[i]][i]["b_e"] for i in range(n_ctu)]
         )
-        ctu_results = async_map(_f, curves_list, num_workers=self.num_workers)
-        return ctu_results
+        curves_list = self.separate_into_sublists(curves_list, self.batch_size)
+        ctu_results = async_map(_f, curves_list, executor=self.PPE)
+        return self.join_lists(ctu_results)
 
     # Actually, this step can basically ignore T loss.
     def find_optimal_target_bytes(

@@ -4,10 +4,9 @@ import os
 import random
 import time
 import copy
+import abc
 
-from concurrent.futures import ProcessPoolExecutor
-from dataclasses import is_dataclass
-from functools import partial
+from dataclasses import dataclass
 
 import numpy as np
 from PIL import Image
@@ -81,7 +80,6 @@ class EngineBase(CodecBase):
         self.methods = []
 
         self.dtype = dtype
-        self.PPE = ProcessPoolExecutor(max_workers=self.num_workers)
 
         self._load_models(tool_groups, tool_filter)
 
@@ -378,39 +376,17 @@ class EngineBase(CodecBase):
 
         return solution.method_ids, q_scales, bitstreams
 
-    def _get_score(self, n_ctu, file_io: FileIO, method_ids, target_byteses, b_t):
-        # Returns score given method ids and target bytes
-        if np.sum(target_byteses) > b_t:
-            return -np.inf, -np.inf, np.inf
-
-        sqe = 0
-        global_time = 0
-
-        for i in range(n_ctu):
-            method_id = method_ids[i]
-            target_bytes = target_byteses[i]
-
-            precomputed_results = self._precomputed_curve[method_id][i]
-
-            ctu_sqe = precomputed_results["b_e"](target_bytes)
-            t = np.polyval(precomputed_results["b_t"], target_bytes)
-
-            global_time += t
-            sqe += ctu_sqe
-
-        sqe /= file_io.num_pixels * 3
-        psnr = -10 * np.log10(sqe)
-        return psnr - self.w_time * global_time, psnr, global_time
-
+    @abc.abstractmethod
     def _solve(
         self,
         img_blocks,
         img_size,
-        b_t,
+        r_limit,
+        t_limit,
         file_io,
         **kwargs,
     ):
-        raise NotImplemented
+        pass
 
     def read_img(self, img_path):
         if not os.path.exists(img_path):
@@ -445,7 +421,7 @@ class EngineBase(CodecBase):
         input_pth,
         output_pth,
         target_bpp,
-        w_time=1.0,
+        target_time,
         **kwargs,
     ):
         input_img, img_hash = self.read_img(input_pth)
@@ -454,18 +430,15 @@ class EngineBase(CodecBase):
 
         file_io = FileIO(h, w, self.ctu_size, self.mosaic)
 
-        # Set loss
-        self.w_time = w_time
-
-        b_t = target_bpp * h * w // 8
+        r_limit = target_bpp * h * w // 8
         print(f"Image shape: {h}x{w}")
-        print(f"Target={b_t}B; Target bpp={target_bpp:.4f};")
+        print(f"Target={r_limit}B; Target bpp={target_bpp:.4f};")
 
         header_bytes = file_io.header_size
         safety_bytes = SAFETY_BYTE_PER_CTU * file_io.n_ctu
-        b_t -= header_bytes + safety_bytes
+        r_limit -= header_bytes + safety_bytes
         print(
-            f"Header bytes={header_bytes}; Safety_bytes={safety_bytes}; CTU bytes={b_t}"
+            f"Header bytes={header_bytes}; Safety_bytes={safety_bytes}; CTU bytes={r_limit}"
         )
 
         img_blocks = self.divide_blocks(file_io, h, w, input_img)
@@ -476,8 +449,9 @@ class EngineBase(CodecBase):
         method_ids, q_scales, bitstreams, data = self._solve(
             img_blocks,
             img_size,
-            b_t,
-            file_io,
+            r_limit=r_limit,
+            t_limit=target_time,
+            file_io=file_io,
             **kwargs,
         )
         file_io.method_id = method_ids
@@ -548,6 +522,7 @@ class SAEngine1(EngineBase):
             ctu_size, mosaic, num_qscale_samples, tool_groups, tool_filter, dtype
         )
         self.solver = solver()
+        self.last_valid_step = None
 
     # Older version that considers T loss
 
@@ -641,7 +616,7 @@ class SAEngine1(EngineBase):
                 flush=True,
             )
 
-    def _adaptive_init(self, file_io: FileIO, n_ctu: int, n_method: int, b_t: int):
+    def _adaptive_init(self, file_io: FileIO, n_ctu: int, n_method: int, r_limit: int):
         ans = np.zeros(
             [
                 n_ctu,
@@ -652,11 +627,12 @@ class SAEngine1(EngineBase):
         for method_id in range(n_method):
             tmpans = np.zeros_like(ans) + method_id
             target_bytes = self.solver.find_optimal_target_bytes(
-                self._precompute_score,
+                self._precomputed_curve,
                 file_io,
                 n_ctu,
                 tmpans,
-                b_t,
+                r_limit,
+                t_limit=float("inf"),
             )[0]
             for ctu_id in range(n_ctu):
                 b = target_bytes[ctu_id]
@@ -667,9 +643,7 @@ class SAEngine1(EngineBase):
                     and b <= self._maximal_bytes[method_id][ctu_id]
                 ):
                     sqe = precomputed_results["b_e"](b) / num_ctu_pixels
-                    score = -10 * np.log10(sqe) - self.w_time * n_ctu * np.polyval(
-                        precomputed_results["b_t"], b
-                    )
+                    score = -10 * np.log10(sqe)
                     if score > best_score[ctu_id]:
                         best_score[ctu_id] = score
                         ans[ctu_id] = method_id
@@ -681,14 +655,14 @@ class SAEngine1(EngineBase):
             current_min += self._minimal_bytes[ans[i]][i]
             current_max += self._maximal_bytes[ans[i]][i]
 
-        cost = max(current_min - b_t, 0) + max(b_t - current_max, 0)
+        cost = max(current_min - r_limit, 0) + max(r_limit - current_max, 0)
         for i in range(n_ctu):
             for j in range(n_method):
                 delta_min = self._minimal_bytes[j][i] - self._minimal_bytes[ans[i]][i]
                 delta_max = self._maximal_bytes[j][i] - self._maximal_bytes[ans[i]][i]
                 new_min = current_min - delta_min
                 new_max = current_max - delta_max
-                new_cost = max(new_min - b_t, 0) + max(b_t - new_max, 0)
+                new_cost = max(new_min - r_limit, 0) + max(r_limit - new_max, 0)
 
                 if new_cost < cost:
                     ans[i] = j
@@ -698,104 +672,136 @@ class SAEngine1(EngineBase):
 
         return ans
 
+    def _init(self, init_values, adaptive_init, n_method, n_ctu, file_io, r_limit):
+        if n_method == 1:
+            ans = np.zeros([n_ctu], dtype=np.int32)
+        else:
+            if init_values is not None:
+                ans = init_values
+            else:
+                if adaptive_init:
+                    ans = self._adaptive_init(file_io, n_ctu, n_method, r_limit)
+                else:
+                    ans = np.random.random_integers(
+                        0,
+                        n_method - 1,
+                        [
+                            n_ctu,
+                        ],
+                    )
+        return ans
+
+    def _sa_body(
+        self,
+        ans,
+        img_blocks,
+        img_size,
+        file_io,
+        r_limit,
+        t_limit,
+        num_steps,
+        adaptive_search,
+        T_start,
+        T_end,
+    ):
+        alpha = np.power(T_end / T_start, 1.0 / num_steps)
+        n_ctu = len(img_blocks)
+        n_method = len(self.methods)
+        if adaptive_search:
+            self.last_valid_step = None
+
+        target_byteses, loss, psnr, t = self.solver.find_optimal_target_bytes(
+            self._precomputed_curve, file_io, n_ctu, ans, r_limit, t_limit
+        )
+
+        T = T_start
+
+        # Simulated Annealing
+        for step in range(num_steps):
+            changed_block, new_method = self._try_move(
+                file_io, ans, n_method, adaptive_search
+            )
+            next_state = ans.copy()
+            next_state[changed_block] = new_method
+
+            (
+                next_target_byteses,
+                next_loss,
+                next_psnr,
+                next_time,
+            ) = self.solver.find_optimal_target_bytes(
+                self._precomputed_curve,
+                file_io,
+                n_ctu,
+                next_state,
+                r_limit,
+                t_limit,
+            )
+
+            if next_loss < loss:
+                accept = True
+                self.last_valid_step = (
+                    changed_block,
+                    ans[changed_block],
+                    new_method,
+                )
+            else:
+                if next_loss[0] == 0 and next_loss[1] == 0:
+                    delta = next_loss[2] - loss[2]
+                    p = safe_SA_prob(delta, T)
+                    accept = np.random.rand() < p
+                    self.last_valid_step = None
+                else:
+                    accept = False
+
+            if accept:
+                ans = next_state
+                target_byteses = next_target_byteses
+                loss = next_loss
+                psnr = next_psnr
+                t = next_time
+
+            if step % (num_steps // 20) == 0:
+                print(f"Results for step: {step}; T={T:.6f}")
+                self._show_solution(ans, target_byteses, r_limit, loss, psnr, t)
+
+            T *= alpha
+        return ans
+
     def _solve(
         self,
         img_blocks: List[ImageBlock],
         img_size,
-        b_t,
+        r_limit,
+        t_limit,
         file_io,
         num_steps=1000,
         T_start=1e-3,
         T_end=1e-6,
-        adaptive_init=True,
+        init_values: np.ndarray = None,
+        adaptive_init=False,
         adaptive_search=True,
+        **kwargs,
     ):
         n_ctu = len(img_blocks)
         n_method = len(self.methods)
-        h, w = img_size
-        num_pixels = h * w
-        alpha = np.power(T_end / T_start, 1.0 / num_steps)
-
-        if n_method == 1:
-            ans = np.zeros([n_ctu], dtype=np.int32)
-        else:
-            if adaptive_init:
-                ans = self._adaptive_init(file_io, n_ctu, n_method, b_t)
-            else:
-                ans = np.random.random_integers(
-                    0,
-                    n_method - 1,
-                    [
-                        n_ctu,
-                    ],
-                )
-
-            if adaptive_search:
-                self.last_valid_step = None
-
-            target_byteses, score, psnr, time = self._find_optimal_target_bytes(
-                file_io, n_ctu, ans, b_t
+        ans = self._init(init_values, adaptive_init, n_method, n_ctu, file_io, r_limit)
+        if n_method > 1:
+            ans = self._sa_body(
+                ans,
+                img_blocks,
+                img_size,
+                file_io,
+                r_limit,
+                t_limit,
+                num_steps,
+                adaptive_search,
+                T_start,
+                T_end,
             )
 
-            T = T_start
-
-            # Simulated Annealing
-            for step in range(num_steps):
-                changed_block, new_method = self._try_move(
-                    file_io, ans, n_method, adaptive_search
-                )
-                next_state = ans.copy()
-                next_state[changed_block] = new_method
-
-                # if use_attempt:
-                #     # Attempt to only change the methods. If no improvement, then reject it with probability
-                #     attempt_score, _, _ = self._get_score(
-                #         n_ctu, num_pixels, method_ids, ans, b_t
-                #     )
-                #     # TODO
-
-                (
-                    next_target_byteses,
-                    next_score,
-                    next_psnr,
-                    next_time,
-                ) = self._find_optimal_target_bytes(
-                    file_io,
-                    n_ctu,
-                    next_state,
-                    b_t,
-                )
-
-                if next_score > score:
-                    accept = True
-                    self.last_valid_step = (
-                        changed_block,
-                        ans[changed_block],
-                        new_method,
-                    )
-                else:
-                    delta = score - next_score
-                    p = safe_SA_prob(delta, T)
-                    accept = np.random.rand() < p
-                    self.last_valid_step = None
-
-                if accept:
-                    ans = next_state
-                    target_byteses = next_target_byteses
-                    score = next_score
-                    psnr = next_psnr
-                    time = next_time
-
-                if step % (num_steps // 20) == 0:
-                    print(
-                        f"Results for step: {step}; w_time={self.w_time:.6f}; T={T:.6f}"
-                    )
-                    self._show_solution(ans, target_byteses, b_t, score, psnr, time)
-
-                T *= alpha
-
-        target_byteses, score, psnr, time = self._find_optimal_target_bytes(
-            file_io, n_ctu, ans, b_t
+        target_byteses, score, psnr, time = self.solver.find_optimal_target_bytes(
+            self._precomputed_curve, file_io, n_ctu, ans, r_limit, t_limit
         )
         solution = Solution(ans, target_byteses)
 

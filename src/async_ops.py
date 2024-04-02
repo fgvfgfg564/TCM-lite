@@ -3,18 +3,15 @@ import concurrent
 from concurrent.futures import ProcessPoolExecutor
 from typing_extensions import List, Callable
 
-executor = ProcessPoolExecutor(max_workers=128)
-
 
 def async_map(
-    f: Callable[[float], float], x: List[float], num_workers: int
+    f: Callable[[float], float], x: List[float], executor: ProcessPoolExecutor
 ) -> List[float]:
     """
     A parallel mapping function that safe to Ctrl-C kill
     """
 
     async def _async_map() -> List[float]:
-        executor._max_workers = num_workers
         loop = asyncio.get_running_loop()
         tasks: List[concurrent.futures.Future] = []
         for itm in x:
