@@ -2,13 +2,13 @@ from typing import TypedDict, Dict, Literal, Union
 from typing_extensions import TypeAlias
 import numpy as np
 
-from .math_utils import WarppedInterpolator
+from .math_utils import Warpped4DFitter
 
 
 class CTUCurves(TypedDict):
-    b_e: WarppedInterpolator
-    b_q: WarppedInterpolator
-    b_t: np.array
+    b_e: Warpped4DFitter
+    b_q: Warpped4DFitter
+    b_t: np.ndarray
 
 
 MethodIdx: TypeAlias = int

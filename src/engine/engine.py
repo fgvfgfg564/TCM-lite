@@ -74,17 +74,12 @@ class EngineBase(CodecBase):
         tool_groups=TOOL_GROUPS.keys(),
         tool_filter=None,
         dtype=torch.half,
-        num_workers: WorkerConfig = "AUTO",
     ) -> None:
         self.ctu_size = ctu_size
         self.mosaic = mosaic
         self.methods = []
 
         self.dtype = dtype
-        if num_workers == "AUTO":
-            self.num_workers = min(os.cpu_count() * 2, 24)
-        else:
-            self.num_workers = num_workers
         self.PPE = ProcessPoolExecutor(max_workers=self.num_workers)
 
         self._load_models(tool_groups, tool_filter)
@@ -286,8 +281,8 @@ class EngineBase(CodecBase):
 
                 try:
                     # If the caches are complete, load them
-                    b_e = WarppedInterpolator.load(b_e_file)
-                    b_q = WarppedInterpolator.load(b_q_file)
+                    b_e = Warpped4DFitter.load(b_e_file)
+                    b_q = Warpped4DFitter.load(b_q_file)
                     b_t = np.load(b_t_file)
                     min_max = np.load(min_max_file)
                     min_t = min_max["min_t"]
@@ -296,7 +291,7 @@ class EngineBase(CodecBase):
 
                     for qscale in self.qscale_samples:
                         pbar_iter.__next__()
-                except:
+                except FileNotFoundError:
                     # No cache or cache is broken
                     sqes = []
                     num_bytes = []
@@ -334,10 +329,10 @@ class EngineBase(CodecBase):
                         )
 
                     try:
-                        b_e = WarppedInterpolator(num_bytes, sqes)
+                        b_e = Warpped4DFitter(num_bytes, sqes, "fit3d")
                         # b_t = interpolate.interp1d(num_bytes, times, kind='linear')
                         b_t = np.polyfit(num_bytes, times, 1)
-                        b_q = WarppedInterpolator(num_bytes, qscales)
+                        b_q = Warpped4DFitter(num_bytes, qscales, "pchip")
                     except ValueError as e:
                         print(f"Interpolation error!")
                         print(f"num_bytes={num_bytes}")
@@ -647,45 +642,8 @@ class SAEngine1(EngineBase):
     #     score, psnr, time = self._get_score(n_ctu, file_io, method_ids, ans, b_t)
 
     #     return ans, score, psnr, time
-
-    @classmethod
-    def _bs_inner_loop(cls, target_d: float, curve: WarppedInterpolator) -> float:
-        return binary_search(curve.derivative, target_d, curve.X_min, curve.X_max, 0.25)
-
-    def get_ctu_results(self, target_d: float, method_ids, n_ctu):
-        _f = partial(self._bs_inner_loop, target_d)
-
-        curves_list = list(
-            [self._precomputed_curve[method_ids[i]][i]["b_e"] for i in range(n_ctu)]
         )
-        ctu_results = async_map(_f, curves_list, num_workers=self.num_workers)
-        return ctu_results
-
-    # Actually, this step can basically ignore T loss.
-    def _find_optimal_target_bytes(
-        self,
-        file_io: FileIO,
-        n_ctu,
-        method_ids,
-        b_t,
-    ):
-        # A simple Lagrange Multiplier
-
-        def outer_loop(target_d: float) -> float:
-            ctu_results = self.get_ctu_results(target_d, method_ids, n_ctu)
-            tot_bytes = sum(ctu_results)
-            return tot_bytes
-
-        target_d = binary_search(outer_loop, b_t, -1, 0, 1e-6)
-        ctu_results = self.get_ctu_results(target_d, method_ids, n_ctu)
-        score, psnr, time = self._get_score(
-            n_ctu=n_ctu,
-            file_io=file_io,
-            method_ids=method_ids,
-            target_byteses=ctu_results,
-            b_t=b_t,
-        )
-        return np.asarray(ctu_results), score, psnr, time
+        return np.asarray(ctu_results), score, psnr, t
 
     W1 = 1000
     W2 = 250

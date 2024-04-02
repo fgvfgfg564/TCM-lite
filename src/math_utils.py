@@ -1,25 +1,43 @@
 import numpy as np
 from scipy.interpolate import PchipInterpolator
-from typing_extensions import Callable
+from typing_extensions import Callable, Literal, Union
 
 
 def is_sorted(arr):
     return np.array_equal(arr, np.sort(arr))
 
 
-class PolyValWrapper:
-    def __init__(self, curve):
-        self.curve = curve
+class PolyValWrapper(np.ndarray):
+    def __new__(cls, input_array):
+        # Input array is an array-like object that you want to turn into a MyArray
+        obj = np.asarray(input_array).view(cls)
+        # Add your extra information or initialization here
+        return obj
 
     def __call__(self, x):
-        return np.polyval(self.curve, x)
+        return np.polyval(self, x)
 
     def derivative(self):
-        return PolyValWrapper(np.polyder(self.curve))
+        return PolyValWrapper(np.polyder(self))
+
+    def posroot(self):
+        if len(self) > 3:
+            raise ValueError("Only supports quadratic funcs")
+
+        a = self[0]
+        b = self[1]
+        c = self[2]
+
+        o = b**2 - 4 * a * c
+        if o < 0:
+            return np.inf
+        return (-b + np.sqrt(o)) / (2 * a)
 
 
-def fit4d(X, Y):
-    return PolyValWrapper(np.polyfit(X, Y, 4))
+def fit3d(X, Y) -> PolyValWrapper:
+    fit = np.polyfit(X, Y, 3)
+    fit = PolyValWrapper(fit)
+    return fit
 
 
 # class LinearRegression:
@@ -45,11 +63,21 @@ def fit4d(X, Y):
 #         return self.slope
 
 
-class WarppedInterpolator:
-    def __init__(self, X: np.ndarray, Y: np.ndarray) -> None:
+class Warpped4DFitter:
+    METHOD_DICT = {"fit3d": fit3d, "pchip": PchipInterpolator}
+
+    def __init__(
+        self,
+        X: np.ndarray,
+        Y: np.ndarray,
+        method: Union[Literal["fit3d"], Literal["pchip"]],
+    ) -> None:
         self.X = np.asarray(X)
         self.Y = np.asarray(Y)
-        self.curve = fit4d(
+        self.method = str(method)
+        self.curve: Union[PchipInterpolator, PolyValWrapper] = self.METHOD_DICT[
+            self.method
+        ](
             X,
             Y,
         )
@@ -67,12 +95,12 @@ class WarppedInterpolator:
         return self.d(x)
 
     def dump(self, filename):
-        np.savez_compressed(filename, X=self.X, Y=self.Y)
+        np.savez_compressed(filename, X=self.X, Y=self.Y, method=self.method)
 
     @classmethod
     def load(cls, filename):
         loaded = np.load(filename)
-        return cls(X=loaded["X"], Y=loaded["Y"])
+        return cls(X=loaded["X"], Y=loaded["Y"], method=loaded["method"])
 
 
 def safe_softmax(x: np.ndarray):
