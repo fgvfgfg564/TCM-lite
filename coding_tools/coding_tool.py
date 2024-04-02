@@ -32,7 +32,7 @@ class CodingToolBase(abc.ABC):
         return qs
 
     @abc.abstractmethod
-    def compress_block(self, img_block, q_scale):
+    def compress_block(self, img_block, q_scale) -> bytes:
         """
         Encode a image block with given q_scale. The block is not padded.
         """

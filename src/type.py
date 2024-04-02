@@ -28,7 +28,7 @@ class ArithTuple(tuple):
         return tuple([(x - y) for x, y in zip(self, other)])
 
     def __repr__(self) -> str:
-        return f"<RDT Loss: R={self[0]}; T={self[1]}; D={self[2]}>"
+        return f"<RDT Loss: R={self[0]:.6f}; T={self[1]:.6f}; D={self[2]:.6f}>"
 
 
 LossType: TypeAlias = ArithTuple[float, float, float]

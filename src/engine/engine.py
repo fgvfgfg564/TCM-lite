@@ -15,6 +15,7 @@ import tqdm
 
 from coding_tools.coding_tool import CodingToolBase
 import coding_tools.utils.timer as timer
+from coding_tools.traditional_tools import WebPTool
 from coding_tools.baseline import CodecBase
 from coding_tools import TOOL_GROUPS
 
@@ -24,6 +25,7 @@ from ..fileio import FileIO
 from ..math_utils import *
 from ..async_ops import async_map
 from .sa_solver import SolverBase, SLSQPSolver, LagrangeMultiplierSolver
+from .toucher import Toucher
 
 SAFETY_BYTE_PER_CTU = 2
 
@@ -523,6 +525,7 @@ class SAEngine1(EngineBase):
         )
         self.solver = solver()
         self.last_valid_step = None
+        self.toucher = Toucher(WebPTool())
 
     # Older version that considers T loss
 
@@ -534,62 +537,69 @@ class SAEngine1(EngineBase):
         self, file_io: FileIO, last_ans: np.ndarray, n_method, adaptive_search
     ):
         # Generate a group of new method_ids that move from current state
+        # 90% swap, 10% replace
         n_ctu = len(last_ans)
 
-        if adaptive_search:
-            # Initialize change matrix
-            P = np.ones([n_ctu, n_method], dtype=np.float32)
-            if self.last_valid_step is not None:
-                (last_changed_block, last_old_method, last_new_method) = (
-                    self.last_valid_step
-                )
-                # 1. If adjacent block of last move is in the same color, it's likely to be an improvement.
-                for blk_id in file_io.adjacencyTable[last_changed_block]:
-                    if last_ans[blk_id] == last_old_method:
-                        P[blk_id, last_new_method] = self.W1
-                # 2. Non-adjacent likely to be an improvement.
-                for blk_id in range(n_ctu):
-                    if last_ans[blk_id] == last_old_method:
-                        P[blk_id, last_new_method] = np.maximum(
-                            P[blk_id, last_new_method], self.W2
-                        )
-
-            # 3. Blocks are likely to change into the method of its adjacent ones.
-            for blk_id in range(n_ctu):
-                count_adjacent = np.zeros(
-                    [
-                        n_method,
-                    ],
-                    dtype=np.int32,
-                )
-                for adj_blk_id in file_io.adjacencyTable[blk_id]:
-                    count_adjacent[last_ans[adj_blk_id]] += 1
-                count_adjacent = np.minimum(count_adjacent, 4)
-                for i in range(n_method):
-                    if count_adjacent[i] >= 1:
-                        P[blk_id, i] = np.maximum(
-                            P[blk_id, i], self.Wa[count_adjacent[i] - 1]
-                        )
-
-            # Normalize and select
-            P /= P.sum()
-            select_list = []
-            P_list = []
-            for blk_id in range(n_ctu):
-                for method_id in range(n_method):
-                    select_list.append((blk_id, method_id))
-                    p = P[blk_id, method_id]
-                    if last_ans[blk_id] == method_id:
-                        p = 0
-                    P_list.append(p)
-
-            selected = random.choices(select_list, weights=P_list, k=1)[0]
-            return selected
+        p = np.random.rand()
+        if p < 0:
+            # Try to swap two blocks
+            pass  # TODO
         else:
-            # Pure random
-            selected = np.random.random_integers(0, n_ctu - 1)
-            new_method = np.random.random_integers(0, n_method - 1)
-        return selected, new_method
+            # Try to update one block
+            if adaptive_search:
+                # Initialize change matrix
+                P = np.ones([n_ctu, n_method], dtype=np.float32)
+                if self.last_valid_step is not None:
+                    (last_changed_block, last_old_method, last_new_method) = (
+                        self.last_valid_step
+                    )
+                    # 1. If adjacent block of last move is in the same color, it's likely to be an improvement.
+                    for blk_id in file_io.adjacencyTable[last_changed_block]:
+                        if last_ans[blk_id] == last_old_method:
+                            P[blk_id, last_new_method] = self.W1
+                    # 2. Non-adjacent likely to be an improvement.
+                    for blk_id in range(n_ctu):
+                        if last_ans[blk_id] == last_old_method:
+                            P[blk_id, last_new_method] = np.maximum(
+                                P[blk_id, last_new_method], self.W2
+                            )
+
+                # 3. Blocks are likely to change into the method of its adjacent ones.
+                for blk_id in range(n_ctu):
+                    count_adjacent = np.zeros(
+                        [
+                            n_method,
+                        ],
+                        dtype=np.int32,
+                    )
+                    for adj_blk_id in file_io.adjacencyTable[blk_id]:
+                        count_adjacent[last_ans[adj_blk_id]] += 1
+                    count_adjacent = np.minimum(count_adjacent, 4)
+                    for i in range(n_method):
+                        if count_adjacent[i] >= 1:
+                            P[blk_id, i] = np.maximum(
+                                P[blk_id, i], self.Wa[count_adjacent[i] - 1]
+                            )
+
+                # Normalize and select
+                P /= P.sum()
+                select_list = []
+                P_list = []
+                for blk_id in range(n_ctu):
+                    for method_id in range(n_method):
+                        select_list.append((blk_id, method_id))
+                        p = P[blk_id, method_id]
+                        if last_ans[blk_id] == method_id:
+                            p = 0
+                        P_list.append(p)
+
+                selected = random.choices(select_list, weights=P_list, k=1)[0]
+                return selected
+            else:
+                # Pure random
+                selected = np.random.random_integers(0, n_ctu - 1)
+                new_method = np.random.random_integers(0, n_method - 1)
+            return selected, new_method
 
     def _show_solution(self, method_ids, target_byteses, b_t, score, psnr, time):
         n_ctu = len(method_ids)
@@ -616,63 +626,44 @@ class SAEngine1(EngineBase):
                 flush=True,
             )
 
-    def _adaptive_init(self, file_io: FileIO, n_ctu: int, n_method: int, r_limit: int):
-        ans = np.zeros(
-            [
-                n_ctu,
-            ],
-            dtype=np.int32,
+    def _adaptive_init(
+        self,
+        img_blocks: List[ImageBlock],
+        file_io: FileIO,
+        n_ctu: int,
+        n_method: int,
+    ):
+        # Assign blocks to methods according to their complexity
+        complexity_scores = np.asarray(
+            [self.toucher.touch_complexity(x.np) for x in img_blocks]
         )
-        best_score = np.zeros_like(ans) - np.infty
-        for method_id in range(n_method):
-            tmpans = np.zeros_like(ans) + method_id
-            target_bytes = self.solver.find_optimal_target_bytes(
-                self._precomputed_curve,
-                file_io,
-                n_ctu,
-                tmpans,
-                r_limit,
-                t_limit=float("inf"),
-            )[0]
-            for ctu_id in range(n_ctu):
-                b = target_bytes[ctu_id]
-                num_ctu_pixels = file_io.block_num_pixels[ctu_id]
-                precomputed_results = self._precomputed_curve[method_id][ctu_id]
-                if (
-                    b >= self._minimal_bytes[method_id][ctu_id]
-                    and b <= self._maximal_bytes[method_id][ctu_id]
-                ):
-                    sqe = precomputed_results["b_e"](b) / num_ctu_pixels
-                    score = -10 * np.log10(sqe)
-                    if score > best_score[ctu_id]:
-                        best_score[ctu_id] = score
-                        ans[ctu_id] = method_id
+        complexity_order = np.argsort(complexity_scores)
 
-        # Random walk until find an available starting
-        current_min = 0
-        current_max = 0
-        for i in range(n_ctu):
-            current_min += self._minimal_bytes[ans[i]][i]
-            current_max += self._maximal_bytes[ans[i]][i]
+        def _est_speed(method_idx):
+            speeds = []
+            for i in range(n_ctu):
+                ctu_speed = np.polyval(
+                    self._precomputed_curve[method_idx][i]["b_t"], 1.0
+                )
+                speeds.append(ctu_speed)
+            return np.asarray(speeds).mean()
 
-        cost = max(current_min - r_limit, 0) + max(r_limit - current_max, 0)
-        for i in range(n_ctu):
-            for j in range(n_method):
-                delta_min = self._minimal_bytes[j][i] - self._minimal_bytes[ans[i]][i]
-                delta_max = self._maximal_bytes[j][i] - self._maximal_bytes[ans[i]][i]
-                new_min = current_min - delta_min
-                new_max = current_max - delta_max
-                new_cost = max(new_min - r_limit, 0) + max(r_limit - new_max, 0)
+        speeds = []
+        for i in range(n_method):
+            speeds.append(_est_speed(i))
+        speeds = np.asarray(speeds)
+        speeds_order = np.argsort(speeds)
+        results = np.zeros((n_ctu,), dtype=np.int32)
+        for i in range(n_method):
+            lb = n_ctu * i // n_method
+            rb = n_ctu * (i + 1) // n_method
+            results[complexity_order[lb:rb]] = speeds_order[i]
+        print(results)
+        return results
 
-                if new_cost < cost:
-                    ans[i] = j
-                    current_min = new_min
-                    current_max = new_max
-                    cost = new_cost
-
-        return ans
-
-    def _init(self, init_values, adaptive_init, n_method, n_ctu, file_io, r_limit):
+    def _init(
+        self, img_blocks, init_values, adaptive_init, n_method, n_ctu, file_io, r_limit
+    ):
         if n_method == 1:
             ans = np.zeros([n_ctu], dtype=np.int32)
         else:
@@ -680,7 +671,7 @@ class SAEngine1(EngineBase):
                 ans = init_values
             else:
                 if adaptive_init:
-                    ans = self._adaptive_init(file_io, n_ctu, n_method, r_limit)
+                    ans = self._adaptive_init(img_blocks, file_io, n_ctu, n_method)
                 else:
                     ans = np.random.random_integers(
                         0,
@@ -715,6 +706,8 @@ class SAEngine1(EngineBase):
         )
 
         T = T_start
+        best_ans = ans
+        best_loss = loss
 
         # Simulated Annealing
         for step in range(num_steps):
@@ -760,13 +753,16 @@ class SAEngine1(EngineBase):
                 loss = next_loss
                 psnr = next_psnr
                 t = next_time
+                if loss < best_loss:
+                    best_loss = loss
+                    best_ans = ans
 
             if step % (num_steps // 20) == 0:
-                print(f"Results for step: {step}; T={T:.6f}")
+                print(f"Results for step: {step}; T={T:.6f}; best_loss={best_loss}")
                 self._show_solution(ans, target_byteses, r_limit, loss, psnr, t)
 
             T *= alpha
-        return ans
+        return best_ans
 
     def _solve(
         self,
@@ -776,16 +772,18 @@ class SAEngine1(EngineBase):
         t_limit,
         file_io,
         num_steps=1000,
-        T_start=1e-3,
+        T_start=10,
         T_end=1e-6,
         init_values: np.ndarray = None,
-        adaptive_init=False,
+        adaptive_init=True,
         adaptive_search=True,
         **kwargs,
     ):
         n_ctu = len(img_blocks)
         n_method = len(self.methods)
-        ans = self._init(init_values, adaptive_init, n_method, n_ctu, file_io, r_limit)
+        ans = self._init(
+            img_blocks, init_values, adaptive_init, n_method, n_ctu, file_io, r_limit
+        )
         if n_method > 1:
             ans = self._sa_body(
                 ans,
