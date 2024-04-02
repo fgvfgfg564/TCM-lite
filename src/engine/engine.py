@@ -1,29 +1,30 @@
-from typing import List
+from typing import List, Type
 
 import os
 import random
-import numpy as np
 import time
-from PIL import Image
-import torch
-from concurrent.futures import ProcessPoolExecutor
-import torch.nn.functional as F
-from dataclasses import dataclass
-from scipy.optimize import minimize
-from functools import partial
-
-import tqdm
 import copy
 
-from ..type import *
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import is_dataclass
+from functools import partial
+
+import numpy as np
+from PIL import Image
+import torch
+import tqdm
+
 from coding_tools.coding_tool import CodingToolBase
 import coding_tools.utils.timer as timer
+from coding_tools.baseline import CodecBase
+from coding_tools import TOOL_GROUPS
+
+from ..type import *
 from ..utils import *
 from ..fileio import FileIO
 from ..math_utils import *
 from ..async_ops import async_map
-from coding_tools.baseline import CodecBase
-from coding_tools import TOOL_GROUPS
+from .sa_solver import SolverBase, SLSQPSolver, LagrangeMultiplierSolver
 
 SAFETY_BYTE_PER_CTU = 2
 
@@ -533,117 +534,22 @@ class EngineBase(CodecBase):
 
 
 class SAEngine1(EngineBase):
-    @staticmethod
-    def _calc_gradient_psnr(sqes: np.ndarray):
-        r"""
-        $ PSNR(sqes) = - 10 * \log_{10}{(\frac{\sum X}{num\_pixels})} $
-        """
-
-        return -10 / (sqes.sum() * np.log(10))
+    def __init__(
+        self,
+        ctu_size,
+        mosaic,
+        num_qscale_samples=20,
+        tool_groups=TOOL_GROUPS.keys(),
+        tool_filter=None,
+        dtype=torch.half,
+        solver: Type[SolverBase] = LagrangeMultiplierSolver,
+    ) -> None:
+        super().__init__(
+            ctu_size, mosaic, num_qscale_samples, tool_groups, tool_filter, dtype
+        )
+        self.solver = solver()
 
     # Older version that considers T loss
-    # def _find_optimal_target_bytes(
-    #     self,
-    #     file_io: FileIO,
-    #     n_ctu,
-    #     method_ids,
-    #     b_t,
-    #     learning_rate=1e3,
-    #     num_steps=1000,
-    #     init_value=None,
-    # ):
-    #     """
-    #     Find the optimal target bytes given CTU methods
-    #     """
-
-    #     min_bytes = np.zeros(
-    #         [
-    #             n_ctu,
-    #         ],
-    #         dtype=np.int32,
-    #     )
-    #     max_bytes = np.zeros(
-    #         [
-    #             n_ctu,
-    #         ],
-    #         dtype=np.int32,
-    #     )
-
-    #     bounds = []
-
-    #     for i in range(n_ctu):
-    #         min_bytes[i] = self._minimal_bytes[method_ids[i]][i]
-    #         max_bytes[i] = self._maximal_bytes[method_ids[i]][i]
-    #         bounds.append((min_bytes[i], max_bytes[i]))
-
-    #     if init_value is None:
-    #         bpp = b_t / file_io.num_pixels * 0.99
-    #         init_value = file_io.block_num_pixels * bpp
-
-    #     init_value = normalize_to_target(init_value, min_bytes, max_bytes, b_t)
-
-    #     if init_value.sum() > b_t:
-    #         score = -float("inf")
-    #         psnr = score
-    #         time = -score
-    #         return init_value, score, psnr, time
-
-    #     def objective_func(target_bytes):
-    #         result = -self._get_score(n_ctu, file_io, method_ids, target_bytes, b_t)[0]
-    #         return result * learning_rate
-
-    #     def grad(target_bytes):
-    #         gradients = np.zeros_like(target_bytes)
-
-    #         # Gradient item on sqe
-    #         sqes = []
-    #         for i in range(n_ctu):
-    #             method_id = method_ids[i]
-    #             precomputed_results = self._precomputed_curve[method_id][i]
-    #             sqes.append(precomputed_results["b_e"](target_bytes[i]))
-    #         sqes = np.asarray(sqes)
-
-    #         sqe_gradient = self._calc_gradient_psnr(np.array(sqes))
-
-    #         gradients = []
-    #         for i in range(n_ctu):
-    #             method_id = method_ids[i]
-    #             b_e: WarppedPchipInterpolator = self._precomputed_curve[method_id][i][
-    #                 "b_e"
-    #             ]
-    #             b_t: np.ndarray = self._precomputed_curve[method_id][i]["b_t"]
-    #             gradients.append(
-    #                 self.w_time * b_t[0]
-    #                 - sqe_gradient * b_e.derivative(target_bytes[i])
-    #             )
-
-    #         return np.asarray(gradients) * learning_rate
-
-    #     def ineq_constraint(target_bytes):
-    #         return b_t - target_bytes.sum()
-
-    #     constraint = {"type": "ineq", "fun": ineq_constraint}
-
-    #     result = minimize(
-    #         objective_func,
-    #         init_value,
-    #         jac=grad,
-    #         method="SLSQP",
-    #         bounds=bounds,
-    #         constraints=[constraint],
-    #         options={
-    #             "ftol": 1e-12,
-    #             "maxiter": num_steps,
-    #         },
-    #     )
-
-    #     ans = result.x
-
-    #     score, psnr, time = self._get_score(n_ctu, file_io, method_ids, ans, b_t)
-
-    #     return ans, score, psnr, time
-        )
-        return np.asarray(ctu_results), score, psnr, t
 
     W1 = 1000
     W2 = 250
@@ -745,7 +651,8 @@ class SAEngine1(EngineBase):
         best_score = np.zeros_like(ans) - np.infty
         for method_id in range(n_method):
             tmpans = np.zeros_like(ans) + method_id
-            target_bytes = self._find_optimal_target_bytes(
+            target_bytes = self.solver.find_optimal_target_bytes(
+                self._precompute_score,
                 file_io,
                 n_ctu,
                 tmpans,
