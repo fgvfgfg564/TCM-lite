@@ -533,73 +533,76 @@ class SAEngine1(EngineBase):
     W2 = 250
     Wa = [5, 15, 45, 100]
 
+    def _try_swap(self, file_io: FileIO, ans):
+        n_ctu = file_io.n_ctu
+        picked = np.random.choice(np.arange(n_ctu), size=2, replace=False)
+
+        while ans[picked[0]] == ans[picked[1]]:
+            picked = np.random.choice(np.arange(n_ctu), size=2, replace=False)
+
+        return picked[0], picked[1]
+
     def _try_move(
         self, file_io: FileIO, last_ans: np.ndarray, n_method, adaptive_search
     ):
         # Generate a group of new method_ids that move from current state
         # 90% swap, 10% replace
         n_ctu = len(last_ans)
+        # Try to update one block
+        if adaptive_search:
+            # Initialize change matrix
+            P = np.ones([n_ctu, n_method], dtype=np.float32)
+            if self.last_valid_step is not None:
+                (last_changed_block, last_old_method, last_new_method) = (
+                    self.last_valid_step
+                )
+                # 1. If adjacent block of last move is in the same color, it's likely to be an improvement.
+                for blk_id in file_io.adjacencyTable[last_changed_block]:
+                    if last_ans[blk_id] == last_old_method:
+                        P[blk_id, last_new_method] = self.W1
+                # 2. Non-adjacent likely to be an improvement.
+                for blk_id in range(n_ctu):
+                    if last_ans[blk_id] == last_old_method:
+                        P[blk_id, last_new_method] = np.maximum(
+                            P[blk_id, last_new_method], self.W2
+                        )
 
-        p = np.random.rand()
-        if p < 0:
-            # Try to swap two blocks
-            pass  # TODO
+            # 3. Blocks are likely to change into the method of its adjacent ones.
+            for blk_id in range(n_ctu):
+                count_adjacent = np.zeros(
+                    [
+                        n_method,
+                    ],
+                    dtype=np.int32,
+                )
+                for adj_blk_id in file_io.adjacencyTable[blk_id]:
+                    count_adjacent[last_ans[adj_blk_id]] += 1
+                count_adjacent = np.minimum(count_adjacent, 4)
+                for i in range(n_method):
+                    if count_adjacent[i] >= 1:
+                        P[blk_id, i] = np.maximum(
+                            P[blk_id, i], self.Wa[count_adjacent[i] - 1]
+                        )
+
+            # Normalize and select
+            P /= P.sum()
+            select_list = []
+            P_list = []
+            for blk_id in range(n_ctu):
+                for method_id in range(n_method):
+                    select_list.append((blk_id, method_id))
+                    p = P[blk_id, method_id]
+                    if last_ans[blk_id] == method_id:
+                        p = 0
+                    P_list.append(p)
+
+            selected = random.choices(select_list, weights=P_list, k=1)[0]
+            return selected
         else:
-            # Try to update one block
-            if adaptive_search:
-                # Initialize change matrix
-                P = np.ones([n_ctu, n_method], dtype=np.float32)
-                if self.last_valid_step is not None:
-                    (last_changed_block, last_old_method, last_new_method) = (
-                        self.last_valid_step
-                    )
-                    # 1. If adjacent block of last move is in the same color, it's likely to be an improvement.
-                    for blk_id in file_io.adjacencyTable[last_changed_block]:
-                        if last_ans[blk_id] == last_old_method:
-                            P[blk_id, last_new_method] = self.W1
-                    # 2. Non-adjacent likely to be an improvement.
-                    for blk_id in range(n_ctu):
-                        if last_ans[blk_id] == last_old_method:
-                            P[blk_id, last_new_method] = np.maximum(
-                                P[blk_id, last_new_method], self.W2
-                            )
-
-                # 3. Blocks are likely to change into the method of its adjacent ones.
-                for blk_id in range(n_ctu):
-                    count_adjacent = np.zeros(
-                        [
-                            n_method,
-                        ],
-                        dtype=np.int32,
-                    )
-                    for adj_blk_id in file_io.adjacencyTable[blk_id]:
-                        count_adjacent[last_ans[adj_blk_id]] += 1
-                    count_adjacent = np.minimum(count_adjacent, 4)
-                    for i in range(n_method):
-                        if count_adjacent[i] >= 1:
-                            P[blk_id, i] = np.maximum(
-                                P[blk_id, i], self.Wa[count_adjacent[i] - 1]
-                            )
-
-                # Normalize and select
-                P /= P.sum()
-                select_list = []
-                P_list = []
-                for blk_id in range(n_ctu):
-                    for method_id in range(n_method):
-                        select_list.append((blk_id, method_id))
-                        p = P[blk_id, method_id]
-                        if last_ans[blk_id] == method_id:
-                            p = 0
-                        P_list.append(p)
-
-                selected = random.choices(select_list, weights=P_list, k=1)[0]
-                return selected
-            else:
-                # Pure random
-                selected = np.random.random_integers(0, n_ctu - 1)
-                new_method = np.random.random_integers(0, n_method - 1)
-            return selected, new_method
+            # Pure random
+            selected = np.random.random_integers(0, n_ctu - 1)
+            new_method = np.random.random_integers(0, n_method - 1)
+        return selected, new_method
 
     def _show_solution(self, method_ids, target_byteses, b_t, score, psnr, time):
         n_ctu = len(method_ids)
@@ -711,11 +714,23 @@ class SAEngine1(EngineBase):
 
         # Simulated Annealing
         for step in range(num_steps):
-            changed_block, new_method = self._try_move(
-                file_io, ans, n_method, adaptive_search
-            )
-            next_state = ans.copy()
-            next_state[changed_block] = new_method
+            # 80%: swap blocks
+            # 20% update a block
+            p = np.random.rand()
+            update = p < 0.2
+            if np.all(ans == ans[0]):
+                # All elements are equal
+                update = True
+            if update:
+                changed_block, new_method = self._try_move(
+                    file_io, ans, n_method, adaptive_search
+                )
+                next_state = ans.copy()
+                next_state[changed_block] = new_method
+            else:
+                id1, id2 = self._try_swap(file_io, ans)
+                next_state = ans.copy()
+                next_state[id1], next_state[id2] = next_state[id2], next_state[id1]
 
             (
                 next_target_byteses,
@@ -733,17 +748,17 @@ class SAEngine1(EngineBase):
 
             if next_loss < loss:
                 accept = True
-                self.last_valid_step = (
-                    changed_block,
-                    ans[changed_block],
-                    new_method,
-                )
+                if update:
+                    self.last_valid_step = (
+                        changed_block,
+                        ans[changed_block],
+                        new_method,
+                    )
             else:
                 if next_loss[0] == 0 and next_loss[1] == 0:
                     delta = next_loss[2] - loss[2]
                     p = safe_SA_prob(delta, T)
                     accept = np.random.rand() < p
-                    self.last_valid_step = None
                 else:
                     accept = False
 
@@ -757,7 +772,7 @@ class SAEngine1(EngineBase):
                     best_loss = loss
                     best_ans = ans
 
-            if step % (num_steps // 20) == 0:
+            if step % (num_steps // 10) == 0:
                 print(f"Results for step: {step}; T={T:.6f}; best_loss={best_loss}")
                 self._show_solution(ans, target_byteses, r_limit, loss, psnr, t)
 
