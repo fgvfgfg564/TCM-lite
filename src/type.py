@@ -8,7 +8,6 @@ from .math_utils import Warpped4DFitter
 
 class CTUCurves(TypedDict):
     b_e: Warpped4DFitter
-    b_q: Warpped4DFitter
     b_t: np.ndarray
 
 

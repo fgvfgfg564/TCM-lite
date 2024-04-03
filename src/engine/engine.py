@@ -76,10 +76,12 @@ class EngineBase(CodecBase):
         tool_groups=TOOL_GROUPS.keys(),
         tool_filter=None,
         dtype=torch.half,
+        fitterclass: Type[Fitter] = FitKExp,
     ) -> None:
         self.ctu_size = ctu_size
         self.mosaic = mosaic
         self.methods = []
+        self.fitterclass = fitterclass
 
         self.dtype = dtype
 
@@ -277,13 +279,11 @@ class EngineBase(CodecBase):
                 )
                 b_e_file = os.path.join(cache_dir, "b_e.npz")
                 b_t_file = os.path.join(cache_dir, "b_t.npy")
-                b_q_file = os.path.join(cache_dir, "b_q.npz")
                 min_max_file = os.path.join(cache_dir, "min_max.npz")
 
                 try:
                     # If the caches are complete, load them
-                    b_e = Warpped4DFitter.load(b_e_file)
-                    b_q = Warpped4DFitter.load(b_q_file)
+                    b_e = self.fitterclass.load(b_e_file)
                     b_t = np.load(b_t_file)
                     min_max = np.load(min_max_file)
                     min_t = min_max["min_t"]
@@ -329,11 +329,12 @@ class EngineBase(CodecBase):
                             f"num_bytes are too few or not strictly increasing: \nnum_bytes={num_bytes}\nsqes={sqes}\nqscales={qscales}"
                         )
 
+                    print(num_bytes, sqes)
+
                     try:
-                        b_e = Warpped4DFitter(num_bytes, sqes, "fit3d")
+                        b_e = self.fitterclass(num_bytes, sqes)
                         # b_t = interpolate.interp1d(num_bytes, times, kind='linear')
                         b_t = np.polyfit(num_bytes, times, 1)
-                        b_q = Warpped4DFitter(num_bytes, qscales, "pchip")
                     except ValueError as e:
                         print(f"Interpolation error!")
                         print(f"num_bytes={num_bytes}")
@@ -346,7 +347,6 @@ class EngineBase(CodecBase):
                     # Save to cache
                     os.makedirs(cache_dir, exist_ok=True)
                     b_e.dump(b_e_file)
-                    b_q.dump(b_q_file)
                     np.save(b_t_file, b_t)
                     np.savez(min_max_file, min_t=min_t, max_t=max_t)
                     print("Cache saved to:", cache_dir, flush=True)
@@ -357,7 +357,6 @@ class EngineBase(CodecBase):
                 self._precomputed_curve[method_idx][i]["b_t"] = b_t  # Linear fitting
                 self._minimal_bytes[method_idx][i] = min_t
                 self._maximal_bytes[method_idx][i] = max_t
-                self._precomputed_curve[method_idx][i]["b_q"] = b_q
 
     def _compress_blocks(self, img_blocks, solution):
         # Calculate q_scale and bitstream for CTUs
@@ -417,6 +416,30 @@ class EngineBase(CodecBase):
 
         return blocks
 
+    def decode_ctu(self, file_io, i, bounds) -> np.ndarray:
+        (upper, left, lower, right) = bounds
+        method_id = file_io.method_id[i]
+        bitstream = file_io.bitstreams[i]
+        method, method_name, _ = self.methods[method_id]
+        torch.cuda.synchronize()
+        ctu = method.decompress_block(bitstream, lower - upper, right - left)
+        if isinstance(ctu, torch.Tensor):
+            ctu = self.torch_float_to_np_uint8(ctu)
+        return ctu
+
+    def _self_check(self, img_blocks: List[ImageBlock], file_io: FileIO):
+        # Check the difference between estimated and actual D loss
+        for i, bounds in enumerate(file_io.block_indexes):
+            ctu = self.decode_ctu(file_io, i, bounds)
+            sqe = (
+                (img_blocks[i].np.astype(np.float32) - ctu.astype(np.float32)) ** 2
+            ).sum() / (255**2)
+            num_bytes = len(file_io.bitstreams[i])
+            sqe_est = self._precomputed_curve[file_io.method_id[i]][i]["b_e"](num_bytes)
+            print(
+                f"Self check CTU #{i}: Method={file_io.method_id[i]}; Estimated SQE: {sqe_est:.6f}; actual SQE: {sqe:.6f}"
+            )
+
     @torch.inference_mode()
     def encode(
         self,
@@ -458,6 +481,7 @@ class EngineBase(CodecBase):
         )
         file_io.method_id = method_ids
         file_io.bitstreams = bitstreams
+        self._self_check(img_blocks, file_io)
         file_io.q_scale = q_scales
         file_io.dump(output_pth)
 
@@ -489,19 +513,9 @@ class EngineBase(CodecBase):
         with torch.no_grad():
             decoded_ctus = []
             with timer.Timer("Decode_CTU"):
-                for i, (upper, left, lower, right) in enumerate(file_io.block_indexes):
-                    method_id = file_io.method_id[i]
-                    bitstream = file_io.bitstreams[i]
-                    method, method_name, _ = self.methods[method_id]
-                    print(
-                        f"Decoding CTU #{i}: ({upper}, {left}) ~ ({lower}, {right})  method #{method_id}('{method_name}'); len_bitstream={len(bitstream)}B"
-                    )
-                    torch.cuda.synchronize()
-                    ctu = method.decompress_block(
-                        bitstream, lower - upper, right - left
-                    )
-                    if isinstance(ctu, torch.Tensor):
-                        ctu = self.torch_float_to_np_uint8(ctu)
+                for i, bounds in enumerate(file_io.block_indexes):
+                    print(f"Decoding CTU #{i})")
+                    ctu = self.decode_ctu(file_io, i, bounds)
                     decoded_ctus.append(ctu)
             with timer.Timer("Reconstruct&save"):
                 recon_img = self.join_blocks(decoded_ctus, file_io)
@@ -621,11 +635,10 @@ class SAEngine1(EngineBase):
             max_tb = self._maximal_bytes[method_ids[i]][i]
 
             est_time = np.polyval(curves["b_t"], target_bytes)
-            est_qscale = curves["b_q"](target_bytes)
             est_sqe = curves["b_e"](target_bytes)
 
             print(
-                f"- CTU [{i}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes:.1f}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\tsquared_error={est_sqe:.6f};",
+                f"- CTU [{i}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes:.1f}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tsquared_error={est_sqe:.6f};",
                 flush=True,
             )
 
@@ -897,11 +910,10 @@ class GAEngine1(EngineBase):
             max_tb = self._maximal_bytes[solution.method_ids[i]][i]
 
             est_time = np.polyval(curves["b_t"], target_bytes)
-            est_qscale = curves["b_q"](target_bytes)
             est_sqe = curves["b_e"](target_bytes)
 
             print(
-                f"- CTU [{i}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes:.1f}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tqscale={est_qscale:.5f}\tsquared_error={est_sqe:.6f}; method_scores={solution.method_score[:, i]}"
+                f"- CTU [{i}]:\tmethod_id={method_id}\ttarget_bytes={target_bytes:.1f}(in [{min_tb}, {max_tb}])\tdec_time={1000*est_time:.2f}ms\tsquared_error={est_sqe:.6f}; method_scores={solution.method_score[:, i]}"
             )
 
     def _solve(

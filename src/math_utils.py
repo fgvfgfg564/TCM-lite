@@ -1,5 +1,13 @@
+from __future__ import annotations
+
+from typing_extensions import Dict
+
+import abc
+from dataclasses import dataclass
+
 import numpy as np
 from scipy.interpolate import PchipInterpolator
+from scipy.optimize import minimize
 from typing_extensions import Callable, Literal, Union
 
 
@@ -7,7 +15,17 @@ def is_sorted(arr):
     return np.array_equal(arr, np.sort(arr))
 
 
-class PolyValWrapper(np.ndarray):
+class DerivableFunc(abc.ABC):
+    @abc.abstractmethod
+    def __call__(self, x: np.ndarray) -> np.ndarray:
+        pass
+
+    @abc.abstractmethod
+    def derivative(self) -> DerivableFunc:
+        pass
+
+
+class PolyValWrapper(np.ndarray, DerivableFunc):
     def __new__(cls, input_array):
         # Input array is an array-like object that you want to turn into a MyArray
         obj = np.asarray(input_array).view(cls)
@@ -20,24 +38,126 @@ class PolyValWrapper(np.ndarray):
     def derivative(self):
         return PolyValWrapper(np.polyder(self))
 
-    def posroot(self):
-        if len(self) > 3:
-            raise ValueError("Only supports quadratic funcs")
 
-        a = self[0]
-        b = self[1]
-        c = self[2]
+@dataclass
+class ExpKModel(DerivableFunc):
+    a: np.ndarray
+    b: np.ndarray
 
-        o = b**2 - 4 * a * c
-        if o < 0:
-            return np.inf
-        return (-b + np.sqrt(o)) / (2 * a)
+    def __call__(self, x: np.ndarray) -> np.ndarray:
+        return (np.power(-self.b, x) * self.a).sum()
+
+    def derivative(self) -> DerivableFunc:
+        ap = -self.a * self.b
+        bp = self.b + 1
+        return ExpKModel(ap, bp)
 
 
-def fit3d(X, Y) -> PolyValWrapper:
-    fit = np.polyfit(X, Y, 3)
-    fit = PolyValWrapper(fit)
-    return fit
+class Fitter(abc.ABC):
+    def __init__(
+        self,
+        X: np.ndarray,
+        Y: np.ndarray,
+    ) -> None:
+        self.X = np.asarray(X)
+        self.Y = np.asarray(Y)
+        self.curve = self.fit()
+        self.X_min = self.X.min()
+        self.X_max = self.X.max()
+        self.d = self.curve.derivative()
+
+    def R2(self, curve):
+        y_mean = self.Y.mean()
+        sum1 = 0
+        sum2 = 0
+        for x, y in zip(self.X, self.Y):
+            y_pred = curve(x)
+            sum1 += (y - y_pred) ** 2
+            sum2 += (y - y_mean) ** 2
+        return 1 - sum1 / sum2
+
+    def __call__(self, x):
+        return self.interpolate(x)
+
+    def interpolate(self, x):
+        return self.curve(x)
+
+    def derivative(self, x: float) -> float:
+        return self.d(x)
+
+    def dump(self, filename):
+        np.savez_compressed(filename, X=self.X, Y=self.Y, method=self.method)
+
+    @classmethod
+    def load(cls, filename):
+        loaded = np.load(filename)
+        return cls(X=loaded["X"], Y=loaded["Y"], method=loaded["method"])
+
+    @abc.abstractmethod
+    def fit(self) -> DerivableFunc:
+        pass
+
+
+class FitCubic(Fitter):
+    def fit(self) -> PolyValWrapper:
+        fit = np.polyfit(self.X, self.Y, 3)
+        fit = PolyValWrapper(fit)
+        return fit
+
+
+class FitKExp(Fitter):
+    def __init__(self, X: np.ndarray, Y: np.ndarray, K=3) -> None:
+        super().__init__(X, Y)
+        self.K = K
+
+    def fit(self):
+        a_init = np.ones([self.K], dtype=np.int32)
+        b_init = np.zeros([self.K], dtype=np.int32)
+        init_value = np.concatenate([a_init, b_init], axis=0)
+        curve = ExpKModel(a_init.copy(), b_init.copy())
+
+        y_std = self.Y.std()
+
+        def objective_func(ab: np.ndarray):
+            a = ab[: self.K]
+            b = ab[self.K :]
+            curve.a = a
+            curve.b = b
+            return -self.R2(curve)
+
+        def objective_gradient(ab: np.ndarray):
+            a = ab[: self.K]
+            b = ab[self.K :]
+            curve.a = a
+            curve.b = b
+            y_pred = curve(self.X)
+            d_r2_y_pred = -2.0 / (y_std**2) * (self.Y - y_pred)
+            da = [(d_r2_y_pred * np.power(self.X, b[i])).sum() for i in range(self.K)]
+            db = [
+                (d_r2_y_pred * a[i] * np.power(self.X, b[i])).sum()
+                for i in range(self.K)
+            ]
+            da = np.asarray(da)
+            db = np.asarray(db)
+            return np.concatenate([da, db], axis=0)
+
+        bounds = list([(1e-8, None) for i in range(K * 2)])
+
+        result = minimize(
+            objective_func,
+            init_value,
+            jac=objective_gradient,
+            method="SLSQP",
+            bounds=bounds,
+            options={
+                "ftol": 1e-12,
+                "maxiter": 1000,
+            },
+        )
+
+        ans = result.x
+        return ExpKModel(ans[: self.K], ans[self.K :])
+        # when x=0, f(x)=sum(a) <= 1.
 
 
 # class LinearRegression:
@@ -61,46 +181,6 @@ def fit3d(X, Y) -> PolyValWrapper:
 #     def derivative(self, x):
 #         # Derivative of the linear regression function (constant slope)
 #         return self.slope
-
-
-class Warpped4DFitter:
-    METHOD_DICT = {"fit3d": fit3d, "pchip": PchipInterpolator}
-
-    def __init__(
-        self,
-        X: np.ndarray,
-        Y: np.ndarray,
-        method: Union[Literal["fit3d"], Literal["pchip"]],
-    ) -> None:
-        self.X = np.asarray(X)
-        self.Y = np.asarray(Y)
-        self.method = str(method)
-        self.curve: Union[PchipInterpolator, PolyValWrapper] = self.METHOD_DICT[
-            self.method
-        ](
-            X,
-            Y,
-        )
-        self.X_min = self.X.min()
-        self.X_max = self.X.max()
-        self.d = self.curve.derivative()
-
-    def __call__(self, x):
-        return self.interpolate(x)
-
-    def interpolate(self, x):
-        return self.curve(x)
-
-    def derivative(self, x: float) -> float:
-        return self.d(x)
-
-    def dump(self, filename):
-        np.savez_compressed(filename, X=self.X, Y=self.Y, method=self.method)
-
-    @classmethod
-    def load(cls, filename):
-        loaded = np.load(filename)
-        return cls(X=loaded["X"], Y=loaded["Y"], method=loaded["method"])
 
 
 def safe_softmax(x: np.ndarray):
