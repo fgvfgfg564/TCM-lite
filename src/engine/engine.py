@@ -66,7 +66,7 @@ class GASolution(Solution):
 
 
 class EngineBase(CodecBase):
-    CACHE_DIR = os.path.join(os.path.split(__file__)[0], "../cache")
+    CACHE_DIR = os.path.join(os.path.split(__file__)[0], "../../cache")
 
     def __init__(
         self,

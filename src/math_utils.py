@@ -14,14 +14,13 @@ from typing_extensions import Callable, Literal, Union
 def is_sorted(arr):
     return np.array_equal(arr, np.sort(arr))
 
-
 class DerivableFunc(abc.ABC):
     @abc.abstractmethod
     def __call__(self, x: np.ndarray) -> np.ndarray:
         pass
 
     @abc.abstractmethod
-    def derivative(self) -> DerivableFunc:
+    def derivative(self) -> Callable[np.ndarray, np.ndarray]:
         pass
 
 
@@ -43,14 +42,24 @@ class PolyValWrapper(np.ndarray, DerivableFunc):
 class ExpKModel(DerivableFunc):
     a: np.ndarray
     b: np.ndarray
+    SCALE: float = 1000
 
     def __call__(self, x: np.ndarray) -> np.ndarray:
-        return (np.power(-self.b, x) * self.a).sum()
+        B, X = np.meshgrid(self.b, x)
+        return np.power(1 + np.exp(-B), -X / self.SCALE) @ self.a
 
-    def derivative(self) -> DerivableFunc:
-        ap = -self.a * self.b
-        bp = self.b + 1
-        return ExpKModel(ap, bp)
+    def derivative(self) -> DExpKModel:
+
+@dataclass
+class DExpKModel:
+    a: np.ndarray
+    b: np.ndarray
+    SCALE: float = 1000
+
+    def __call__(self, x: np.ndarray) -> np.ndarray:
+        b2 = 1 + np.exp(-self.b)
+        B, X = np.meshgrid(b2, x)
+        return np.power(B, X) @ (self.a * np.log(b2))
 
 
 class Fitter(abc.ABC):
@@ -76,6 +85,13 @@ class Fitter(abc.ABC):
             sum2 += (y - y_mean) ** 2
         return 1 - sum1 / sum2
 
+    def mse(self, curve):
+        sqe = 0
+        for x, y in zip(self.X, self.Y):
+            y_pred = curve(x)
+            sqe += (y - y_pred) ** 2
+        return sqe / len(self.X)
+
     def __call__(self, x):
         return self.interpolate(x)
 
@@ -86,12 +102,12 @@ class Fitter(abc.ABC):
         return self.d(x)
 
     def dump(self, filename):
-        np.savez_compressed(filename, X=self.X, Y=self.Y, method=self.method)
+        np.savez_compressed(filename, X=self.X, Y=self.Y)
 
     @classmethod
     def load(cls, filename):
         loaded = np.load(filename)
-        return cls(X=loaded["X"], Y=loaded["Y"], method=loaded["method"])
+        return cls(X=loaded["X"], Y=loaded["Y"])
 
     @abc.abstractmethod
     def fit(self) -> DerivableFunc:
@@ -106,24 +122,28 @@ class FitCubic(Fitter):
 
 
 class FitKExp(Fitter):
+
     def __init__(self, X: np.ndarray, Y: np.ndarray, K=3) -> None:
-        super().__init__(X, Y)
         self.K = K
+        super().__init__(X, Y)
+        print("MSE=", self.mse(self.curve))
 
     def fit(self):
-        a_init = np.ones([self.K], dtype=np.int32)
-        b_init = np.zeros([self.K], dtype=np.int32)
+        a_init = np.random.rand(self.K) * 2 * self.Y[0] / self.K
+        b_init = np.zeros([self.K])
         init_value = np.concatenate([a_init, b_init], axis=0)
         curve = ExpKModel(a_init.copy(), b_init.copy())
 
-        y_std = self.Y.std()
+        y_std2 = ((self.Y - self.Y.mean()) ** 2).sum()
 
         def objective_func(ab: np.ndarray):
+            # print(ab, flush=True)
             a = ab[: self.K]
             b = ab[self.K :]
             curve.a = a
             curve.b = b
-            return -self.R2(curve)
+            objective = self.mse(curve)
+            return objective
 
         def objective_gradient(ab: np.ndarray):
             a = ab[: self.K]
@@ -131,17 +151,27 @@ class FitKExp(Fitter):
             curve.a = a
             curve.b = b
             y_pred = curve(self.X)
-            d_r2_y_pred = -2.0 / (y_std**2) * (self.Y - y_pred)
-            da = [(d_r2_y_pred * np.power(self.X, b[i])).sum() for i in range(self.K)]
+            d_r2_y_pred = 2.0 / len(self.X) * (y_pred - self.Y)
+            da = [
+                (d_r2_y_pred * np.power(1 + np.exp(-b[i]), -self.X / curve.SCALE)).sum()
+                for i in range(self.K)
+            ]
             db = [
-                (d_r2_y_pred * a[i] * np.power(self.X, b[i])).sum()
+                (
+                    d_r2_y_pred
+                    * a[i]
+                    * (-self.X / curve.SCALE)
+                    * np.power(1 + np.exp(-b[i]), -(self.X / curve.SCALE + 1))
+                    * (-np.exp(-b[i]))
+                ).sum()
                 for i in range(self.K)
             ]
             da = np.asarray(da)
             db = np.asarray(db)
+            # print(a, b, da, db, flush=True)
             return np.concatenate([da, db], axis=0)
 
-        bounds = list([(1e-8, None) for i in range(K * 2)])
+        bounds = [(None, None)] * self.K + [(-2, 100)] * self.K
 
         result = minimize(
             objective_func,
@@ -151,8 +181,9 @@ class FitKExp(Fitter):
             bounds=bounds,
             options={
                 "ftol": 1e-12,
-                "maxiter": 1000,
+                "maxiter": 10000,
             },
+            tol=1e-12,
         )
 
         ans = result.x

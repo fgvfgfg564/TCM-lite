@@ -150,8 +150,8 @@ class SLSQPSolver(SolverBase):
             gradients = []
             for i in range(n_ctu):
                 method_id = method_ids[i]
-                b_e: Warpped4DFitter = precomputed_curve[method_id][i]["b_e"]
-                b_t: np.ndarray = precomputed_curve[method_id][i]["b_t"]
+                b_e = precomputed_curve[method_id][i]["b_e"]
+                b_t = precomputed_curve[method_id][i]["b_t"]
                 gradients.append(
                     self.w_time * b_t[0]
                     - sqe_gradient * b_e.derivative(target_bytes[i])
@@ -206,7 +206,7 @@ class LagrangeMultiplierSolver(SolverBase):
         self.PPE = ProcessPoolExecutor(max_workers=self.num_workers)
 
     @classmethod
-    def _bs_inner_loop(cls, target_d: float, curves: List[Warpped4DFitter]) -> float:
+    def _bs_inner_loop(cls, target_d: float, curves: List[Fitter]) -> float:
         roots = []
         for curve in curves:
             fdx = curve.curve.derivative().copy()

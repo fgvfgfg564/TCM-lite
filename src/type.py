@@ -3,11 +3,11 @@ from typing_extensions import TypeAlias
 import numpy as np
 import dataclasses
 
-from .math_utils import Warpped4DFitter
+from .math_utils import Fitter
 
 
 class CTUCurves(TypedDict):
-    b_e: Warpped4DFitter
+    b_e: Fitter
     b_t: np.ndarray
 
 
