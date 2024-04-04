@@ -209,8 +209,9 @@ class LagrangeMultiplierSolver(SolverBase):
     def _bs_inner_loop(cls, target_d: float, curves: List[Fitter]) -> float:
         roots = []
         for curve in curves:
-            fdx = curve.curve.derivative().copy()
+            fdx = curve.curve.derivative()
             fdx[-1] -= target_d
+            raise NotImplemented  # TODO
             root = fdx.posroot()
             root = np.clip(root, curve.X_min, curve.X_max)
             roots.append(root)

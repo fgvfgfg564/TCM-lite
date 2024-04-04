@@ -14,6 +14,7 @@ from typing_extensions import Callable, Literal, Union
 def is_sorted(arr):
     return np.array_equal(arr, np.sort(arr))
 
+
 class DerivableFunc(abc.ABC):
     @abc.abstractmethod
     def __call__(self, x: np.ndarray) -> np.ndarray:
@@ -48,18 +49,8 @@ class ExpKModel(DerivableFunc):
         B, X = np.meshgrid(self.b, x)
         return np.power(1 + np.exp(-B), -X / self.SCALE) @ self.a
 
-    def derivative(self) -> DExpKModel:
-
-@dataclass
-class DExpKModel:
-    a: np.ndarray
-    b: np.ndarray
-    SCALE: float = 1000
-
-    def __call__(self, x: np.ndarray) -> np.ndarray:
-        b2 = 1 + np.exp(-self.b)
-        B, X = np.meshgrid(b2, x)
-        return np.power(B, X) @ (self.a * np.log(b2))
+    def derivative(self) -> ExpKModel:
+        pass
 
 
 class Fitter(abc.ABC):
