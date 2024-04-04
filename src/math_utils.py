@@ -130,9 +130,6 @@ class FitKExp(Fitter):
         r2 = self.R2(self.curve)
         print("R2=", r2)
 
-        if r2 < 0.5:
-            raise ValueError("Fitting failed")
-
     def fit(self):
         a_init = np.random.rand(self.K) * 2 * self.Y[0] / self.K
         b_init = np.zeros([self.K]) - 0.05

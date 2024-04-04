@@ -89,7 +89,9 @@ class FileIO:
 
             for i in range(N):
                 at_item = []
-                for j in range(i + 1, N):
+                for j in range(N):
+                    if i == j:
+                        continue
                     if self.intersects(self.block_indexes[i], self.block_indexes[j]):
                         at_item.append(j)
                 AT.append(at_item)

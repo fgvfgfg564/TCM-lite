@@ -144,6 +144,8 @@ class EngineBase(CodecBase):
         if len(self.methods) == 0:
             raise RuntimeError("No valid coding tool is loaded!")
 
+        self.n_method = len(self.methods)
+
     def _feed_block(self, method: CodingToolBase, image_block: ImageBlock, qscale):
         if method.PLATFORM == "numpy":
             return method.compress_block(image_block.np, qscale)
@@ -543,30 +545,20 @@ class SAEngine1(EngineBase):
 
     # Older version that considers T loss
 
-    W1 = 1000
-    W2 = 250
-    Wa = 100.0
-
-    def _try_swap(self, file_io: FileIO, ans):
-        n_ctu = file_io.n_ctu
-        picked = np.random.choice(np.arange(n_ctu), size=2, replace=False)
-
-        while ans[picked[0]] == ans[picked[1]]:
-            picked = np.random.choice(np.arange(n_ctu), size=2, replace=False)
-
-        return picked[0], picked[1]
+    W1 = 100
+    W2 = 25
+    Wa = 10.0
 
     def _select_distinctive_block(
         self,
         file_io: FileIO,
-        n_method,
         last_ans,
         method=None,
         last_valid_step=None,
     ):
         n_ctu = file_io.n_ctu
         # Initialize change matrix
-        P = np.ones([n_ctu, n_method], dtype=np.float32)
+        P = np.ones([n_ctu, self.n_method], dtype=np.float32)
         if last_valid_step is not None:
             (last_changed_block, last_old_method, last_new_method) = last_valid_step
             # 1. If adjacent block of last move is in the same color, it's likely to be an improvement.
@@ -582,27 +574,25 @@ class SAEngine1(EngineBase):
 
         # 3. Blocks are likely to change into the method of its adjacent ones.
         for blk_id in range(n_ctu):
-            count_adjacent = np.zeros(
-                [
-                    n_method,
-                ],
-                dtype=np.float32,
-            )
+            count_adjacent = np.zeros([self.n_method], dtype=np.float32)
             for adj_blk_id in file_io.adjacencyTable[blk_id]:
                 count_adjacent[last_ans[adj_blk_id]] += 1
             count_adjacent /= count_adjacent.sum()
-            for i in range(n_method):
-                if count_adjacent[i] >= 1:
-                    P[blk_id, i] = np.maximum(
-                        P[blk_id, i], self.Wa * count_adjacent[i] ** 2
-                    )
+            for i in range(self.n_method):
+                P[blk_id, i] = np.maximum(
+                    P[blk_id, i], self.Wa * count_adjacent[i] ** 2
+                )
 
         # Normalize and select
         P /= P.sum()
-        select_list = []
+        select_list: List[Tuple[int, int]] = []
         P_list = []
         for blk_id in range(n_ctu):
-            for method_id in range(n_method):
+            if method is not None:
+                method_list = [method]
+            else:
+                method_list = range(self.n_method)
+            for method_id in method_list:
                 select_list.append((blk_id, method_id))
                 p = P[blk_id, method_id]
                 if last_ans[blk_id] == method_id:
@@ -610,6 +600,7 @@ class SAEngine1(EngineBase):
                 P_list.append(p)
 
         selected = random.choices(select_list, weights=P_list, k=1)[0]
+        return selected
 
     def _try_move(
         self, file_io: FileIO, last_ans: np.ndarray, n_method, adaptive_search
@@ -621,7 +612,6 @@ class SAEngine1(EngineBase):
         if adaptive_search:
             selected = self._select_distinctive_block(
                 file_io,
-                n_method,
                 last_ans=last_ans,
                 last_valid_step=self.last_valid_step,
             )
@@ -634,6 +624,13 @@ class SAEngine1(EngineBase):
             selected = np.random.random_integers(0, n_ctu - 1)
             new_method = np.random.random_integers(0, n_method - 1)
         return selected, new_method
+
+    def _try_swap(self, file_io: FileIO, last_ans: np.ndarray):
+        unique = np.unique(last_ans)
+        m1, m2 = np.random.choice(unique, 2, replace=False)
+        blk1, _ = self._select_distinctive_block(file_io, last_ans, method=m1)
+        blk2, _ = self._select_distinctive_block(file_io, last_ans, method=m2)
+        return blk1, blk2
 
     def _show_solution(self, method_ids, target_byteses, b_t, score, psnr, time):
         n_ctu = len(method_ids)
@@ -806,6 +803,8 @@ class SAEngine1(EngineBase):
                     accept = np.random.rand() < p
                 else:
                     accept = False
+                if update:
+                    self.last_valid_step = None
 
             print(f"Loss: {loss}; next_loss: {next_loss}; Accept: {accept}")
 
