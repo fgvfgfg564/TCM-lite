@@ -50,7 +50,7 @@ class PSNRMetric(MetricBase):
     @classmethod
     def _ctu_level_loss_np(cls, output: np.ndarray, target: np.ndarray) -> float:
         output = output.astype(np.float32)
-        target = target.astype(np.int32)
+        target = target.astype(np.float32)
         return np.sum((output - target) ** 2) / (255.0**2)
 
     @classmethod

@@ -26,8 +26,8 @@ def parse_args():
 
 
 def psnr(img1, img2):
-    img1 = np.array(Image.open(img1)).astype(np.int32)
-    img2 = np.array(Image.open(img2)).astype(np.int32)
+    img1 = np.array(Image.open(img1)).astype(np.float32)
+    img2 = np.array(Image.open(img2)).astype(np.float32)
 
     print(img1.shape)
 

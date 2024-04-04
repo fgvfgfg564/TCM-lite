@@ -27,7 +27,7 @@ class SolverBase(abc.ABC):
     ) -> Tuple[LossType, float, float]:
         # Returns score given method ids and target bytes
         if r_limit is not None and np.sum(target_byteses) > r_limit:
-            r_exceed = np.sum(target_byteses) > r_limit
+            r_exceed = np.sum(target_byteses) - r_limit
         else:
             r_exceed = 0
 
@@ -97,13 +97,13 @@ class SLSQPSolver(SolverBase):
             [
                 n_ctu,
             ],
-            dtype=np.int32,
+            dtype=np.float32,
         )
         max_bytes = np.zeros(
             [
                 n_ctu,
             ],
-            dtype=np.int32,
+            dtype=np.float32,
         )
 
         bounds = []
@@ -268,10 +268,22 @@ class LagrangeMultiplierSolver(SolverBase):
             min_d = min(min_d, min_do)
             max_d = max(max_d, max_do)
 
-        target_d = brentq(lambda x: outer_loop(x) - r_limit, min_d, max_d, xtol=1e-3)
-        # target_d = binary_search(
-        #     outer_loop, r_limit, min_d, max_d, epsilon=1e-3, f_epsilon=8
-        # )
+        # if outer_loop(min_d) >= r_limit - 4:
+        #     target_d = min_d
+        # elif outer_loop(max_d) <= r_limit - 4:
+        #     target_d = max_d
+        # else:
+        #     # Zero-point exists
+        #     target_d = brentq(
+        #         lambda x: outer_loop(x) - r_limit - 4,
+        #         min_d,
+        #         max_d,
+        #         xtol=1e-6,
+        #         rtol=1e-4,
+        #     )
+        target_d = binary_search(
+            outer_loop, r_limit, min_d, max_d, epsilon=1e-6, f_epsilon=32
+        )
         ctu_results = self.get_ctu_results(curves_list, target_d, method_ids, n_ctu)
         loss, psnr, t = self._loss(
             precomputed_curve=precomputed_curve,

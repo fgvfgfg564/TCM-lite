@@ -53,8 +53,8 @@ class GASolution(Solution):
         self.n_ctu = len(self.method_ids)
 
     def normalize_target_byteses(self, min_table, max_table, b_t):
-        min_bytes = np.zeros_like(self.target_byteses, dtype=np.int32)
-        max_bytes = np.zeros_like(self.target_byteses, dtype=np.int32)
+        min_bytes = np.zeros_like(self.target_byteses, dtype=np.float32)
+        max_bytes = np.zeros_like(self.target_byteses, dtype=np.float32)
 
         for i in range(self.n_ctu):
             min_bytes[i] = min_table[self.method_ids[i]][i]
@@ -254,8 +254,8 @@ class EngineBase(CodecBase):
         n_methods = len(self.methods)
 
         self._precomputed_curve: ImgCurves = {}
-        self._minimal_bytes = np.zeros([n_methods, n_ctu], dtype=np.int32)
-        self._maximal_bytes = np.zeros([n_methods, n_ctu], dtype=np.int32)
+        self._minimal_bytes = np.zeros([n_methods, n_ctu], dtype=np.float32)
+        self._maximal_bytes = np.zeros([n_methods, n_ctu], dtype=np.float32)
 
         pbar = tqdm.trange(n_methods * n_ctu * len(self.qscale_samples))
         pbar.set_description("Precomputing score")
@@ -545,7 +545,7 @@ class SAEngine1(EngineBase):
 
     W1 = 1000
     W2 = 250
-    Wa = [5, 15, 45, 100]
+    Wa = 100.0
 
     def _try_swap(self, file_io: FileIO, ans):
         n_ctu = file_io.n_ctu
@@ -556,6 +556,61 @@ class SAEngine1(EngineBase):
 
         return picked[0], picked[1]
 
+    def _select_distinctive_block(
+        self,
+        file_io: FileIO,
+        n_method,
+        last_ans,
+        method=None,
+        last_valid_step=None,
+    ):
+        n_ctu = file_io.n_ctu
+        # Initialize change matrix
+        P = np.ones([n_ctu, n_method], dtype=np.float32)
+        if last_valid_step is not None:
+            (last_changed_block, last_old_method, last_new_method) = last_valid_step
+            # 1. If adjacent block of last move is in the same color, it's likely to be an improvement.
+            for blk_id in file_io.adjacencyTable[last_changed_block]:
+                if last_ans[blk_id] == last_old_method:
+                    P[blk_id, last_new_method] = self.W1
+            # 2. Non-adjacent likely to be an improvement.
+            for blk_id in range(n_ctu):
+                if last_ans[blk_id] == last_old_method:
+                    P[blk_id, last_new_method] = np.maximum(
+                        P[blk_id, last_new_method], self.W2
+                    )
+
+        # 3. Blocks are likely to change into the method of its adjacent ones.
+        for blk_id in range(n_ctu):
+            count_adjacent = np.zeros(
+                [
+                    n_method,
+                ],
+                dtype=np.float32,
+            )
+            for adj_blk_id in file_io.adjacencyTable[blk_id]:
+                count_adjacent[last_ans[adj_blk_id]] += 1
+            count_adjacent /= count_adjacent.sum()
+            for i in range(n_method):
+                if count_adjacent[i] >= 1:
+                    P[blk_id, i] = np.maximum(
+                        P[blk_id, i], self.Wa * count_adjacent[i] ** 2
+                    )
+
+        # Normalize and select
+        P /= P.sum()
+        select_list = []
+        P_list = []
+        for blk_id in range(n_ctu):
+            for method_id in range(n_method):
+                select_list.append((blk_id, method_id))
+                p = P[blk_id, method_id]
+                if last_ans[blk_id] == method_id:
+                    p = 0
+                P_list.append(p)
+
+        selected = random.choices(select_list, weights=P_list, k=1)[0]
+
     def _try_move(
         self, file_io: FileIO, last_ans: np.ndarray, n_method, adaptive_search
     ):
@@ -564,53 +619,15 @@ class SAEngine1(EngineBase):
         n_ctu = len(last_ans)
         # Try to update one block
         if adaptive_search:
-            # Initialize change matrix
-            P = np.ones([n_ctu, n_method], dtype=np.float32)
-            if self.last_valid_step is not None:
-                (last_changed_block, last_old_method, last_new_method) = (
-                    self.last_valid_step
-                )
-                # 1. If adjacent block of last move is in the same color, it's likely to be an improvement.
-                for blk_id in file_io.adjacencyTable[last_changed_block]:
-                    if last_ans[blk_id] == last_old_method:
-                        P[blk_id, last_new_method] = self.W1
-                # 2. Non-adjacent likely to be an improvement.
-                for blk_id in range(n_ctu):
-                    if last_ans[blk_id] == last_old_method:
-                        P[blk_id, last_new_method] = np.maximum(
-                            P[blk_id, last_new_method], self.W2
-                        )
-
-            # 3. Blocks are likely to change into the method of its adjacent ones.
-            for blk_id in range(n_ctu):
-                count_adjacent = np.zeros(
-                    [
-                        n_method,
-                    ],
-                    dtype=np.int32,
-                )
-                for adj_blk_id in file_io.adjacencyTable[blk_id]:
-                    count_adjacent[last_ans[adj_blk_id]] += 1
-                count_adjacent = np.minimum(count_adjacent, 4)
-                for i in range(n_method):
-                    if count_adjacent[i] >= 1:
-                        P[blk_id, i] = np.maximum(
-                            P[blk_id, i], self.Wa[count_adjacent[i] - 1]
-                        )
-
-            # Normalize and select
-            P /= P.sum()
-            select_list = []
-            P_list = []
-            for blk_id in range(n_ctu):
-                for method_id in range(n_method):
-                    select_list.append((blk_id, method_id))
-                    p = P[blk_id, method_id]
-                    if last_ans[blk_id] == method_id:
-                        p = 0
-                    P_list.append(p)
-
-            selected = random.choices(select_list, weights=P_list, k=1)[0]
+            selected = self._select_distinctive_block(
+                file_io,
+                n_method,
+                last_ans=last_ans,
+                last_valid_step=self.last_valid_step,
+            )
+            print(
+                f"Selected block: {selected[0]}; Old: {last_ans[selected[0]]}; New: {selected[1]}"
+            )
             return selected
         else:
             # Pure random
@@ -648,6 +665,8 @@ class SAEngine1(EngineBase):
         file_io: FileIO,
         n_ctu: int,
         n_method: int,
+        t_limit,
+        num_steps=10000,
     ):
         # Assign blocks to methods according to their complexity
         complexity_scores = np.asarray(
@@ -678,7 +697,15 @@ class SAEngine1(EngineBase):
         return results
 
     def _init(
-        self, img_blocks, init_values, adaptive_init, n_method, n_ctu, file_io, r_limit
+        self,
+        img_blocks,
+        init_values,
+        adaptive_init,
+        n_method,
+        n_ctu,
+        file_io,
+        r_limit,
+        t_limit,
     ):
         if n_method == 1:
             ans = np.zeros([n_ctu], dtype=np.int32)
@@ -687,7 +714,9 @@ class SAEngine1(EngineBase):
                 ans = init_values
             else:
                 if adaptive_init:
-                    ans = self._adaptive_init(img_blocks, file_io, n_ctu, n_method)
+                    ans = self._adaptive_init(
+                        img_blocks, file_io, n_ctu, n_method, t_limit
+                    )
                 else:
                     ans = np.random.random_integers(
                         0,
@@ -734,6 +763,9 @@ class SAEngine1(EngineBase):
             if np.all(ans == ans[0]):
                 # All elements are equal
                 update = True
+            if best_loss[0] > 0 or best_loss[1] > 0:
+                # Failed to meet constraints
+                update = True
             if update:
                 changed_block, new_method = self._try_move(
                     file_io, ans, n_method, adaptive_search
@@ -775,6 +807,8 @@ class SAEngine1(EngineBase):
                 else:
                     accept = False
 
+            print(f"Loss: {loss}; next_loss: {next_loss}; Accept: {accept}")
+
             if accept:
                 ans = next_state
                 target_byteses = next_target_byteses
@@ -810,7 +844,14 @@ class SAEngine1(EngineBase):
         n_ctu = len(img_blocks)
         n_method = len(self.methods)
         ans = self._init(
-            img_blocks, init_values, adaptive_init, n_method, n_ctu, file_io, r_limit
+            img_blocks,
+            init_values,
+            adaptive_init,
+            n_method,
+            n_ctu,
+            file_io,
+            r_limit,
+            t_limit,
         )
         if n_method > 1:
             ans = self._sa_body(
@@ -819,7 +860,7 @@ class SAEngine1(EngineBase):
                 img_size,
                 file_io,
                 r_limit,
-                t_limit, 
+                t_limit,
                 num_steps,
                 adaptive_search,
                 T_start,

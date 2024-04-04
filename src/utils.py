@@ -37,8 +37,8 @@ def get_bpg_result(img_filename, qp=28):
         file_size_bytes = os.path.getsize(bin_filename)
         num_bits = file_size_bytes
 
-        img1 = np.array(Image.open(img_filename)).astype(np.int32)
-        img2 = np.array(Image.open(recon_filename)).astype(np.int32)
+        img1 = np.array(Image.open(img_filename)).astype(np.float32)
+        img2 = np.array(Image.open(recon_filename)).astype(np.float32)
 
         mse = np.mean((img1 - img2) ** 2)
         psnr = -10 * np.log10(mse / (255**2))
