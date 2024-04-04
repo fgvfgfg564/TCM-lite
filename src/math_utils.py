@@ -118,22 +118,27 @@ class FitKExp(Fitter):
         self.K = K
         super().__init__(X, Y)
         print("MSE=", self.mse(self.curve))
+        r2 = self.R2(self.curve)
+        print("R2=", r2)
+
+        if r2 < 0.5:
+            raise ValueError("Fitting failed")
 
     def fit(self):
         a_init = np.random.rand(self.K) * 2 * self.Y[0] / self.K
-        b_init = np.zeros([self.K])
+        b_init = np.zeros([self.K]) - 0.05
         init_value = np.concatenate([a_init, b_init], axis=0)
         curve = ExpKModel(a_init.copy(), b_init.copy())
 
         y_std2 = ((self.Y - self.Y.mean()) ** 2).sum()
 
         def objective_func(ab: np.ndarray):
-            # print(ab, flush=True)
+            # R2 loss
             a = ab[: self.K]
             b = ab[self.K :]
             curve.a = a
             curve.b = b
-            objective = self.mse(curve)
+            objective = 1.0 - self.R2(curve)
             return objective
 
         def objective_gradient(ab: np.ndarray):
@@ -142,7 +147,7 @@ class FitKExp(Fitter):
             curve.a = a
             curve.b = b
             y_pred = curve(self.X)
-            d_r2_y_pred = 2.0 / len(self.X) * (y_pred - self.Y)
+            d_r2_y_pred = 2.0 / y_std2 * (y_pred - self.Y)
             da = [
                 (d_r2_y_pred * np.power(1 + np.exp(-b[i]), -self.X / curve.SCALE)).sum()
                 for i in range(self.K)
@@ -162,7 +167,7 @@ class FitKExp(Fitter):
             # print(a, b, da, db, flush=True)
             return np.concatenate([da, db], axis=0)
 
-        bounds = [(None, None)] * self.K + [(-2, 100)] * self.K
+        bounds = [(None, None)] * self.K + [(-2, 10)] * self.K
 
         result = minimize(
             objective_func,
