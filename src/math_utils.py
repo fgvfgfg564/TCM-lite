@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing_extensions import Dict
+from typing_extensions import Dict, TypeVar, Self
 
 import abc
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from scipy.interpolate import PchipInterpolator
@@ -15,13 +15,16 @@ def is_sorted(arr):
     return np.array_equal(arr, np.sort(arr))
 
 
+T = TypeVar("T", np.ndarray, float)
+
+
 class DerivableFunc(abc.ABC):
     @abc.abstractmethod
-    def __call__(self, x: np.ndarray) -> np.ndarray:
+    def __call__(self, x: T) -> T:
         pass
 
     @abc.abstractmethod
-    def derivative(self) -> Callable[np.ndarray, np.ndarray]:
+    def derivative(self) -> DerivableFunc:
         pass
 
 
@@ -43,14 +46,20 @@ class PolyValWrapper(np.ndarray, DerivableFunc):
 class ExpKModel(DerivableFunc):
     a: np.ndarray
     b: np.ndarray
-    SCALE: float = 1000
+    c: np.ndarray = np.asarray(0.0)
+    SCALE: float = field(default=1000, init=False, repr=False)
 
-    def __call__(self, x: np.ndarray) -> np.ndarray:
+    def __call__(self, x: T) -> T:
         B, X = np.meshgrid(self.b, x)
-        return np.power(1 + np.exp(-B), -X / self.SCALE) @ self.a
+        result = np.power(1 + np.exp(-B), -X / self.SCALE) @ self.a + self.c
+        if not isinstance(x, np.ndarray):
+            result = result.item()
+        return result
 
     def derivative(self) -> ExpKModel:
-        pass
+        a_new = -self.a * np.log(1 + np.exp(-self.b)) / self.SCALE
+        b_new = self.b
+        return ExpKModel(a_new, b_new, np.asarray(0.0))
 
 
 class Fitter(abc.ABC):
@@ -186,6 +195,24 @@ class FitKExp(Fitter):
         return ExpKModel(ans[: self.K], ans[self.K :])
         # when x=0, f(x)=sum(a) <= 1.
 
+    def dump(self, filename):
+        np.savez_compressed(
+            filename, X=self.X, Y=self.Y, K=self.K, a=self.curve.a, b=self.curve.b
+        )
+
+    @classmethod
+    def load(cls, filename) -> Self:
+        loaded = np.load(filename)
+        obj = cls.__new__(cls)
+        obj.X = loaded["X"]
+        obj.Y = loaded["Y"]
+        obj.K = loaded["K"]
+        obj.curve = ExpKModel(a=loaded["a"], b=loaded["b"], c=np.asarray(0))
+        obj.X_min = obj.X.min()
+        obj.X_max = obj.X.max()
+        obj.d = obj.curve.derivative()
+        return obj
+
 
 # class LinearRegression:
 #     def __init__(self, X, Y):
@@ -226,11 +253,12 @@ def safe_SA_prob(delta, T):
 
 
 def binary_search(
-    f: Callable[[float], float],
+    func: Callable[[float], float],
     target: float,
     x_min: float,
     x_max: float,
     epsilon: float,
+    f_epsilon: float = None,
     debug: bool = False,
 ) -> float:
     """
@@ -240,9 +268,12 @@ def binary_search(
     r = x_max
     while l < r - epsilon:
         mid = (l + r) / 2
-        u = f(mid)
+        u = func(mid)
         if u <= target:
+            if f_epsilon is not None and u >= target - f_epsilon:
+                return mid
             l = mid
+            fl = u
         else:
             r = mid
         if debug:

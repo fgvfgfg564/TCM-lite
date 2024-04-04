@@ -20,13 +20,14 @@ def async_map(
 
         try:
             results = await asyncio.gather(*tasks)
-        except (KeyboardInterrupt, asyncio.CancelledError):
+        except (KeyboardInterrupt, asyncio.CancelledError) as e:
             for task in tasks:
                 task.cancel()
             for process in executor._processes.values():
                 process.terminate()
             executor.shutdown(wait=False, cancel_futures=True)
             await asyncio.gather(*tasks, return_exceptions=True)
+            raise e
         return results
 
     return asyncio.run(_async_map())

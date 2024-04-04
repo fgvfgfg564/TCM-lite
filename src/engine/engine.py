@@ -819,7 +819,7 @@ class SAEngine1(EngineBase):
                 img_size,
                 file_io,
                 r_limit,
-                t_limit,
+                t_limit, 
                 num_steps,
                 adaptive_search,
                 T_start,

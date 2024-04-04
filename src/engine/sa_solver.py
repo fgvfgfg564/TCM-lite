@@ -2,8 +2,9 @@ from typing_extensions import *
 
 import abc
 import os
+import copy
 from functools import partial
-from scipy.optimize import minimize
+from scipy.optimize import minimize, newton, brentq
 from concurrent.futures import ProcessPoolExecutor
 from time import time
 
@@ -14,7 +15,7 @@ from ..math_utils import *
 
 
 class SolverBase(abc.ABC):
-    def _get_score(
+    def _loss(
         self,
         precomputed_curve: ImgCurves,
         n_ctu,
@@ -125,7 +126,7 @@ class SLSQPSolver(SolverBase):
             return init_value, score, psnr, time
 
         def objective_func(target_bytes) -> LossType:
-            result = self._get_score(
+            result = self._loss(
                 precomputed_curve,
                 n_ctu,
                 file_io,
@@ -163,7 +164,7 @@ class SLSQPSolver(SolverBase):
             return r_limit - target_bytes.sum()
 
         def ineq_constraint_t(target_bytes):
-            _, __, t = self._get_score(
+            _, __, t = self._loss(
                 precomputed_curve,
                 n_ctu,
                 file_io,
@@ -190,7 +191,7 @@ class SLSQPSolver(SolverBase):
 
         ans = result.x
 
-        score, psnr, time = self._get_score(n_ctu, file_io, method_ids, ans, b_t)
+        score, psnr, time = self._loss(n_ctu, file_io, method_ids, ans, b_t)
 
         return ans, score, psnr, time
 
@@ -199,10 +200,10 @@ class LagrangeMultiplierSolver(SolverBase):
     def __init__(self, num_workers: WorkerConfig = "AUTO") -> None:
         super().__init__()
         if num_workers == "AUTO":
-            self.num_workers = os.cpu_count() * 2
+            self.num_workers = min(os.cpu_count() * 2, 32)
         else:
             self.num_workers = num_workers
-        self.batch_size = 32
+        self.batch_size = 4
         self.PPE = ProcessPoolExecutor(max_workers=self.num_workers)
 
     @classmethod
@@ -210,27 +211,30 @@ class LagrangeMultiplierSolver(SolverBase):
         roots = []
         for curve in curves:
             fdx = curve.curve.derivative()
-            fdx[-1] -= target_d
-            raise NotImplemented  # TODO
-            root = fdx.posroot()
-            root = np.clip(root, curve.X_min, curve.X_max)
-            roots.append(root)
+            fdx = copy.copy(fdx)
+            fdx.c -= target_d
+            if fdx(curve.X_min) > 0:
+                # fdx should be increasing
+                roots.append(curve.X_min)
+            elif fdx(curve.X_max) < 0:
+                roots.append(curve.X_max)
+            else:
+                root = newton(fdx, x0=0.0, fprime=fdx.derivative(), maxiter=50, tol=1.0)
+                root = np.clip(root, curve.X_min, curve.X_max)
+                roots.append(root)
         return roots
 
     @classmethod
     def separate_into_sublists(cls, lst, length):
-        return [lst[i : i + length] for i in range(0, len(lst), length)]
+        return list([lst[i : i + length] for i in range(0, len(lst), length)])
 
     @classmethod
     def join_lists(cls, lists):
         return list([element for sublist in lists for element in sublist])
 
-    def get_ctu_results(self, precomputed_curve, target_d: float, method_ids, n_ctu):
+    def get_ctu_results(self, curves_list, target_d: float, method_ids, n_ctu):
         _f = partial(self._bs_inner_loop, target_d)
 
-        curves_list = list(
-            [precomputed_curve[method_ids[i]][i]["b_e"] for i in range(n_ctu)]
-        )
         curves_list = self.separate_into_sublists(curves_list, self.batch_size)
         ctu_results = async_map(_f, curves_list, executor=self.PPE)
         return self.join_lists(ctu_results)
@@ -246,19 +250,30 @@ class LagrangeMultiplierSolver(SolverBase):
         t_limit,
     ):
         # A simple Lagrange Multiplier
+        curves_list = list(
+            [precomputed_curve[method_ids[i]][i]["b_e"] for i in range(n_ctu)]
+        )
 
         def outer_loop(target_d: float) -> float:
-            ctu_results = self.get_ctu_results(
-                precomputed_curve, target_d, method_ids, n_ctu
-            )
+            ctu_results = self.get_ctu_results(curves_list, target_d, method_ids, n_ctu)
             tot_bytes = sum(ctu_results)
             return tot_bytes
 
-        target_d = binary_search(outer_loop, r_limit, -1, 0, 1e-6)
-        ctu_results = self.get_ctu_results(
-            precomputed_curve, target_d, method_ids, n_ctu
-        )
-        score, psnr, t = self._get_score(
+        min_d = float("inf")
+        max_d = -float("inf")
+
+        for curve in curves_list:
+            min_do = curve.derivative(curve.X_min)
+            max_do = curve.derivative(curve.X_max)
+            min_d = min(min_d, min_do)
+            max_d = max(max_d, max_do)
+
+        target_d = brentq(lambda x: outer_loop(x) - r_limit, min_d, max_d, xtol=1e-3)
+        # target_d = binary_search(
+        #     outer_loop, r_limit, min_d, max_d, epsilon=1e-3, f_epsilon=8
+        # )
+        ctu_results = self.get_ctu_results(curves_list, target_d, method_ids, n_ctu)
+        loss, psnr, t = self._loss(
             precomputed_curve=precomputed_curve,
             n_ctu=n_ctu,
             file_io=file_io,
@@ -267,4 +282,4 @@ class LagrangeMultiplierSolver(SolverBase):
             r_limit=r_limit,
             t_limit=t_limit,
         )
-        return np.asarray(ctu_results), score, psnr, t
+        return np.asarray(ctu_results), loss, psnr, t
