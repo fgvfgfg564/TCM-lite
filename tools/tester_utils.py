@@ -34,25 +34,28 @@ def test_single_image(
         _, orec = tempfile.mkstemp(suffix=".png")
 
     ## Encode
-    time0 = time.time()
-    encoder_returns = engine.encode(
-        input_filename,
-        obin,
-        **kwargs,
-    )
-    torch.cuda.synchronize()
+    if not os.path.isfile(obin):
+        time0 = time.time()
+        encoder_returns = engine.encode(
+            input_filename,
+            obin,
+            **kwargs,
+        )
+        torch.cuda.synchronize()
 
-    if encoder_returns is not None:
-        with open(osta, "w") as f:
-            json.dump(encoder_returns, f)
+        if encoder_returns is not None:
+            with open(osta, "w") as f:
+                json.dump(encoder_returns, f)
 
-    time_enc = time.time() - time0
+        time_enc = time.time() - time0
+    else:
+        print(f"{obin} already exists. Skip encoding {input_filename}.")
 
     # Decoding process; generate recon image
     time_dec_meter = AverageMeter()
     for i in range(3):
         time_start = time.time()
-        out_img = engine.decode(obin, orec)  # Decoded image; shape=[3, H, W]
+        engine.decode(obin, orec)  # Decoded image; shape=[3, H, W]
         torch.cuda.synchronize()
         time_end = time.time()
         time_dec = time_end - time_start
