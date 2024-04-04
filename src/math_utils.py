@@ -173,7 +173,7 @@ class FitKExp(Fitter):
             # print(a, b, da, db, flush=True)
             return np.concatenate([da, db], axis=0)
 
-        bounds = [(None, None)] * self.K + [(-2, 10)] * self.K
+        bounds = [(1e-9, None)] * self.K + [(-2, 10)] * self.K
 
         result = minimize(
             objective_func,
