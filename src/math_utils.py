@@ -58,7 +58,7 @@ class ExpKModel(DerivableFunc):
 
     def derivative(self) -> ExpKModel:
         a_new = -self.a * np.log(1 + np.exp(-self.b)) / self.SCALE
-        b_new = self.b
+        b_new = self.b.copy()
         return ExpKModel(a_new, b_new, np.asarray(0.0))
 
 
@@ -134,7 +134,6 @@ class FitKExp(Fitter):
         a_init = np.random.rand(self.K) * 2 * self.Y[0] / self.K
         b_init = np.zeros([self.K]) - 0.05
         init_value = np.concatenate([a_init, b_init], axis=0)
-        curve = ExpKModel(a_init.copy(), b_init.copy())
 
         y_std2 = ((self.Y - self.Y.mean()) ** 2).sum()
 
@@ -142,16 +141,14 @@ class FitKExp(Fitter):
             # R2 loss
             a = ab[: self.K]
             b = ab[self.K :]
-            curve.a = a
-            curve.b = b
+            curve = ExpKModel(a.copy(), b.copy())
             objective = 1.0 - self.R2(curve)
             return objective
 
         def objective_gradient(ab: np.ndarray):
             a = ab[: self.K]
             b = ab[self.K :]
-            curve.a = a
-            curve.b = b
+            curve = ExpKModel(a.copy(), b.copy())
             y_pred = curve(self.X)
             d_r2_y_pred = 2.0 / y_std2 * (y_pred - self.Y)
             da = [
@@ -189,7 +186,11 @@ class FitKExp(Fitter):
         )
 
         ans = result.x
-        return ExpKModel(ans[: self.K], ans[self.K :])
+        check = np.all(ans[:self.K] > 0)
+        if not check:
+            print(self.X, self.Y, ans)
+            raise ValueError("Fit failed! Some A <= 0")
+        return ExpKModel(ans[: self.K].copy(), ans[self.K :].copy())
         # when x=0, f(x)=sum(a) <= 1.
 
     def dump(self, filename):

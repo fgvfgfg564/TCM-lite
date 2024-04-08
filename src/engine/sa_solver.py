@@ -222,7 +222,7 @@ class LagrangeMultiplierSolver(SolverBase):
                 try:
                     root = newton(fdx, x0=0.0, fprime=fdx.derivative(), maxiter=50, tol=1.0)
                 except RuntimeError:
-                    print("WARNING: Newton's method failed.")
+                    print(f"WARNING: Newton's method failed. Curve={curve.curve}; Derivative func={fdx}")
                     root = binary_search(fdx, 0.0, x_min=curve.X_min, x_max=curve.X_max, epsilon=1.)
                 root = np.clip(root, curve.X_min, curve.X_max)
                 roots.append(root)

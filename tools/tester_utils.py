@@ -19,6 +19,7 @@ def test_single_image(
     save_image,
     **kwargs,
 ):
+    print(f"Testing: input={input_filename}; output_dir={output_dir}; kwargs={kwargs}")
     output_dir = os.path.join(
         output_dir,
         *([str(k) + "=" + str(v) for k, v in kwargs.items()]),
@@ -53,7 +54,7 @@ def test_single_image(
 
     # Decoding process; generate recon image
     time_dec_meter = AverageMeter()
-    for i in range(3):
+    for i in range(1):
         time_start = time.time()
         engine.decode(obin, orec)  # Decoded image; shape=[3, H, W]
         torch.cuda.synchronize()

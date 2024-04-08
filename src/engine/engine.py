@@ -331,17 +331,10 @@ class EngineBase(CodecBase):
                             f"num_bytes are too few or not strictly increasing: \nnum_bytes={num_bytes}\nsqes={sqes}\nqscales={qscales}"
                         )
 
-                    print(num_bytes, sqes)
 
-                    try:
-                        b_e = self.fitterclass(num_bytes, sqes)
-                        # b_t = interpolate.interp1d(num_bytes, times, kind='linear')
-                        b_t = np.polyfit(num_bytes, times, 1)
-                    except ValueError as e:
-                        print(f"Interpolation error!")
-                        print(f"num_bytes={num_bytes}")
-                        print(f"sqes={sqes}")
-                        raise e
+                    b_e = self.fitterclass(num_bytes, sqes)
+                    # b_t = interpolate.interp1d(num_bytes, times, kind='linear')
+                    b_t = np.polyfit(num_bytes, times, 1)
 
                     min_t = min(num_bytes)
                     max_t = max(num_bytes)
@@ -352,6 +345,8 @@ class EngineBase(CodecBase):
                     np.save(b_t_file, b_t)
                     np.savez(min_max_file, min_t=min_t, max_t=max_t)
                     print("Cache saved to:", cache_dir, flush=True)
+                
+                print(f"b_e[{i}] = {b_e.curve}")
 
                 self._precomputed_curve[method_idx][i][
                     "b_e"
@@ -396,7 +391,7 @@ class EngineBase(CodecBase):
             raise FileNotFoundError(img_path)
 
         rgb_np = Image.open(img_path).convert("RGB")
-        rgb_np = np.asarray(rgb_np)
+        rgb_np = np.asarray(rgb_np).copy()
         img_hash = hash_numpy_array(rgb_np)
         return rgb_np, img_hash
 
