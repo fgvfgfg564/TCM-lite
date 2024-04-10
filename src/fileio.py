@@ -146,7 +146,7 @@ class FileIO:
         return struct.unpack(format_str, s)
 
     @classmethod
-    def load(cls, source: str, mosaic, ctu_size):
+    def load(cls, source: bytes, mosaic, ctu_size):
         if isinstance(source, bytes):
             fd = io.BytesIO(source)
         else:

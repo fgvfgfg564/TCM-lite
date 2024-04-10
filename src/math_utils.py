@@ -16,7 +16,7 @@ import abc
 from dataclasses import field
 
 import numpy as np
-from type import NDArray
+from .type import NDArray
 from scipy.interpolate import PchipInterpolator
 from scipy.optimize import minimize
 

@@ -24,7 +24,7 @@ from ..utils import *
 from ..fileio import FileIO
 from ..math_utils import *
 from ..async_ops import async_map
-from .sa_solver import SolverBase, SLSQPSolver, LagrangeMultiplierSolver
+from .sa_solver import SolverBase, LagrangeMultiplierSolver
 from .toucher import Toucher
 
 SAFETY_BYTE_PER_CTU = 2
@@ -331,7 +331,6 @@ class EngineBase(CodecBase):
                             f"num_bytes are too few or not strictly increasing: \nnum_bytes={num_bytes}\nsqes={sqes}\nqscales={qscales}"
                         )
 
-
                     b_e = self.fitterclass(num_bytes, sqes)
                     # b_t = interpolate.interp1d(num_bytes, times, kind='linear')
                     b_t = np.polyfit(num_bytes, times, 1)
@@ -345,7 +344,7 @@ class EngineBase(CodecBase):
                     np.save(b_t_file, b_t)
                     np.savez(min_max_file, min_t=min_t, max_t=max_t)
                     print("Cache saved to:", cache_dir, flush=True)
-                
+
                 print(f"b_e[{i}] = {b_e.curve}")
 
                 self._precomputed_curve[method_idx][i][

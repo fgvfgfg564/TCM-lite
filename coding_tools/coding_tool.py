@@ -3,6 +3,7 @@ import argparse
 import struct
 import time
 import tempfile
+from typing import Optional
 from typing_extensions import Self
 
 import torch
@@ -39,7 +40,7 @@ class CodingToolBase(abc.ABC):
 
     @abc.abstractmethod
     def decompress_block(
-        self, bit_stream: bytes, h: int | None, w: int | None
+        self, bit_stream: bytes, h: Optional[int], w: Optional[int]
     ) -> np.ndarray:
         """
         Decode a image block. The block is not padded. H and W are passed from image header.
