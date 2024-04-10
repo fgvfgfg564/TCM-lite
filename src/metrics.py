@@ -1,3 +1,6 @@
+from typing import cast
+from typing_extensions import Union
+
 import abc
 from numpy.core.multiarray import array as array
 import torch
@@ -15,17 +18,20 @@ def torch_to_uint8(x):
     return x
 
 
-def convert_to_np_uint8(x: np.ndarray | torch.Tensor) -> np.ndarray:
+def convert_to_np_uint8(x: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
     if isinstance(x, torch.Tensor):
         x = torch_to_uint8(x)
         x = x[0].permute(1, 2, 0).detach().cpu().numpy()
+        x = cast(np.ndarray, x)
     return x
 
 
 class MetricBase(abc.ABC):
     @classmethod
     def ctu_level_loss(
-        cls, output: np.ndarray | torch.Tensor, target: np.ndarray | torch.Tensor
+        cls,
+        output: Union[np.ndarray, torch.Tensor],
+        target: Union[np.ndarray, torch.Tensor],
     ) -> float:
         output = convert_to_np_uint8(output)
         target = convert_to_np_uint8(target)
@@ -40,7 +46,9 @@ class MetricBase(abc.ABC):
 
     @classmethod
     @abc.abstractmethod
-    def global_level_loss(cls, ctu_level_losses: np.ndarray, file_io: FileIO):
+    def global_level_loss(
+        cls, ctu_level_losses: np.ndarray, file_io: FileIO
+    ) -> np.ndarray:
         """
         Global loss reducer.
         """
@@ -65,9 +73,13 @@ class PSNRMetric(MetricBase):
 class MSSSIMMEtric(MetricBase):
     @classmethod
     def _ctu_level_loss_np(cls, output: np.ndarray, target: np.ndarray) -> float:
-        output = torch.tensor(output).permute(2, 0, 1).unsqueeze(0)
-        target = torch.tensor(target).permute(2, 0, 1).unsqueeze(0)
-        return pytorch_msssim.ms_ssim(output, target, data_range=255).numpy().item()
+        output_tensor = torch.tensor(output).permute(2, 0, 1).unsqueeze(0)
+        target_tensor = torch.tensor(target).permute(2, 0, 1).unsqueeze(0)
+        return (
+            pytorch_msssim.ms_ssim(output_tensor, target_tensor, data_range=255)
+            .numpy()
+            .item()
+        )
 
     @classmethod
     def global_level_loss(cls, ctu_level_losses: np.ndarray, file_io: FileIO):

@@ -1,65 +1,100 @@
 from __future__ import annotations
+from typing import cast
 
-from typing_extensions import Dict, TypeVar, Self
+from typing_extensions import (
+    Dict,
+    TypeVar,
+    Self,
+    Callable,
+    Literal,
+    Union,
+    Optional,
+    override,
+)
 
 import abc
-from dataclasses import dataclass, field
+from dataclasses import field
 
 import numpy as np
+from type import NDArray
 from scipy.interpolate import PchipInterpolator
 from scipy.optimize import minimize
-from typing_extensions import Callable, Literal, Union
 
 
 def is_sorted(arr):
     return np.array_equal(arr, np.sort(arr))
 
 
-T = TypeVar("T", np.ndarray, float)
-
-
 class DerivableFunc(abc.ABC):
+    def __init__(self, c: Optional[NDArray] = None) -> None:
+        if c is None:
+            c = np.asarray(0.0)
+        self.c = c
+
+    def __call__(self, x: NDArray) -> NDArray:
+        return self.funccall(x) + self.c
+
     @abc.abstractmethod
-    def __call__(self, x: T) -> T:
+    def funccall(self, x: NDArray) -> NDArray:
         pass
 
     @abc.abstractmethod
     def derivative(self) -> DerivableFunc:
         pass
 
+    @abc.abstractmethod
+    def dump(self) -> Dict[str, NDArray]:
+        pass
 
-class PolyValWrapper(np.ndarray, DerivableFunc):
-    def __new__(cls, input_array):
-        # Input array is an array-like object that you want to turn into a MyArray
-        obj = np.asarray(input_array).view(cls)
-        # Add your extra information or initialization here
-        return obj
-
-    def __call__(self, x):
-        return np.polyval(self, x)
-
-    def derivative(self):
-        return PolyValWrapper(np.polyder(self))
+    @classmethod
+    def load(cls, cfg: Dict[str, NDArray]):
+        return cls(**cfg)
 
 
-@dataclass
+# class PolyValWrapper(np.ndarray, DerivableFunc):
+#     def __new__(cls, input_array):
+#         # Input array is an array-like object that you want to turn into a MyArray
+#         obj = np.asarray(input_array).view(cls)
+#         # Add your extra information or initialization here
+#         return obj
+
+#     def funccall(self, x):
+#         return np.polyval(self, x)
+
+#     def derivative(self):
+#         return PolyValWrapper(np.polyder(self))
+
+
 class ExpKModel(DerivableFunc):
-    a: np.ndarray
-    b: np.ndarray
-    c: np.ndarray = np.asarray(0.0)
-    SCALE: float = field(default=1000, init=False, repr=False)
+    SCALE = 1000
 
-    def __call__(self, x: T) -> T:
+    def __init__(self, c: Optional[NDArray] = None, *, a, b) -> None:
+        super().__init__(c)
+        self.a = a
+        self.b = b
+
+    @override
+    def funccall(self, x: NDArray) -> NDArray:
         B, X = np.meshgrid(self.b, x)
-        result = np.power(1 + np.exp(-B), -X / self.SCALE) @ self.a + self.c
+        result = np.power(1 + np.exp(-B), -X / self.SCALE) @ self.a
         if not isinstance(x, np.ndarray):
             result = result.item()
+        result = cast(NDArray, result)
         return result
 
+    @override
     def derivative(self) -> ExpKModel:
         a_new = -self.a * np.log(1 + np.exp(-self.b)) / self.SCALE
         b_new = self.b.copy()
-        return ExpKModel(a_new, b_new, np.asarray(0.0))
+        return ExpKModel(a=a_new, b=b_new, c=self.c)
+
+    @override
+    def dump(self) -> Dict[str, NDArray]:
+        return {
+            "a": self.a,
+            "b": self.b,
+            "c": self.c,
+        }
 
 
 class Fitter(abc.ABC):
@@ -98,7 +133,7 @@ class Fitter(abc.ABC):
     def interpolate(self, x):
         return self.curve(x)
 
-    def derivative(self, x: float) -> float:
+    def derivative(self, x: NDArray) -> NDArray:
         return self.d(x)
 
     def dump(self, filename):
@@ -114,11 +149,11 @@ class Fitter(abc.ABC):
         pass
 
 
-class FitCubic(Fitter):
-    def fit(self) -> PolyValWrapper:
-        fit = np.polyfit(self.X, self.Y, 3)
-        fit = PolyValWrapper(fit)
-        return fit
+# class FitCubic(Fitter):
+#     def fit(self) -> PolyValWrapper:
+#         fit = np.polyfit(self.X, self.Y, 3)
+#         fit = PolyValWrapper(fit)
+#         return fit
 
 
 class FitKExp(Fitter):
@@ -141,14 +176,14 @@ class FitKExp(Fitter):
             # R2 loss
             a = ab[: self.K]
             b = ab[self.K :]
-            curve = ExpKModel(a.copy(), b.copy())
+            curve = ExpKModel(a=a.copy(), b=b.copy(order="A"))
             objective = 1.0 - self.R2(curve)
             return objective
 
         def objective_gradient(ab: np.ndarray):
             a = ab[: self.K]
             b = ab[self.K :]
-            curve = ExpKModel(a.copy(), b.copy())
+            curve = ExpKModel(a=a.copy(), b=b.copy(order="A"))
             y_pred = curve(self.X)
             d_r2_y_pred = 2.0 / y_std2 * (y_pred - self.Y)
             da = [
@@ -186,28 +221,30 @@ class FitKExp(Fitter):
         )
 
         ans = result.x
-        check = np.all(ans[:self.K] > 0)
+        ans = cast(NDArray, ans)
+        check = np.all(ans[: self.K] > 0)
         if not check:
             print(self.X, self.Y, ans)
             raise ValueError("Fit failed! Some A <= 0")
-        return ExpKModel(ans[: self.K].copy(), ans[self.K :].copy())
+        return ExpKModel(a=ans[: self.K].copy(), b=ans[self.K :].copy(order="A"))
         # when x=0, f(x)=sum(a) <= 1.
 
     def dump(self, filename):
-        np.savez_compressed(
-            filename, X=self.X, Y=self.Y, K=self.K, a=self.curve.a, b=self.curve.b
-        )
+        curve_cfg = self.curve.dump()
+        curve_cfg = {"curve." + k: v for k, v in curve_cfg.items()}
+        np.savez_compressed(filename, X=self.X, Y=self.Y, K=self.K, **curve_cfg)
 
     @classmethod
     def load(cls, filename) -> Self:
-        loaded = np.load(filename)
+        loaded: Dict[str, NDArray] = np.load(filename)
         obj = cls.__new__(cls)
         obj.X = loaded["X"]
         obj.Y = loaded["Y"]
         obj.K = loaded["K"]
-        obj.curve = ExpKModel(a=loaded["a"], b=loaded["b"], c=np.asarray(0))
         obj.X_min = obj.X.min()
         obj.X_max = obj.X.max()
+        curve_cfg = {k.split(sep=".", maxsplit=2)[1]: v for k, v in loaded.items()}
+        obj.curve = ExpKModel.load(curve_cfg)
         obj.d = obj.curve.derivative()
         return obj
 
@@ -242,21 +279,21 @@ def safe_softmax(x: np.ndarray):
     return y / np.sum(y)
 
 
-def safe_SA_prob(delta, T):
-    if delta / T < 60:
-        p = 1.0 / (1.0 + np.exp(delta / T))
+def safe_SA_prob(delta, NDArray):
+    if delta / NDArray < 60:
+        p = 1.0 / (1.0 + np.exp(delta / NDArray))
     else:
         p = 0
     return p
 
 
 def binary_search(
-    func: Callable[[float], float],
+    func: Callable[[NDArray], NDArray],
     target: float,
     x_min: float,
     x_max: float,
     epsilon: float,
-    f_epsilon: float = None,
+    f_epsilon: Optional[float] = None,
     debug: bool = False,
 ) -> float:
     """

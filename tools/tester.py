@@ -2,6 +2,7 @@ import enum
 import argparse
 from pyinstrument import Profiler
 import torch
+import torch.backends
 import json
 
 from coding_tools.register import TOOL_GROUPS
@@ -70,7 +71,7 @@ def parse_args():
 
 if __name__ == "__main__":
     """
-    Tester for CVPR 2023 paper
+    Basic algorithm tester
     """
     torch.backends.cudnn.enabled = True
 
@@ -79,6 +80,8 @@ if __name__ == "__main__":
     if args.profile:
         profiler = Profiler()
         profiler.start()
+    else:
+        profiler = None
 
     algorithm: AlgorithmType = getattr(AlgorithmType, args.algorithm)
 
@@ -144,13 +147,15 @@ if __name__ == "__main__":
             args.save_image,
             quality=args.quality,
         )
+    else:
+        raise ValueError(f"Invalid algorithm: {algorithm}")
 
     os.makedirs(args.output_dir, exist_ok=True)
     result_filename = os.path.join(args.output_dir, "results.json")
     with open(result_filename, "w") as f:
         json.dump(results, f, indent=4, sort_keys=True)
 
-    if args.profile:
+    if profiler is not None:
         profiler.stop()
         profile_filename = os.path.join(args.output_dir, "profile.html")
         with open(profile_filename, "w") as f:

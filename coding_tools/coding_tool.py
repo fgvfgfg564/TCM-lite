@@ -32,13 +32,15 @@ class CodingToolBase(abc.ABC):
         return qs
 
     @abc.abstractmethod
-    def compress_block(self, img_block, q_scale) -> bytes:
+    def compress_block(self, img_block: np.ndarray, q_scale: float) -> bytes:
         """
         Encode a image block with given q_scale. The block is not padded.
         """
 
     @abc.abstractmethod
-    def decompress_block(self, bit_stream, h, w):
+    def decompress_block(
+        self, bit_stream: bytes, h: int | None, w: int | None
+    ) -> np.ndarray:
         """
         Decode a image block. The block is not padded. H and W are passed from image header.
         """
