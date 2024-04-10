@@ -73,6 +73,9 @@ class ExpKModel(DerivableFunc):
         self.a = a
         self.b = b
 
+    def __repr__(self) -> str:
+        return f"<y = {self.a} * ({1 + np.exp(-self.b)}) ** (-x/{self.SCALE}) + {self.c}; a={self.a}; b={self.b}; c={self.c}>"
+
     @override
     def funccall(self, x: NDArray) -> NDArray:
         B, X = np.meshgrid(self.b, x)
@@ -86,7 +89,7 @@ class ExpKModel(DerivableFunc):
     def derivative(self) -> ExpKModel:
         a_new = -self.a * np.log(1 + np.exp(-self.b)) / self.SCALE
         b_new = self.b.copy()
-        return ExpKModel(a=a_new, b=b_new, c=self.c)
+        return ExpKModel(a=a_new, b=b_new)
 
     @override
     def dump(self) -> Dict[str, NDArray]:
@@ -243,7 +246,11 @@ class FitKExp(Fitter):
         obj.K = loaded["K"]
         obj.X_min = obj.X.min()
         obj.X_max = obj.X.max()
-        curve_cfg = {k.split(sep=".", maxsplit=2)[1]: v for k, v in loaded.items()}
+        curve_cfg = {
+            k.split(sep=".", maxsplit=2)[1]: v
+            for k, v in loaded.items()
+            if k.startswith("curve.")
+        }
         obj.curve = ExpKModel.load(curve_cfg)
         obj.d = obj.curve.derivative()
         return obj

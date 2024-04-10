@@ -28,7 +28,7 @@ def test_single_image(
         os.makedirs(output_dir, exist_ok=True)
         realname = pathlib.Path(input_filename).stem
         obin = os.path.join(output_dir, realname + ".bin")
-        orec = os.path.join(output_dir, realname + "_rec.png")
+        orec = os.path.join(output_dir, realname + "_rec.bmp")
         osta = os.path.join(output_dir, realname + "_statistics.json")
     else:
         _, obin = tempfile.mkstemp()
@@ -55,11 +55,8 @@ def test_single_image(
     # Decoding process; generate recon image
     time_dec_meter = AverageMeter()
     for i in range(1):
-        time_start = time.time()
-        engine.decode(obin, orec)  # Decoded image; shape=[3, H, W]
-        torch.cuda.synchronize()
-        time_end = time.time()
-        time_dec = time_end - time_start
+        time_dec = engine.decode(obin, orec)  # Decoded image; shape=[3, H, W]
+        print(f"Decode time={time_dec:.5f}s")
         time_dec_meter.update(time_dec)
 
     n_bytes = os.path.getsize(obin)
@@ -74,6 +71,7 @@ def test_single_image(
         "MS-SSIM": ms_ssim,
         "t_dec": time_dec_meter.avg,
     }
+    print(results)
 
     if not save_image:
         os.remove(obin)

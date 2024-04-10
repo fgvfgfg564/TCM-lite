@@ -496,9 +496,11 @@ class EngineBase(CodecBase):
         return recon_img
 
     @torch.inference_mode()
-    def decode(self, input_pth, output_pth):
+    def _decode(self, input_pth, output_pth):
         """
-        Decode into NumPy array with range 0-1
+        Decode into NumPy array with range 0-1.
+        Return:
+         - decoding time on CTUs
         """
         fd = open(input_pth, "rb")
         bitstream = fd.read()
@@ -508,15 +510,13 @@ class EngineBase(CodecBase):
         file_io: FileIO = FileIO.load(bitstream, self.mosaic, self.ctu_size)
         with torch.no_grad():
             decoded_ctus = []
-            with timer.Timer("Decode_CTU"):
-                for i, bounds in enumerate(file_io.block_indexes):
-                    print(f"Decoding CTU #{i})")
-                    ctu = self.decode_ctu(file_io, i, bounds)
-                    decoded_ctus.append(ctu)
-            with timer.Timer("Reconstruct&save"):
-                recon_img = self.join_blocks(decoded_ctus, file_io)
-                out_img = dump_image(recon_img)
-                Image.fromarray(out_img).save(output_pth)
+            for i, bounds in enumerate(file_io.block_indexes):
+                print(f"Decoding CTU #{i}")
+                ctu = self.decode_ctu(file_io, i, bounds)
+                decoded_ctus.append(ctu)
+            recon_img = self.join_blocks(decoded_ctus, file_io)
+            out_img = dump_image(recon_img)
+            Image.fromarray(out_img).save(output_pth)
 
 
 class SAEngine1(EngineBase):
