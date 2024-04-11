@@ -30,6 +30,9 @@ def parse_args():
     parser.add_argument("-i", "--input", type=str, required=True, help="input glob")
     parser.add_argument("--target_time", nargs="+", type=float, default=[float("inf")])
     parser.add_argument("--target_bpp", nargs="+", type=float, default=[1.0])
+    parser.add_argument(
+        "--loss", nargs=1, type=str, required=True, choices=LOSSES.keys()
+    )
     parser.add_argument("--save_image", action="store_true")
 
     parser.add_argument(
@@ -58,6 +61,7 @@ def parse_args():
     parser.add_argument("--no_allocation", nargs="+", type=bool, default=[False])
 
     # Encoder config args (SA)
+    parser.add_argument("--num_steps", nargs="+", type=int, default=1000)
 
     # Encoder config args (BPG)
     parser.add_argument("--qp", nargs="+", type=int, default=None)
@@ -124,6 +128,8 @@ if __name__ == "__main__":
             args.save_image,
             target_bpp=args.target_bpp,
             target_time=args.target_time,
+            num_steps=args.num_steps,
+            losstype=args.loss,
         )
     elif algorithm == AlgorithmType.BPG:
         engine = BPG()

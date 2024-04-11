@@ -11,6 +11,8 @@ from scipy.optimize import minimize, newton
 from concurrent.futures import ProcessPoolExecutor
 from time import time
 
+from ..loss import LOSSES
+
 from ..async_ops import async_map
 from ..type import *
 from ..fileio import FileIO
@@ -24,8 +26,9 @@ class SolverBase(abc.ABC):
         precomputed_curve: ImgCurves,
         n_ctu,
         file_io: FileIO,
-        method_ids,
-        target_byteses,
+        method_ids: NDArray,
+        target_byteses: NDArray,
+        losstype: str,
         r_limit: Optional[float] = None,
         t_limit: Optional[float] = None,
     ) -> Tuple[LossType, float, float]:
@@ -35,29 +38,29 @@ class SolverBase(abc.ABC):
         else:
             r_exceed = 0
 
-        sqe = 0
+        ctu_losses = []
         global_time = 0
 
         for i in range(n_ctu):
-            method_id = method_ids[i]
-            target_bytes = target_byteses[i]
+            method_id: int = method_ids[i]
+            target_bytes: float = target_byteses[i]
 
             precomputed_results = precomputed_curve[method_id][i]
 
-            ctu_sqe = precomputed_results["b_e"](target_bytes)
+            ctu_loss: NDArray[np.float32] = precomputed_results["b_e"](target_bytes)
             t = np.polyval(precomputed_results["b_t"], target_bytes)
 
             global_time += t
-            sqe += ctu_sqe
+            ctu_losses.append(ctu_loss)
 
-        sqe /= file_io.num_pixels * 3
-        psnr: float = (-10.0 * np.log10(sqe)).item()
+        losscls = LOSSES[losstype]
+        dloss = losscls.global_level_loss(file_io, ctu_losses)
         if t_limit is not None and global_time > t_limit:
             t_exceed = global_time - t_limit
         else:
             t_exceed = 0
-        loss = LossType(r=r_exceed, t=t_exceed, d=-psnr)
-        return loss, psnr, global_time
+        loss = LossType(r=r_exceed, t=t_exceed, d=dloss)
+        return loss, dloss, global_time
 
     @abc.abstractmethod
     def find_optimal_target_bytes(
@@ -68,6 +71,7 @@ class SolverBase(abc.ABC):
         method_ids: ndarray,
         r_limit: float,
         t_limit: float,
+        losstype: str,
     ) -> Tuple[np.ndarray, LossType, float, float]:
         pass
 
@@ -268,6 +272,7 @@ class LagrangeMultiplierSolver(SolverBase):
         method_ids,
         r_limit,
         t_limit,
+        losstype,
     ):
         # A simple Lagrange Multiplier
         curves_list = list(
@@ -313,5 +318,6 @@ class LagrangeMultiplierSolver(SolverBase):
             target_byteses=ctu_results,
             r_limit=r_limit,
             t_limit=t_limit,
+            losstype=losstype,
         )
         return np.asarray(ctu_results), loss, psnr, t

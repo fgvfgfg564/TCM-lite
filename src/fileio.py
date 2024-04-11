@@ -28,6 +28,7 @@ class FileIO:
         mosaic: bool,
         method_id=None,
         bitstreams=None,
+        q_scales=None,
     ) -> None:
         self.h = h
         self.w = w
@@ -43,6 +44,7 @@ class FileIO:
 
         self.method_id = method_id
         self.bitstreams = bitstreams
+        self.q_scales = q_scales
         self.num_bytes = (
             None
             if bitstreams is None

@@ -7,6 +7,7 @@ import copy
 import abc
 
 from dataclasses import dataclass
+from typing_extensions import deprecated
 
 import numpy as np
 from PIL import Image
@@ -18,6 +19,7 @@ import coding_tools.utils.timer as timer
 from coding_tools.traditional_tools import WebPTool
 from coding_tools.baseline import CodecBase
 from coding_tools import TOOL_GROUPS
+from ..loss import LOSSES, LossBase
 
 from ..type import *
 from ..utils import *
@@ -212,13 +214,17 @@ class EngineBase(CodecBase):
         self,
         method: CodingToolBase,
         image_block: ImageBlock,
+        loss,
         target_bytes=None,
         q_scale=None,
         repeat=1,
     ):
+        losscls = LOSSES[loss]
         times = []
-        sqes = []
         _, c, h, w = image_block.cuda.shape
+        ctu_loss = float("inf")
+        bitstream = b""
+        assert repeat >= 1
         for i in range(repeat):
             if q_scale is None:
                 bitstream, q_scale = self._compress_with_target(
@@ -233,24 +239,13 @@ class EngineBase(CodecBase):
             times.append(time.time() - time0)
 
             if method.PLATFORM == "torch":
-                ref = self.torch_pseudo_quantize_to_uint8(image_block.cuda)
                 recon_img = self.torch_pseudo_quantize_to_uint8(recon_img)
+            ctu_loss = losscls.ctu_level_loss(image_block, recon_img)
 
-                sqe = torch.sum((ref - recon_img) ** 2).detach().cpu().numpy()
-                sqes.append(sqe)
-            else:
-                ref = image_block.np.astype(np.float32)
-                recon_img = recon_img.astype(np.float32)
+        return ctu_loss, np.mean(times), bitstream
 
-                sqe = np.sum((ref - recon_img) ** 2) / (255.0**2)
-                sqes.append(sqe)
-
-        sqe = np.mean(sqes)
-        psnr = -10 * np.log10(sqe)
-
-        return sqe, np.mean(times), bitstream, recon_img, q_scale
-
-    def _precompute_score(self, img_blocks, img_size, img_hash):
+    def _precompute_score(self, img_blocks, img_size, img_hash, loss: str):
+        assert loss in LOSSES
         h, w = img_size
         n_ctu = len(img_blocks)
         n_methods = len(self.methods)
@@ -265,9 +260,9 @@ class EngineBase(CodecBase):
         for method, method_name, method_idx in self.methods:
             self._precomputed_curve[method_idx] = {}
             for i in range(n_ctu):
-                self._precomputed_curve[method_idx][i] = {}
                 cache_dir = os.path.join(
                     self.CACHE_DIR,
+                    loss,
                     method_name,
                     img_hash,
                     "-".join(
@@ -296,7 +291,7 @@ class EngineBase(CodecBase):
                         pbar_iter.__next__()
                 except FileNotFoundError:
                     # No cache or cache is broken
-                    sqes = []
+                    ctu_losses = []
                     num_bytes = []
                     qscales = []
                     times = []
@@ -305,21 +300,20 @@ class EngineBase(CodecBase):
                         image_block = img_blocks[i]
 
                         (
-                            sqe,
+                            ctu_loss,
                             dec_time,
                             bitstream,
-                            __,
-                            ___,
                         ) = self._try_compress_decompress(
                             method,
                             image_block,
                             target_bytes=None,
                             q_scale=qscale,
                             repeat=1,
+                            loss=loss,
                         )
                         num_byte = len(bitstream)
                         num_bytes.append(num_byte)
-                        sqes.append(sqe)
+                        ctu_losses.append(ctu_loss)
                         times.append(dec_time)
                         qscales.append(qscale)
                         pbar_iter.__next__()
@@ -328,10 +322,10 @@ class EngineBase(CodecBase):
 
                     if len(num_bytes) <= 3 or not is_strictly_increasing(num_bytes):
                         raise ValueError(
-                            f"num_bytes are too few or not strictly increasing: \nnum_bytes={num_bytes}\nsqes={sqes}\nqscales={qscales}"
+                            f"num_bytes are too few or not strictly increasing: \nnum_bytes={num_bytes}\nsqes={ctu_losses}\nqscales={qscales}"
                         )
 
-                    b_e = self.fitterclass(num_bytes, sqes)
+                    b_e = self.fitterclass(num_bytes, ctu_losses)
                     # b_t = interpolate.interp1d(num_bytes, times, kind='linear')
                     b_t = np.polyfit(num_bytes, times, 1)
 
@@ -347,10 +341,8 @@ class EngineBase(CodecBase):
 
                 print(f"b_e[{i}] = {b_e.curve}")
 
-                self._precomputed_curve[method_idx][i][
-                    "b_e"
-                ] = b_e  # interpolate.interp1d; Linear
-                self._precomputed_curve[method_idx][i]["b_t"] = b_t  # Linear fitting
+                results: CTUCurves = {"b_e": b_e, "b_t": b_t}
+                self._precomputed_curve[method_idx][i] = results
                 self._minimal_bytes[method_idx][i] = min_t
                 self._maximal_bytes[method_idx][i] = max_t
 
@@ -381,8 +373,9 @@ class EngineBase(CodecBase):
         r_limit,
         t_limit,
         file_io,
+        losstype: str,
         **kwargs,
-    ):
+    ) -> Any:
         pass
 
     def read_img(self, img_path):
@@ -423,17 +416,16 @@ class EngineBase(CodecBase):
             ctu = self.torch_float_to_np_uint8(ctu)
         return ctu
 
-    def _self_check(self, img_blocks: List[ImageBlock], file_io: FileIO):
+    def _self_check(self, img_blocks: List[ImageBlock], file_io: FileIO, losstype: str):
+        losscls = LOSSES[losstype]
         # Check the difference between estimated and actual D loss
         for i, bounds in enumerate(file_io.block_indexes):
             ctu = self.decode_ctu(file_io, i, bounds)
-            sqe = (
-                (img_blocks[i].np.astype(np.float32) - ctu.astype(np.float32)) ** 2
-            ).sum() / (255**2)
+            ctu_loss = losscls.ctu_level_loss(img_blocks[i], ctu)
             num_bytes = len(file_io.bitstreams[i])
             sqe_est = self._precomputed_curve[file_io.method_id[i]][i]["b_e"](num_bytes)
             print(
-                f"Self check CTU #{i}: Method={file_io.method_id[i]}; Estimated SQE: {sqe_est:.6f}; actual SQE: {sqe:.6f}"
+                f"Self check CTU #{i}: Method={file_io.method_id[i]}; Estimated CTU loss: {sqe_est:.6f}; actual CTU loss: {ctu_loss:.6f}"
             )
 
     @torch.inference_mode()
@@ -443,6 +435,7 @@ class EngineBase(CodecBase):
         output_pth,
         target_bpp,
         target_time,
+        losstype: str,
         **kwargs,
     ):
         input_img, img_hash = self.read_img(input_pth)
@@ -465,7 +458,7 @@ class EngineBase(CodecBase):
         img_blocks = self.divide_blocks(file_io, h, w, input_img)
 
         print("Precompute all scorees", flush=True)
-        self._precompute_score(img_blocks, img_size, img_hash)
+        self._precompute_score(img_blocks, img_size, img_hash, losstype)
 
         method_ids, q_scales, bitstreams, data = self._solve(
             img_blocks,
@@ -473,12 +466,13 @@ class EngineBase(CodecBase):
             r_limit=r_limit,
             t_limit=target_time,
             file_io=file_io,
+            losstype=losstype,
             **kwargs,
         )
         file_io.method_id = method_ids
         file_io.bitstreams = bitstreams
-        self._self_check(img_blocks, file_io)
-        file_io.q_scale = q_scales
+        self._self_check(img_blocks, file_io, losstype)
+        file_io.q_scales = q_scales
         file_io.dump(output_pth)
 
         return data
@@ -724,6 +718,7 @@ class SAEngine1(EngineBase):
         img_blocks,
         img_size,
         file_io,
+        losstype,
         r_limit,
         t_limit,
         num_steps,
@@ -738,7 +733,7 @@ class SAEngine1(EngineBase):
             self.last_valid_step = None
 
         target_byteses, loss, psnr, t = self.solver.find_optimal_target_bytes(
-            self._precomputed_curve, file_io, n_ctu, ans, r_limit, t_limit
+            self._precomputed_curve, file_io, n_ctu, ans, r_limit, t_limit, losstype
         )
 
         T = T_start
@@ -780,6 +775,7 @@ class SAEngine1(EngineBase):
                 next_state,
                 r_limit,
                 t_limit,
+                losstype,
             )
 
             if next_loss < loss:
@@ -826,6 +822,7 @@ class SAEngine1(EngineBase):
         r_limit,
         t_limit,
         file_io,
+        losstype,
         num_steps=1000,
         T_start=10,
         T_end=1e-6,
@@ -852,6 +849,7 @@ class SAEngine1(EngineBase):
                 img_blocks,
                 img_size,
                 file_io,
+                losstype,
                 r_limit,
                 t_limit,
                 num_steps,
@@ -861,7 +859,7 @@ class SAEngine1(EngineBase):
             )
 
         target_byteses, score, psnr, time = self.solver.find_optimal_target_bytes(
-            self._precomputed_curve, file_io, n_ctu, ans, r_limit, t_limit
+            self._precomputed_curve, file_io, n_ctu, ans, r_limit, t_limit, losstype
         )
         solution = Solution(ans, target_byteses)
 
@@ -869,6 +867,7 @@ class SAEngine1(EngineBase):
         return method_ids, q_scales, bitstreams, None
 
 
+@deprecated("No longer in use")
 class GAEngine1(EngineBase):
     def _initial_method_score(self, n_ctu, n_method):
         result = np.random.uniform(0.0, 1.0, [n_method, n_ctu])
