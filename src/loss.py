@@ -70,8 +70,13 @@ class MSSSIMLoss(LossBase):
             Y = Y.permute((2, 0, 1)).to(torch.float32) / 255.0
             Y = Y.unsqueeze(0)
         Y = Y.to(X.device)
-        msssim = pytorch_msssim.ms_ssim(X, Y, data_range=1.0).detach().cpu().numpy()
         _, c, h, w = X.shape
+        if h < 160 or w < 160:
+            msssim = (
+                pytorch_msssim.ssim(X, Y, data_range=1.0).detach().cpu().numpy()
+            )  # Estimate by SSIM. Image too small
+        else:
+            msssim = pytorch_msssim.ms_ssim(X, Y, data_range=1.0).detach().cpu().numpy()
         ctu_loss = h * w * (1.0 - msssim)
         return ctu_loss
 
