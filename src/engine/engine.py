@@ -29,6 +29,8 @@ from ..async_ops import async_map
 from .sa_solver import SolverBase, LagrangeMultiplierSolver
 from .toucher import Toucher
 
+Image.MAX_IMAGE_PIXELS = None  # Don't detect decompression bombs
+
 SAFETY_BYTE_PER_CTU = 2
 
 np.seterr(all="raise")
