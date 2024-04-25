@@ -5,7 +5,7 @@ from typing_extensions import Union, Any
 import abc
 import os
 import os.path as osp
-from .traditional_tools import JPEGTool, WebPTool, TraditionalCodingToolBase
+from .traditional_tools import JPEGTool, VTMTool, WebPTool, TraditionalCodingToolBase
 from PIL import Image
 import numpy as np
 import tempfile
@@ -102,3 +102,9 @@ class JPEG(ToolBasedCodec):
     @property
     def tool(self):
         return JPEGTool()
+
+
+class VTM(ToolBasedCodec):
+    @property
+    def tool(self):
+        return VTMTool()

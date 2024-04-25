@@ -45,7 +45,9 @@ class PSNRLoss(LossBase):
         if isinstance(recon, torch.Tensor):
             sqe = torch.sum((origin.cuda - recon) ** 2).detach().cpu().numpy()
         else:
-            sqe = np.sum((origin.np - recon) ** 2) / (255.0**2)
+            x = origin.np.astype(np.float32)
+            y = recon.astype(np.float32)
+            sqe = np.sum((x - y) ** 2) / (255.0**2)
         return sqe
 
     @staticmethod

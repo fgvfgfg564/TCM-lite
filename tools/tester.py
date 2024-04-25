@@ -7,7 +7,7 @@ import json
 
 from coding_tools.register import TOOL_GROUPS
 from src.engine import *
-from coding_tools.baseline import BPG, WebP, JPEG
+from coding_tools.baseline import BPG, VTM, WebP, JPEG
 from tester_utils import test_multiple_configs
 
 
@@ -17,6 +17,7 @@ class AlgorithmType(enum.Enum):
     BPG = enum.auto()
     WebP = enum.auto()
     JPEG = enum.auto()
+    VTM = enum.auto()
 
 
 ALGORITHMS = AlgorithmType.__members__.keys()
@@ -31,7 +32,7 @@ def parse_args():
     parser.add_argument("--target_time", nargs="+", type=float, default=[float("inf")])
     parser.add_argument("--target_bpp", nargs="+", type=float, default=[1.0])
     parser.add_argument(
-        "--loss", nargs=1, type=str, required=True, choices=LOSSES.keys()
+        "--loss", nargs=1, type=str, choices=LOSSES.keys(), default=None
     )
     parser.add_argument("--save_image", action="store_true")
 
@@ -141,11 +142,13 @@ if __name__ == "__main__":
             qp=args.qp,
             level=args.level,
         )
-    elif algorithm in [AlgorithmType.JPEG, AlgorithmType.WebP]:
+    elif algorithm in [AlgorithmType.JPEG, AlgorithmType.WebP, AlgorithmType.VTM]:
         if algorithm == AlgorithmType.JPEG:
             engine = JPEG()
-        else:
+        elif algorithm == AlgorithmType.WebP:
             engine = WebP()
+        elif algorithm == AlgorithmType.VTM:
+            engine = VTM()
         results = test_multiple_configs(
             engine,
             args.input,

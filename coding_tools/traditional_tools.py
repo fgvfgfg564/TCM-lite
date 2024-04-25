@@ -21,16 +21,16 @@ import abc
 @register_tool("VTM")
 class VTMTool(TraditionalCodingToolBase):
     def __init__(self):
-        self.encoder_path = "../third_party/VVCSoftware_VTM/bin/EncoderAppStatic"
-        self.decoder_path = "../third_party/VVCSoftware_VTM/bin/DecoderAppStatic"
-        self.config_path = "../third_party/VVCSoftware_VTM/cfg/encoder_intra_vtm.cfg"
+        self.encoder_path = "../VVCSoftware_VTM/bin/EncoderAppStatic"
+        self.decoder_path = "../VVCSoftware_VTM/bin/DecoderAppStatic"
+        self.config_path = "../VVCSoftware_VTM/cfg/encoder_intra_vtm.cfg"
 
-    def compress_block(self, img_block: torch.Tensor, q_scale: float) -> bytes:
+    def compress_block(self, img_block: np.ndarray, q_scale: float) -> bytes:
         q_scale = math.ceil(q_scale * 63)
         if not 0.0 <= q_scale <= 63.0:
             raise ValueError(f"Invalid quality value: {q_scale} (0,63)")
         bitdepth = 8
-        arr = np.asarray(transforms.ToPILImage()(img_block.squeeze(0)))
+        arr = img_block
         fd, yuv_path = mkstemp(suffix=".yuv")
         out_filepath = os.path.splitext(yuv_path)[0] + ".bin"
         arr = arr.transpose((2, 0, 1))
@@ -93,7 +93,6 @@ class VTMTool(TraditionalCodingToolBase):
         rec = Image.fromarray(
             (rec_arr.clip(0, 1).transpose(1, 2, 0) * 255.0).astype(np.uint8)
         )
-        rec = transforms.ToTensor()(rec).unsqueeze(0)
 
         return rec
 
