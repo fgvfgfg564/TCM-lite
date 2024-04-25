@@ -1,3 +1,4 @@
+import statistics
 from typing import List, Type
 
 import os
@@ -744,6 +745,9 @@ class SAEngine1(EngineBase):
         best_ans = ans
         best_loss = loss
 
+        t0 = time.time()
+        statistics = []
+
         # Simulated Annealing
         for step in range(num_steps):
             # 80%: swap blocks
@@ -802,6 +806,14 @@ class SAEngine1(EngineBase):
 
             print(f"Loss: {loss}; next_loss: {next_loss}; Accept: {accept}")
 
+            statistics.append(
+                {
+                    "time": time.time() - t0,
+                    "loss": loss.d,
+                    "legal": bool(loss.r <= 0 and loss.t <= 0),
+                }
+            )
+
             if accept:
                 ans = next_state
                 target_byteses = next_target_byteses
@@ -812,12 +824,12 @@ class SAEngine1(EngineBase):
                     best_loss = loss
                     best_ans = ans
 
-            # if step % (num_steps // 10) == 0:
-            #     print(f"Results for step: {step}; T={T:.6f}; best_loss={best_loss}")
-            #     self._show_solution(ans, target_byteses, r_limit, loss, psnr, t)
+            if step % (num_steps // 10) == 0:
+                print(f"Results for step: {step}; T={T:.6f}; best_loss={best_loss}")
+                self._show_solution(ans, target_byteses, r_limit, loss, psnr, t)
 
             T *= alpha
-        return best_ans
+        return best_ans, statistics
 
     def _solve(
         self,
@@ -848,7 +860,7 @@ class SAEngine1(EngineBase):
             t_limit,
         )
         if n_method > 1:
-            ans = self._sa_body(
+            ans, statistics = self._sa_body(
                 ans,
                 img_blocks,
                 img_size,
@@ -861,6 +873,8 @@ class SAEngine1(EngineBase):
                 T_start,
                 T_end,
             )
+        else:
+            statistics = None
 
         target_byteses, score, psnr, time = self.solver.find_optimal_target_bytes(
             self._precomputed_curve, file_io, n_ctu, ans, r_limit, t_limit, losstype
@@ -868,7 +882,7 @@ class SAEngine1(EngineBase):
         solution = Solution(ans, target_byteses)
 
         method_ids, q_scales, bitstreams = self._compress_blocks(img_blocks, solution)
-        return method_ids, q_scales, bitstreams, None
+        return method_ids, q_scales, bitstreams, statistics
 
 
 @deprecated("No longer in use")
