@@ -1,5 +1,5 @@
 BASEDIR=$(dirname "$0")
-DATASET_DIR=$BASEDIR/../../../images/6720x4480/IMG_3227.png
+DATASET_DIR=$BASEDIR/../../../images/6720x4480/IMG_1813.png
 
 # sudo --preserve-env=PATH,PYTHONPATH,CUDA_VISIBLE_DEVICES sh -c "which python"
 

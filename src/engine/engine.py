@@ -327,6 +327,8 @@ class EngineBase(CodecBase):
                             f"num_bytes are too few or not strictly increasing: \nnum_bytes={num_bytes}\nsqes={ctu_losses}\nqscales={qscales}"
                         )
 
+                    print(f"bytes={num_bytes}\ndistortion={ctu_losses}")
+
                     b_e = self.fitterclass(num_bytes, ctu_losses)
                     # b_t = interpolate.interp1d(num_bytes, times, kind='linear')
                     b_t = np.polyfit(num_bytes, times, 1)
@@ -810,9 +812,9 @@ class SAEngine1(EngineBase):
                     best_loss = loss
                     best_ans = ans
 
-            if step % (num_steps // 10) == 0:
-                print(f"Results for step: {step}; T={T:.6f}; best_loss={best_loss}")
-                self._show_solution(ans, target_byteses, r_limit, loss, psnr, t)
+            # if step % (num_steps // 10) == 0:
+            #     print(f"Results for step: {step}; T={T:.6f}; best_loss={best_loss}")
+            #     self._show_solution(ans, target_byteses, r_limit, loss, psnr, t)
 
             T *= alpha
         return best_ans

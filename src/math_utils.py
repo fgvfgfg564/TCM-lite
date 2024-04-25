@@ -169,8 +169,14 @@ class FitKExp(Fitter):
         print("R2=", r2)
 
     def fit(self):
-        a_init = np.random.rand(self.K) * 2 * self.Y[0] / self.K
-        b_init = np.zeros([self.K]) - 0.05
+        a_init = (
+            np.random.rand(self.K)
+            * 2
+            * self.Y[0]
+            / self.K
+            / ((1 + np.exp(-3.0)) ** (self.X[0] / ExpKModel.SCALE))
+        )
+        b_init = np.zeros([self.K]) + 3.0
         init_value = np.concatenate([a_init, b_init], axis=0)
 
         y_std2 = ((self.Y - self.Y.mean()) ** 2).sum()
