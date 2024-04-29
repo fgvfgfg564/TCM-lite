@@ -3,6 +3,7 @@ from PIL import Image
 import io
 import math
 import torch
+import struct
 import numpy as np
 from tempfile import mkstemp
 from torchvision import transforms
@@ -34,6 +35,7 @@ class VTMTool(TraditionalCodingToolBase):
         fd, yuv_path = mkstemp(suffix=".yuv")
         out_filepath = os.path.splitext(yuv_path)[0] + ".bin"
         arr = arr.transpose((2, 0, 1))
+        c, h, w = arr.shape
         rgb = arr.astype(np.float32) / (2**bitdepth - 1)
         arr = np.clip(rgb2yuv(rgb), 0, 1)
         arr = (arr * (2**bitdepth - 1)).astype(np.uint8)
@@ -72,9 +74,16 @@ class VTMTool(TraditionalCodingToolBase):
         os.unlink(yuv_path)
         os.unlink(out_filepath)
 
-        return bit_stream
+        hw_header = struct.pack("2i", h, w)
+
+        return hw_header + bit_stream
 
     def decompress_block(self, bit_stream: bytes, h: int, w: int) -> torch.Tensor:
+        header_length = struct.calcsize("2i")
+        header = bit_stream[:header_length]
+        bit_stream = bit_stream[header_length:]
+        h, w = struct.unpack("2i", header)
+
         bitdepth = 8
         fd, yuv_path = mkstemp(suffix=".yuv")
         out_filepath = os.path.splitext(yuv_path)[0] + ".bin"
