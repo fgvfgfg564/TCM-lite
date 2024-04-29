@@ -8,6 +8,7 @@ import copy
 import abc
 
 from dataclasses import dataclass
+from unittest import result
 from typing_extensions import deprecated
 
 import numpy as np
@@ -655,13 +656,21 @@ class SAEngine1(EngineBase):
         file_io: FileIO,
         n_ctu: int,
         n_method: int,
+        r_limit,
         t_limit,
-        num_steps=10000,
+        losstype,
+        num_steps=100,
     ):
         # Assign blocks to methods according to their complexity
-        complexity_scores = np.asarray(
-            [self.toucher.touch_complexity(x.np) for x in img_blocks]
-        )
+        print("Starting initialization ...")
+        print("Estimating scores for method")
+
+        complexity_scores = []
+
+        for x in tqdm.tqdm(img_blocks, "Touching image blocks"):
+            score = self.toucher.touch_complexity(x.np)
+            complexity_scores.append(score)
+        complexity_scores = np.asarray(complexity_scores)
         complexity_order = np.argsort(complexity_scores)
 
         def _est_speed(method_idx):
@@ -674,17 +683,80 @@ class SAEngine1(EngineBase):
             return np.asarray(speeds).mean()
 
         speeds = []
-        for i in range(n_method):
+        for i in tqdm.tqdm(range(n_method), "Estimate speed for methods"):
             speeds.append(_est_speed(i))
         speeds = np.asarray(speeds)
         speeds_order = np.argsort(speeds)
-        results = np.zeros((n_ctu,), dtype=np.int32)
-        for i in range(n_method):
-            lb = n_ctu * i // n_method
-            rb = n_ctu * (i + 1) // n_method
-            results[complexity_order[lb:rb]] = speeds_order[i]
-        print(results)
-        return results
+
+        # Hill-climbing on method ratios
+        # ratio = softmax(w/20.0)
+        w = np.zeros((n_method,), dtype=np.int32)
+
+        def generate_results(_w):
+            ratio = np.exp(_w / 20) / np.sum(np.exp(_w / 20))
+            ratio = np.cumsum(ratio)
+            ratio[-1] = 1.0
+            ratio = np.concatenate([[0.0], ratio])
+
+            # calculate results
+            results = np.zeros((n_ctu,), dtype=np.int32)
+            for i in range(n_method):
+                lb = int(round(n_ctu * ratio[i]))
+                rb = int(round(n_ctu * ratio[i + 1]))
+                results[complexity_order[lb:rb]] = speeds_order[i]
+            return results
+
+        def calc_loss(results):
+            return self.solver.find_optimal_target_bytes(
+                self._precomputed_curve,
+                file_io,
+                n_ctu,
+                results,
+                r_limit,
+                t_limit,
+                losstype,
+            )[1]
+
+        results = generate_results(w)
+        loss = calc_loss(results)
+        visited = set()
+
+        hashw = hash_numpy_array(w)
+        visited.add(hashw)
+
+        for step in tqdm.tqdm(range(num_steps), "Hill-climbing method usage ratio"):
+            print(f"Loss={loss}")
+
+            poslist = list(range(n_method))
+            dirlist = [-1, 1]
+            random.shuffle(poslist)
+            random.shuffle(dirlist)
+
+            found = False
+            for pos in poslist:
+                for dir in dirlist:
+                    w_new = w.copy()
+                    w_new[pos] += dir
+                    hashnew = hash_numpy_array(w_new)
+                    if hashnew not in visited:
+                        visited.add(hashnew)
+                        result_new = generate_results(w_new)
+                        loss_new = calc_loss(result_new)
+                        if loss_new < loss:
+                            loss = loss_new
+                            w = w_new
+                            result = result_new
+                            found = True
+                            break
+                if found:
+                    break
+
+            if not found:
+                print("Hill-climbing reaches local minimum")
+                break
+
+        print(result)
+        return result
 
     def _init(
         self,
@@ -696,6 +768,7 @@ class SAEngine1(EngineBase):
         file_io,
         r_limit,
         t_limit,
+        losstype,
     ):
         if n_method == 1:
             ans = np.zeros([n_ctu], dtype=np.int32)
@@ -705,7 +778,7 @@ class SAEngine1(EngineBase):
             else:
                 if adaptive_init:
                     ans = self._adaptive_init(
-                        img_blocks, file_io, n_ctu, n_method, t_limit
+                        img_blocks, file_io, n_ctu, n_method, r_limit, t_limit, losstype
                     )
                 else:
                     ans = np.random.random_integers(
@@ -858,6 +931,7 @@ class SAEngine1(EngineBase):
             file_io,
             r_limit,
             t_limit,
+            losstype,
         )
         if n_method > 1:
             ans, statistics = self._sa_body(
