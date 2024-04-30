@@ -9,6 +9,7 @@ import abc
 
 from dataclasses import dataclass
 from unittest import result
+from sympy import rational_interpolate
 from typing_extensions import deprecated
 
 import numpy as np
@@ -659,8 +660,9 @@ class SAEngine1(EngineBase):
         r_limit,
         t_limit,
         losstype,
-        num_steps=100,
+        num_steps=1000,
     ):
+        GRAN = 40
         # Assign blocks to methods according to their complexity
         print("Starting initialization ...")
         print("Estimating scores for method")
@@ -691,9 +693,10 @@ class SAEngine1(EngineBase):
         # Hill-climbing on method ratios
         # ratio = softmax(w/20.0)
         w = np.zeros((n_method,), dtype=np.int32)
+        w[0] = GRAN
 
-        def generate_results(_w):
-            ratio = np.exp(_w / 20) / np.sum(np.exp(_w / 20))
+        def generate_results(_w: np.ndarray):
+            ratio = _w / GRAN
             ratio = np.cumsum(ratio)
             ratio[-1] = 1.0
             ratio = np.concatenate([[0.0], ratio])
@@ -719,41 +722,50 @@ class SAEngine1(EngineBase):
 
         results = generate_results(w)
         loss = calc_loss(results)
-        visited = set()
+        visited = dict()
 
         hashw = hash_numpy_array(w)
-        visited.add(hashw)
+        visited[hashw] = loss
+
+        T = 10.0
 
         for step in tqdm.tqdm(range(num_steps), "Hill-climbing method usage ratio"):
-            print(f"Loss={loss}")
+            print(f"Weights={w}; Loss={loss}")
 
-            poslist = list(range(n_method))
-            dirlist = [-1, 1]
-            random.shuffle(poslist)
-            random.shuffle(dirlist)
+            in_idx = random.randrange(n_method)
+            out_idx = random.randrange(n_method)
+            while in_idx == out_idx or w[out_idx] == 0:
+                in_idx = random.randrange(n_method)
+                out_idx = random.randrange(n_method)
 
-            found = False
-            for pos in poslist:
-                for dir in dirlist:
-                    w_new = w.copy()
-                    w_new[pos] += dir
-                    hashnew = hash_numpy_array(w_new)
-                    if hashnew not in visited:
-                        visited.add(hashnew)
-                        result_new = generate_results(w_new)
-                        loss_new = calc_loss(result_new)
-                        if loss_new < loss:
-                            loss = loss_new
-                            w = w_new
-                            result = result_new
-                            found = True
-                            break
-                if found:
-                    break
+            w_new = w.copy()
+            w_new[out_idx] -= 1
+            w_new[in_idx] += 1
+            hashnew = hash_numpy_array(w_new)
+            result_new = generate_results(w_new)
+            if hashnew not in visited:
+                loss_new = calc_loss(result_new)
+                visited[hashnew] = loss_new
+            else:
+                loss_new = visited[hashnew]
 
-            if not found:
-                print("Hill-climbing reaches local minimum")
-                break
+            if loss_new < loss:
+                accept = True
+            elif loss_new.r > 0 or loss_new.t > 0:
+                accept = False
+            else:
+                delta = loss_new[2] - loss[2]
+                p = safe_SA_prob(delta, T)
+                accept = np.random.rand() < p
+
+            print(f"T={T:.6f}; w_new={w_new}; loss={loss_new}; accept={accept}")
+
+            if accept:
+                loss = loss_new
+                w = w_new
+                result = result_new
+
+            T *= 0.99
 
         print(result)
         return result

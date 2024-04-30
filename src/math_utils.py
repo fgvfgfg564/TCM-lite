@@ -292,9 +292,9 @@ def safe_softmax(x: np.ndarray):
     return y / np.sum(y)
 
 
-def safe_SA_prob(delta, NDArray):
-    if delta / NDArray < 60:
-        p = 1.0 / (1.0 + np.exp(delta / NDArray))
+def safe_SA_prob(delta, T):
+    if delta / T < 60:
+        p = np.exp(-delta / T)
     else:
         p = 0
     return p
