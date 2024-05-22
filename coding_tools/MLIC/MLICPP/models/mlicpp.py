@@ -5,8 +5,11 @@ import time
 from compressai.models import CompressionModel
 from compressai.ops import ste_round
 from compressai.ans import BufferedRansEncoder, RansDecoder
-from utils.func import update_registered_buffers, get_scale_table
-from utils.ckbd import *
+from coding_tools.MLIC.MLICPP.utils.func import (
+    update_registered_buffers,
+    get_scale_table,
+)
+from coding_tools.MLIC.MLICPP.utils.ckbd import *
 from modules.transform import *
 
 

@@ -12,8 +12,8 @@ from torchvision import transforms
 from torch.utils.data import DataLoader
 from PIL import ImageFile, Image
 from models import *
-from utils.testing import test_model
-from utils.logger import setup_logger
+from coding_tools.MLIC.MLICPP.utils.testing import test_model
+from coding_tools.MLIC.MLICPP.utils.logger import setup_logger
 
 
 def main():
@@ -27,11 +27,17 @@ def main():
 
     torch.backends.cudnn.deterministic = True
 
-    if not os.path.exists(os.path.join('./experiments', args.experiment)):
-        os.makedirs(os.path.join('./experiments', args.experiment))
-    setup_logger('test', os.path.join('./experiments', args.experiment), 'test_' + args.experiment, level=logging.INFO,
-                        screen=True, tofile=True)
-    logger_test = logging.getLogger('test')
+    if not os.path.exists(os.path.join("./experiments", args.experiment)):
+        os.makedirs(os.path.join("./experiments", args.experiment))
+    setup_logger(
+        "test",
+        os.path.join("./experiments", args.experiment),
+        "test_" + args.experiment,
+        level=logging.INFO,
+        screen=True,
+        tofile=True,
+    )
+    logger_test = logging.getLogger("test")
 
     test_transforms = transforms.Compose([transforms.ToTensor()])
     test_dataset = ImageFolder(args.dataset, split="tecnick", transform=test_transforms)
@@ -49,15 +55,22 @@ def main():
     net = MLICPlusPlus(config=config)
     net = net.to(device)
     checkpoint = torch.load(args.checkpoint)
-    net.load_state_dict(checkpoint['state_dict'])
+    net.load_state_dict(checkpoint["state_dict"])
     epoch = checkpoint["epoch"]
-    logger_test.info(f"Start testing!" )
-    save_dir = os.path.join('./experiments', args.experiment, 'codestream', '%02d' % (epoch + 1))
+    logger_test.info(f"Start testing!")
+    save_dir = os.path.join(
+        "./experiments", args.experiment, "codestream", "%02d" % (epoch + 1)
+    )
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
-    test_model(net=net, test_dataloader=test_dataloader, logger_test=logger_test, save_dir=save_dir, epoch=epoch)
+    test_model(
+        net=net,
+        test_dataloader=test_dataloader,
+        logger_test=logger_test,
+        save_dir=save_dir,
+        epoch=epoch,
+    )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
-

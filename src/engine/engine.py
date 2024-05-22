@@ -382,7 +382,7 @@ class EngineBase(CodecBase):
         file_io,
         losstype: str,
         **kwargs,
-    ) -> Any:
+    ) -> Tuple[FileIO, Any]:
         pass
 
     def read_img(self, img_path):
@@ -423,6 +423,14 @@ class EngineBase(CodecBase):
             ctu = self.torch_float_to_np_uint8(ctu)
         return ctu
 
+    def _estimate_decode_time(self, file_io: FileIO):
+        total_time = 0
+        for i, bitstream in file_io.bitstreams:
+            num_bytes = len(bitstream)
+            dec_est = self._precomputed_curve[file_io.method_id[i]][i]["b_t"](num_bytes)
+            total_time += dec_est
+        return total_time
+
     def _self_check(self, img_blocks: List[ImageBlock], file_io: FileIO, losstype: str):
         losscls = LOSSES[losstype]
         # Check the difference between estimated and actual D loss
@@ -435,16 +443,14 @@ class EngineBase(CodecBase):
                 f"Self check CTU #{i}: Method={file_io.method_id[i]}; Estimated CTU loss: {sqe_est:.6f}; actual CTU loss: {ctu_loss:.6f}"
             )
 
-    @torch.inference_mode()
-    def encode(
+    def _encode(
         self,
         input_pth,
-        output_pth,
         target_bpp,
         target_time,
         losstype: str,
         **kwargs,
-    ):
+    ) -> Tuple[FileIO, Any]:
         input_img, img_hash = self.read_img(input_pth)
         h, w, c = input_img.shape
         img_size = (h, w)
@@ -467,7 +473,7 @@ class EngineBase(CodecBase):
         print("Precompute all scorees", flush=True)
         self._precompute_score(img_blocks, img_size, img_hash, losstype)
 
-        method_ids, q_scales, bitstreams, data = self._solve(
+        file_io, data = self._solve(
             img_blocks,
             img_size,
             r_limit=r_limit,
@@ -476,12 +482,25 @@ class EngineBase(CodecBase):
             losstype=losstype,
             **kwargs,
         )
-        file_io.method_id = method_ids
-        file_io.bitstreams = bitstreams
-        self._self_check(img_blocks, file_io, losstype)
-        file_io.q_scales = q_scales
-        file_io.dump(output_pth)
 
+        self._self_check(img_blocks, file_io, losstype)
+
+        return file_io, data
+
+    @torch.inference_mode()
+    def encode(
+        self,
+        input_pth,
+        output_pth,
+        target_bpp,
+        target_time,
+        losstype: str,
+        **kwargs,
+    ):
+        file_io, data = self._encode(
+            input_pth, target_bpp, target_time, losstype, **kwargs
+        )
+        file_io.dump(output_pth)
         return data
 
     def join_blocks(self, decoded_ctus, file_io: FileIO):
@@ -518,6 +537,34 @@ class EngineBase(CodecBase):
             recon_img = self.join_blocks(decoded_ctus, file_io)
             out_img = dump_image(recon_img)
             Image.fromarray(out_img).save(output_pth)
+
+    @torch.inference_mode()
+    def accelerate(
+        self,
+        input_pth,
+        output_pth,
+        target_bpp,
+        speedup,
+        losstype: str,
+        **kwargs,
+    ):
+        # Test acceleration with particular percent time
+        # First, only enable the 0-th method
+        method_backup = self.methods
+        self.methods = [method_backup[0]]
+        (fullspeed_fileio, _) = self._encode(
+            input_pth, target_bpp, float("inf"), losstype, **kwargs
+        )
+
+        # restore methods and calculate time budget
+        self.methods = method_backup
+        fulltime = self._estimate_decode_time(fullspeed_fileio)
+        time_limit = fulltime / speedup
+        file_io, data = self._encode(
+            input_pth, target_bpp, time_limit, losstype, **kwargs
+        )
+        file_io.dump(output_pth)
+        return data
 
 
 class SAEngine1(EngineBase):
@@ -922,7 +969,7 @@ class SAEngine1(EngineBase):
         img_size,
         r_limit,
         t_limit,
-        file_io,
+        file_io: FileIO,
         losstype,
         num_steps=1000,
         T_start=10,
@@ -968,7 +1015,13 @@ class SAEngine1(EngineBase):
         solution = Solution(ans, target_byteses)
 
         method_ids, q_scales, bitstreams = self._compress_blocks(img_blocks, solution)
-        return method_ids, q_scales, bitstreams, statistics
+
+        # update fileio
+        file_io.method_id = method_ids
+        file_io.bitstreams = bitstreams
+        file_io.q_scales = q_scales
+
+        return file_io, statistics
 
 
 @deprecated("No longer in use")

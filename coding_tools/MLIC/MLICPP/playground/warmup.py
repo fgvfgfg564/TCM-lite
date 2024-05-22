@@ -12,11 +12,11 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from transformers import get_linear_schedule_with_warmup
 from compressai.datasets import ImageFolder
-from utils.logger import setup_logger
-from utils.utils import CustomDataParallel, save_checkpoint
-from utils.optimizers import configure_optimizers
-from utils.training import warmup_one_epoch
-from utils.testing import test_one_epoch
+from coding_tools.MLIC.MLICPP.utils.logger import setup_logger
+from coding_tools.MLIC.MLICPP.utils.utils import CustomDataParallel, save_checkpoint
+from coding_tools.MLIC.MLICPP.utils.optimizers import configure_optimizers
+from coding_tools.MLIC.MLICPP.utils.training import warmup_one_epoch
+from coding_tools.MLIC.MLICPP.utils.testing import test_one_epoch
 from loss.rd_loss import RateDistortionLoss
 from config.args import train_options
 from config.config import model_config
@@ -32,7 +32,7 @@ def main():
     args = train_options()
     config = model_config()
 
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu_id)
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
     device = "cuda" if args.cuda and torch.cuda.is_available() else "cpu"
 
     if args.seed is not None:
@@ -41,27 +41,39 @@ def main():
         torch.manual_seed(seed)
         random.seed(seed)
 
-    if not os.path.exists(os.path.join('./experiments', args.experiment)):
-        os.makedirs(os.path.join('./experiments', args.experiment))
+    if not os.path.exists(os.path.join("./experiments", args.experiment)):
+        os.makedirs(os.path.join("./experiments", args.experiment))
 
-    setup_logger('train', os.path.join('./experiments', args.experiment), 'train_' + args.experiment, level=logging.INFO,
-                        screen=True, tofile=True)
-    setup_logger('val', os.path.join('./experiments', args.experiment), 'val_' + args.experiment, level=logging.INFO,
-                        screen=True, tofile=True)
+    setup_logger(
+        "train",
+        os.path.join("./experiments", args.experiment),
+        "train_" + args.experiment,
+        level=logging.INFO,
+        screen=True,
+        tofile=True,
+    )
+    setup_logger(
+        "val",
+        os.path.join("./experiments", args.experiment),
+        "val_" + args.experiment,
+        level=logging.INFO,
+        screen=True,
+        tofile=True,
+    )
 
-    logger_train = logging.getLogger('train')
-    logger_val = logging.getLogger('val')
-    tb_logger = SummaryWriter(log_dir='./tb_logger/' + args.experiment)
+    logger_train = logging.getLogger("train")
+    logger_val = logging.getLogger("val")
+    tb_logger = SummaryWriter(log_dir="./tb_logger/" + args.experiment)
 
-    if not os.path.exists(os.path.join('./experiments', args.experiment, 'checkpoints')):
-        os.makedirs(os.path.join('./experiments', args.experiment, 'checkpoints'))
+    if not os.path.exists(
+        os.path.join("./experiments", args.experiment, "checkpoints")
+    ):
+        os.makedirs(os.path.join("./experiments", args.experiment, "checkpoints"))
 
     train_transforms = transforms.Compose(
         [transforms.RandomCrop(args.patch_size), transforms.ToTensor()]
     )
-    test_transforms = transforms.Compose(
-        [transforms.ToTensor()]
-    )
+    test_transforms = transforms.Compose([transforms.ToTensor()])
 
     train_dataset = ImageFolder(args.dataset, split="train", transform=train_transforms)
     test_dataset = ImageFolder(args.dataset, split="test", transform=test_transforms)
@@ -97,16 +109,18 @@ def main():
     if args.checkpoint != None:
         checkpoint = torch.load(args.checkpoint)
         net.load_state_dict(checkpoint["state_dict"])
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        aux_optimizer.load_state_dict(checkpoint['aux_optimizer'])
-        lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+        optimizer.load_state_dict(checkpoint["optimizer"])
+        aux_optimizer.load_state_dict(checkpoint["aux_optimizer"])
+        lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
         # lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[450,550], gamma=0.1)
         # lr_scheduler._step_count = checkpoint['lr_scheduler']['_step_count']
         # lr_scheduler.last_epoch = checkpoint['lr_scheduler']['last_epoch']
         # print(lr_scheduler.state_dict())
-        start_epoch = checkpoint['epoch']
-        best_loss = checkpoint['loss']
-        current_step = start_epoch * math.ceil(len(train_dataloader.dataset) / args.batch_size)
+        start_epoch = checkpoint["epoch"]
+        best_loss = checkpoint["loss"]
+        current_step = start_epoch * math.ceil(
+            len(train_dataloader.dataset) / args.batch_size
+        )
         checkpoint = None
     else:
         start_epoch = 0
@@ -134,11 +148,15 @@ def main():
             logger_train,
             tb_logger,
             current_step,
-            lr_scheduler
+            lr_scheduler,
         )
 
-        save_dir = os.path.join('./experiments', args.experiment, 'val_images', '%03d' % (epoch + 1))
-        loss = test_one_epoch(epoch, test_dataloader, net, criterion, save_dir, logger_val, tb_logger)
+        save_dir = os.path.join(
+            "./experiments", args.experiment, "val_images", "%03d" % (epoch + 1)
+        )
+        loss = test_one_epoch(
+            epoch, test_dataloader, net, criterion, save_dir, logger_val, tb_logger
+        )
 
         is_best = loss < best_loss
         best_loss = min(loss, best_loss)
@@ -155,10 +173,16 @@ def main():
                     "lr_scheduler": lr_scheduler.state_dict(),
                 },
                 is_best,
-                os.path.join('./experiments', args.experiment, 'checkpoints', "checkpoint_%03d.pth.tar" % (epoch + 1))
+                os.path.join(
+                    "./experiments",
+                    args.experiment,
+                    "checkpoints",
+                    "checkpoint_%03d.pth.tar" % (epoch + 1),
+                ),
             )
             if is_best:
-                logger_val.info('best checkpoint saved.')
+                logger_val.info("best checkpoint saved.")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
