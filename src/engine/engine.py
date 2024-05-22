@@ -1,3 +1,4 @@
+import enum
 import statistics
 from typing import List, Type
 
@@ -31,6 +32,7 @@ from ..math_utils import *
 from ..async_ops import async_map
 from .sa_solver import SolverBase, LagrangeMultiplierSolver
 from .toucher import Toucher
+
 
 Image.MAX_IMAGE_PIXELS = None  # Don't detect decompression bombs
 
@@ -462,6 +464,7 @@ class EngineBase(CodecBase):
         r_limit = target_bpp * h * w // 8
         print(f"Image shape: {h}x{w}")
         print(f"Target={r_limit}B; Target bpp={target_bpp:.4f};")
+        print(f"Time limit={target_time}s")
 
         header_bytes = file_io.header_size
         safety_bytes = SAFETY_BYTE_PER_CTU * file_io.n_ctu
@@ -545,23 +548,42 @@ class EngineBase(CodecBase):
         self,
         input_pth,
         output_pth,
-        target_bpp,
+        qscale,
         speedup,
         losstype: str,
         **kwargs,
     ):
         # Test acceleration with particular percent time
         # First, only enable the 0-th method
+        input_img, img_hash = self.read_img(input_pth)
+        h, w, c = input_img.shape
+        img_size = (h, w)
+        fullspeed_file_io = FileIO(h, w, self.ctu_size, self.mosaic)
+        img_blocks = self.divide_blocks(fullspeed_file_io, h, w, input_img)
+
+        print("Precompute score of method #0", flush=True)
         method_backup = self.methods
         self.methods = [method_backup[0]]
-        (fullspeed_fileio, _) = self._encode(
-            input_pth, target_bpp, float("inf"), losstype, **kwargs
-        )
+        self._precompute_score(img_blocks, img_size, img_hash, losstype)
 
-        # restore methods and calculate time budget
+        method, _, __ = self.methods[0]
+        bitstreams = []
+        method_ids = np.zeros([len(img_blocks)], dtype=np.int32)
+        for i, block in enumerate(img_blocks):
+            bitstream = self._feed_block(method, block, qscale)
+            bitstreams.append(bitstream)
+        fullspeed_file_io.method_id = method_ids
+        fullspeed_file_io.bitstreams = bitstreams
+
+        # restore methods, calculate time budget and target bpp
         self.methods = method_backup
-        fulltime = self._estimate_decode_time(fullspeed_fileio)
+        fulltime = self._estimate_decode_time(fullspeed_file_io)
+        num_bytes = len(fullspeed_file_io.dumps())
+        target_bpp = num_bytes * 8 / h / w
         time_limit = fulltime / speedup
+        print(
+            f"Full decode time={fulltime}s. Accelerate {speedup}x. Time limit={time_limit}s"
+        )
         file_io, data = self._encode(
             input_pth, target_bpp, time_limit, losstype, **kwargs
         )
@@ -812,12 +834,12 @@ class SAEngine1(EngineBase):
             if accept:
                 loss = loss_new
                 w = w_new
-                result = result_new
+                results = result_new
 
             T *= 0.99
 
-        print(result)
-        return result
+        print(results)
+        return results
 
     def _init(
         self,

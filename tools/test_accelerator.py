@@ -18,7 +18,7 @@ def parse_args():
     parser.add_argument("output_dir", type=str)
     parser.add_argument("-i", "--input", type=str, required=True, help="input glob")
     parser.add_argument("--speedup", nargs="+", type=float, required=True)
-    parser.add_argument("--target_bpp", nargs="+", type=float, default=[1.0])
+    parser.add_argument("--qscale", nargs="+", type=float, required=True)
     parser.add_argument(
         "--loss", nargs=1, type=str, choices=LOSSES.keys(), default=None
     )
@@ -68,7 +68,7 @@ if __name__ == "__main__":
         args.input,
         args.output_dir,
         args.save_image,
-        target_bpp=args.target_bpp,
+        qscale=args.qscale,
         speedup=args.speedup,
         num_steps=args.num_steps,
         losstype=args.loss,

@@ -128,18 +128,27 @@ class FileIO:
     def header_size(self):
         return struct.calcsize(self.format_str)
 
+    def _dump(self, fd):
+        items = [self.h, self.w]
+        for i in range(self.n_ctu):
+            items.append(self.method_id[i])
+            items.append(len(self.bitstreams[i]))
+
+        bits = struct.pack(self.format_str, *items)
+        fd.write(bits)
+
+        for i in range(self.n_ctu):
+            fd.write(self.bitstreams[i])
+
     def dump(self, filename: str):
         with open(filename, "wb") as fd:
-            items = [self.h, self.w]
-            for i in range(self.n_ctu):
-                items.append(self.method_id[i])
-                items.append(len(self.bitstreams[i]))
+            self._dump(fd)
 
-            bits = struct.pack(self.format_str, *items)
-            fd.write(bits)
-
-            for i in range(self.n_ctu):
-                fd.write(self.bitstreams[i])
+    def dumps(self):
+        bytesio = io.BytesIO()
+        self._dump(bytesio)
+        bytesio.seek(0)
+        return bytesio.read()
 
     @classmethod
     def _read_with_format(cls, format_str, fd: BinaryIO):

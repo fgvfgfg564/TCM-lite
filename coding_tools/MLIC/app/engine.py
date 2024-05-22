@@ -13,6 +13,7 @@ import copy
 from PIL import Image
 
 from ..MLICPP.models import MLICPlusPlusVBR
+from ..MLICPP.config.config import model_config
 
 from .utils import *
 
@@ -41,7 +42,7 @@ class MLICModelEngine(LICToolBase):
         model_path = self.get_model_path(model_name)
 
         i_state_dict = get_state_dict(model_path, device="cuda")
-        i_frame_net = MLICPlusPlusVBR()
+        i_frame_net = MLICPlusPlusVBR(config=model_config())
         i_frame_net.load_state_dict(i_state_dict, verbose=False)
         i_frame_net = i_frame_net.cuda()
         i_frame_net.eval()
