@@ -14,6 +14,7 @@ from src.utils import *
 
 def test_single_image(
     engine: EngineBase,
+    entrance: str,
     input_filename,
     output_dir,
     save_image,
@@ -36,8 +37,9 @@ def test_single_image(
 
     ## Encode
     if not os.path.isfile(obin):
+        entrance_func = engine.__getattribute__(entrance)
         time0 = time.time()
-        encoder_returns = engine.encode(
+        encoder_returns = entrance_func(
             input_filename,
             obin,
             **kwargs,
@@ -82,6 +84,7 @@ def test_single_image(
 
 def test_glob(
     engine,
+    entrance,
     input_pattern,
     output_dir,
     save_image,
@@ -99,6 +102,7 @@ def test_glob(
     for filename in input_glob:
         img_result = test_single_image(
             engine,
+            entrance,
             filename,
             output_dir,
             save_image=save_image,
@@ -149,6 +153,7 @@ def _config_mapper(config_list, f):
 
 def test_multiple_configs(
     engine,
+    entrance,
     input_pattern,
     output_dir,
     save_image,
@@ -161,6 +166,7 @@ def test_multiple_configs(
     ):
         return test_glob(
             engine,
+            entrance,
             input_pattern,
             output_dir,
             save_image=save_image,

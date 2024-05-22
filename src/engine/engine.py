@@ -425,9 +425,11 @@ class EngineBase(CodecBase):
 
     def _estimate_decode_time(self, file_io: FileIO):
         total_time = 0
-        for i, bitstream in file_io.bitstreams:
+        for i, bitstream in enumerate(file_io.bitstreams):
             num_bytes = len(bitstream)
-            dec_est = self._precomputed_curve[file_io.method_id[i]][i]["b_t"](num_bytes)
+            dec_est = np.polyval(
+                self._precomputed_curve[file_io.method_id[i]][i]["b_t"], num_bytes
+            )
             total_time += dec_est
         return total_time
 

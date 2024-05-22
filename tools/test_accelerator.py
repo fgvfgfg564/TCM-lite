@@ -64,6 +64,7 @@ if __name__ == "__main__":
 
     results = test_multiple_configs(
         engine,
+        "accelerate",
         args.input,
         args.output_dir,
         args.save_image,

@@ -101,6 +101,7 @@ if __name__ == "__main__":
 
         results = test_multiple_configs(
             engine,
+            "encode",
             input_pattern=args.input,
             output_dir=args.output_dir,
             target_bpp=args.target_bpp,
@@ -124,6 +125,7 @@ if __name__ == "__main__":
 
         results = test_multiple_configs(
             engine,
+            "encode",
             args.input,
             args.output_dir,
             args.save_image,
@@ -136,6 +138,7 @@ if __name__ == "__main__":
         engine = BPG()
         results = test_multiple_configs(
             engine,
+            "encode",
             args.input,
             args.output_dir,
             args.save_image,
@@ -151,6 +154,7 @@ if __name__ == "__main__":
             engine = VTM()
         results = test_multiple_configs(
             engine,
+            "encode",
             args.input,
             args.output_dir,
             args.save_image,
