@@ -62,7 +62,7 @@ def parse_args():
     parser.add_argument("--no_allocation", nargs="+", type=bool, default=[False])
 
     # Encoder config args (SA)
-    parser.add_argument("--num_steps", nargs="+", type=int, default=1000)
+    parser.add_argument("--num_steps", nargs="+", type=int, default=[1000])
 
     # Encoder config args (BPG)
     parser.add_argument("--qp", nargs="+", type=int, default=None)

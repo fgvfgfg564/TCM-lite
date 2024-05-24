@@ -51,10 +51,6 @@ class CodingToolBase(abc.ABC):
     def _load_from_weight(cls, model_name, dtype, ctu_size):
         decoder_app = cls(model_name, dtype, ctu_size)
         torch.cuda.synchronize()
-        dummy_input = torch.zeros(
-            [1, 3, ctu_size, ctu_size], device="cuda", dtype=dtype
-        )
-        decoder_app.i_frame_net(dummy_input, 0.5)
         return decoder_app
 
     def preheat(self):

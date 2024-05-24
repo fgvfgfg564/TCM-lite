@@ -84,7 +84,7 @@ class EngineBase(CodecBase):
         num_qscale_samples=20,
         tool_groups=TOOL_GROUPS.keys(),
         tool_filter=None,
-        dtype=torch.half,
+        dtype=torch.float32,
         fitterclass: Type[Fitter] = FitKExp,
     ) -> None:
         self.ctu_size = ctu_size
@@ -591,7 +591,7 @@ class SAEngine1(EngineBase):
         num_qscale_samples=20,
         tool_groups=TOOL_GROUPS.keys(),
         tool_filter=None,
-        dtype=torch.half,
+        dtype=torch.float32,
         solver: Type[SolverBase] = LagrangeMultiplierSolver,
     ) -> None:
         super().__init__(
@@ -742,7 +742,7 @@ class SAEngine1(EngineBase):
             np.ndarray: 编码方法选择结果。
 
         """
-        GRAN = min(40, len(img_blocks))
+        GRAN = min(100, len(img_blocks))
         # Assign blocks to methods according to their complexity
         print("Starting initialization ...")
         print("Estimating scores for method")
@@ -806,6 +806,8 @@ class SAEngine1(EngineBase):
 
         results = generate_results(w)
         loss = calc_loss(results)
+        best_results = results.copy()
+        best_loss = copy.deepcopy(loss)
         visited = dict()
 
         hashw = hash_numpy_array(w)
@@ -849,10 +851,14 @@ class SAEngine1(EngineBase):
                 w = w_new
                 results = result_new
 
+            if loss < best_loss:
+                best_loss = copy.deepcopy(loss)
+                best_results = results.copy()
+
             T *= 0.99
 
-        print(f"Initial method selection: {results}")
-        return results
+        print(f"Initial method selection: {best_results}")
+        return best_results
 
     def _init(
         self,
@@ -913,6 +919,10 @@ class SAEngine1(EngineBase):
         T = T_start
         best_ans = ans
         best_loss = loss
+
+        print("Initial ans: ", best_ans)
+        print("Initial loss: ", best_loss)
+        print(f"Start SA with {num_steps} steps")
 
         t0 = time.time()
         statistics = []
