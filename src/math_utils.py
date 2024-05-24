@@ -1,4 +1,5 @@
 from __future__ import annotations
+import random
 from typing import cast
 
 from typing_extensions import (
@@ -161,22 +162,37 @@ class Fitter(abc.ABC):
 
 class FitKExp(Fitter):
 
-    def __init__(self, X: np.ndarray, Y: np.ndarray, K=3) -> None:
+    def __init__(self, X: np.ndarray, Y: np.ndarray, K=5) -> None:
         self.K = K
         super().__init__(X, Y)
-        print("MSE=", self.mse(self.curve))
-        r2 = self.R2(self.curve)
-        print("R2=", r2)
+
+        while True:
+            mse = self.mse(self.curve)
+            print("MSE=", mse)
+            r2 = self.R2(self.curve)
+            print("R2=", r2)
+
+            if mse > 2000 and r2 < 0.99:
+                print("Bad fit, retrying... Ignore the first & last element")
+            else:
+                break
+            self.X = self.X[1:-1]
+            self.Y = self.Y[1:-1]
+            self.curve = self.fit()
+            self.X_min = self.X.min()
+            self.X_max = self.X.max()
+            self.d = self.curve.derivative()
 
     def fit(self):
+        random_sum_1 = np.random.rand(self.K)
+        random_sum_1 /= np.sum(random_sum_1)
+        midi = len(self.Y) // 2
         a_init = (
-            np.random.rand(self.K)
-            * 2
-            * self.Y[0]
-            / self.K
-            / ((1 + np.exp(-3.0)) ** (self.X[0] / ExpKModel.SCALE))
+            random_sum_1
+            * self.Y[midi]
+            / ((1 + np.exp(-4.0)) ** (self.X[midi] / ExpKModel.SCALE))
         )
-        b_init = np.zeros([self.K]) + 3.0
+        b_init = np.zeros([self.K]) + 4.0
         init_value = np.concatenate([a_init, b_init], axis=0)
 
         y_std2 = ((self.Y - self.Y.mean()) ** 2).sum()
