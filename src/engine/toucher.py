@@ -21,5 +21,7 @@ class Toucher:
             None,
             None,
         )
+        recon = recon.astype(np.float32)
+        img_block = img_block.astype(np.float32)
         mse = ((recon - img_block) ** 2).mean()
         return mse

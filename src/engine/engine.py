@@ -438,6 +438,7 @@ class EngineBase(CodecBase):
 
     def _self_check(self, img_blocks: List[ImageBlock], file_io: FileIO, losstype: str):
         losscls = LOSSES[losstype]
+        ctu_losses = []
         # Check the difference between estimated and actual D loss
         for i, bounds in enumerate(file_io.block_indexes):
             ctu = self.decode_ctu(file_io, i, bounds)
@@ -447,6 +448,11 @@ class EngineBase(CodecBase):
             print(
                 f"Self check CTU #{i}: Method={file_io.method_id[i]}; Estimated CTU loss: {sqe_est:.6f}; actual CTU loss: {ctu_loss:.6f}"
             )
+            ctu_losses.append(ctu_loss)
+        estimated_loss = losscls.global_level_loss(file_io, ctu_losses)
+        print(
+            f"Full self check: global loss={estimated_loss:.6f}. This should be precise."
+        )
 
     def _encode(
         self,
@@ -734,6 +740,23 @@ class SAEngine1(EngineBase):
         losstype,
         num_steps=1000,
     ):
+        """
+        根据图像块的复杂度，自适应地初始化编码方法的选择。
+
+        Args:
+            img_blocks (List[ImageBlock]): 图像块列表。
+            file_io (FileIO): 文件输入输出接口对象。
+            n_ctu (int): CTU (Coding Tree Unit) 数量。
+            n_method (int): 编码方法数量。
+            r_limit (float): 压缩率的限制值。
+            t_limit (float): 时间复杂度的限制值。
+            losstype (str): 损失类型。
+            num_steps (int, optional): 迭代次数。默认为1000。
+
+        Returns:
+            np.ndarray: 编码方法选择结果。
+
+        """
         GRAN = min(40, len(img_blocks))
         # Assign blocks to methods according to their complexity
         print("Starting initialization ...")
@@ -761,11 +784,14 @@ class SAEngine1(EngineBase):
             speeds.append(_est_speed(i))
         speeds = np.asarray(speeds)
         speeds_order = np.argsort(speeds)
+        speeds_rank = np.empty_like(speeds_order)
+        speeds_rank[speeds_order] = np.arange(n_method)
 
         # Hill-climbing on method ratios
         # ratio = softmax(w/20.0)
+        # Initialize with #0 method
         w = np.zeros((n_method,), dtype=np.int32)
-        w[-1] = GRAN
+        w[speeds_rank[0]] = GRAN
 
         def generate_results(_w: np.ndarray):
             ratio = _w / GRAN
