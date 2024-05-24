@@ -12,12 +12,13 @@ class Toucher:
         h, w, c = img_block.shape
         target_bytes = target_bpp * h * w / 8
 
-        def _f(quality):
-            return -len(self.tool.compress_block(img_block, quality))
+        def _f(q_scale):
+            return -len(self.tool.compress_block(img_block, q_scale))
 
-        resulting_quality = binary_search(_f, -target_bytes, 0.0, 1.0, 1e-3)
+        # q_scale越高则码率越低，质量越差；需要求个负数。
+        resulting_q_scale = binary_search(_f, -target_bytes, 0.0, 1.0, 1e-3)
         recon: np.ndarray = self.tool.decompress_block(
-            self.tool.compress_block(img_block, resulting_quality),
+            self.tool.compress_block(img_block, resulting_q_scale),
             None,
             None,
         )

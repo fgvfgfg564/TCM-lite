@@ -198,25 +198,6 @@ class EngineBase(CodecBase):
 
         return max_qs, target_bytes
 
-    @classmethod
-    def torch_to_uint8(cls, x):
-        x = torch.clamp(x, 0, 1)
-        x *= 255
-        x = torch.round(x)
-        x = x.to(torch.uint8)
-        return x
-
-    @classmethod
-    def torch_float_to_np_uint8(cls, x):
-        x = cls.torch_to_uint8(x)
-        x = x[0].permute(1, 2, 0).detach().cpu().numpy()
-        return x
-
-    def torch_pseudo_quantize_to_uint8(self, x):
-        x = self.torch_to_uint8(x)
-        x = x.to(self.dtype) / 255.0
-        return x
-
     def _try_compress_decompress(
         self,
         method: CodingToolBase,
@@ -246,7 +227,7 @@ class EngineBase(CodecBase):
             times.append(time.time() - time0)
 
             if method.PLATFORM == "torch":
-                recon_img = self.torch_pseudo_quantize_to_uint8(recon_img)
+                recon_img = torch_pseudo_quantize_to_uint8(recon_img)
             ctu_loss = losscls.ctu_level_loss(image_block, recon_img)
 
         return ctu_loss, np.mean(times), bitstream
@@ -423,7 +404,7 @@ class EngineBase(CodecBase):
         torch.cuda.synchronize()
         ctu = method.decompress_block(bitstream, lower - upper, right - left)
         if isinstance(ctu, torch.Tensor):
-            ctu = self.torch_float_to_np_uint8(ctu)
+            ctu = torch_float_to_np_uint8(ctu)
         return ctu
 
     def _estimate_decode_time(self, file_io: FileIO):
@@ -453,6 +434,7 @@ class EngineBase(CodecBase):
         print(
             f"Full self check: global loss={estimated_loss:.6f}. This should be precise."
         )
+        return estimated_loss
 
     def _encode(
         self,
@@ -581,6 +563,9 @@ class EngineBase(CodecBase):
             bitstreams.append(bitstream)
         fullspeed_file_io.method_id = method_ids
         fullspeed_file_io.bitstreams = bitstreams
+
+        # Check the anchor bitstream
+        self._self_check(img_blocks, fullspeed_file_io, losstype)
 
         # restore methods, calculate time budget and target bpp
         self.methods = method_backup

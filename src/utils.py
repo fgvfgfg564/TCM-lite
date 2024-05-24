@@ -199,3 +199,54 @@ def hash_list_of_arrays(array_list, hash_function="sha256"):
         combined_hash.update(array_hash.encode())
 
     return combined_hash.hexdigest()
+
+
+def torch_to_uint8(x):
+    """
+    将输入的Tensor从[0, 1]的浮点型归一化到[0, 255]的uint8类型。
+
+    Args:
+        x (torch.Tensor): 输入的Tensor，数据类型为float32，值域在[0, 1]之间。
+
+    Returns:
+        torch.Tensor: 转换后的Tensor，数据类型为uint8，值域在[0, 255]之间。
+
+    """
+    x = torch.clamp(x, 0, 1)
+    x *= 255
+    x = torch.round(x)
+    x = x.to(torch.uint8)
+    return x
+
+
+def torch_float_to_np_uint8(x):
+    """
+    将PyTorch的FloatTensor类型的张量转换为NumPy的uint8类型的数组。
+
+    Args:
+        x (torch.FloatTensor): 输入的FloatTensor类型的张量，其形状应为(1, C, H, W)。
+
+    Returns:
+        np.ndarray: 转换后的NumPy uint8类型的数组，其形状为(H, W, C)。
+
+    """
+    x = torch_to_uint8(x)
+    x = x[0].permute(1, 2, 0).detach().cpu().numpy()
+    return x
+
+
+def torch_pseudo_quantize_to_uint8(x):
+    """
+    将输入张量 x 进行伪量化到 uint8，然后再转换回float。
+
+    Args:
+        x (torch.Tensor): 待伪量化的输入张量。
+
+    Returns:
+        torch.Tensor: 伪量化到 uint8 后的张量，数据类型与输入张量相同。
+
+    """
+    dtype = x.dtype
+    x = torch_to_uint8(x)
+    x = x.to(dtype) / 255.0
+    return x

@@ -10,6 +10,8 @@ from typing import List, Type, Union
 import numpy as np
 import pytorch_msssim
 
+from .utils import *
+
 
 class LossBase(abc.ABC):
     @staticmethod
@@ -43,11 +45,10 @@ class PSNRLoss(LossBase):
         origin: "ImageBlock", recon: Union[np.ndarray, torch.Tensor]
     ) -> float:
         if isinstance(recon, torch.Tensor):
-            sqe = torch.sum((origin.cuda - recon) ** 2).detach().cpu().numpy()
-        else:
-            x = origin.np.astype(np.float32)
-            y = recon.astype(np.float32)
-            sqe = np.sum((x - y) ** 2) / (255.0**2)
+            recon = torch_float_to_np_uint8(recon)
+        x = origin.np.astype(np.float32)
+        y = recon.astype(np.float32)
+        sqe = np.sum((x - y) ** 2) / (255.0**2)
         return sqe
 
     @staticmethod
@@ -66,11 +67,10 @@ class MSSSIMLoss(LossBase):
     ) -> float:
         X: torch.Tensor = origin.cuda
         if isinstance(recon, torch.Tensor):
-            Y = recon
-        else:
-            Y = torch.tensor(recon)
-            Y = Y.permute((2, 0, 1)).to(torch.float32) / 255.0
-            Y = Y.unsqueeze(0)
+            recon = torch_float_to_np_uint8(recon)
+        Y = torch.tensor(recon)
+        Y = Y.permute((2, 0, 1)).to(torch.float32) / 255.0
+        Y = Y.unsqueeze(0)
         Y = Y.to(X.device)
         _, c, h, w = X.shape
         if h < 160 or w < 160:
