@@ -253,6 +253,7 @@ class EngineBase(CodecBase):
 
     def _precompute_score(self, img_blocks, img_size, img_hash, loss: str):
         assert loss in LOSSES
+        print(f"Self.methods: {list([x[1] for x in self.methods])}")
         h, w = img_size
         n_ctu = len(img_blocks)
         n_methods = len(self.methods)
@@ -733,7 +734,7 @@ class SAEngine1(EngineBase):
         losstype,
         num_steps=1000,
     ):
-        GRAN = 40
+        GRAN = min(40, len(img_blocks))
         # Assign blocks to methods according to their complexity
         print("Starting initialization ...")
         print("Estimating scores for method")
@@ -764,7 +765,7 @@ class SAEngine1(EngineBase):
         # Hill-climbing on method ratios
         # ratio = softmax(w/20.0)
         w = np.zeros((n_method,), dtype=np.int32)
-        w[0] = GRAN
+        w[-1] = GRAN
 
         def generate_results(_w: np.ndarray):
             ratio = _w / GRAN
@@ -800,7 +801,7 @@ class SAEngine1(EngineBase):
 
         T = 10.0
 
-        for step in tqdm.tqdm(range(num_steps), "Hill-climbing method usage ratio"):
+        for step in tqdm.tqdm(range(num_steps), "Calculate method ratio"):
             print(f"Weights={w}; Loss={loss}")
 
             in_idx = random.randrange(n_method)
@@ -838,7 +839,7 @@ class SAEngine1(EngineBase):
 
             T *= 0.99
 
-        print(results)
+        print(f"Initial method selection: {results}")
         return results
 
     def _init(
@@ -1003,6 +1004,8 @@ class SAEngine1(EngineBase):
         adaptive_search=True,
         **kwargs,
     ):
+        # Technologies include:
+        #
         n_ctu = len(img_blocks)
         n_method = len(self.methods)
         ans = self._init(
