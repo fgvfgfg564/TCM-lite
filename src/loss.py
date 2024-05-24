@@ -54,7 +54,7 @@ class PSNRLoss(LossBase):
     @staticmethod
     def global_level_loss(fileio: FileIO, ctu_level_losses: List[float]) -> float:
         num_pixels = fileio.num_pixels
-        mse = sum(ctu_level_losses) / num_pixels
+        mse = sum(ctu_level_losses) / num_pixels / 3
         negpsnr = 10 * log10(mse)
         return negpsnr
 
