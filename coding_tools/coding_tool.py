@@ -36,6 +36,7 @@ class CodingToolBase(abc.ABC):
     def compress_block(self, img_block: np.ndarray, q_scale: float) -> bytes:
         """
         Encode a image block with given q_scale. The block is not padded.
+        Q_scale 和重建质量成反比，scale越高则重建质量越差。
         """
 
     @abc.abstractmethod

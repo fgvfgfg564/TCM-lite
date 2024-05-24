@@ -13,9 +13,9 @@ class Toucher:
         target_bytes = target_bpp * h * w / 8
 
         def _f(quality):
-            return len(self.tool.compress_block(img_block, quality))
+            return -len(self.tool.compress_block(img_block, quality))
 
-        resulting_quality = binary_search(_f, target_bytes, 0.0, 1.0, 1e-3)
+        resulting_quality = binary_search(_f, -target_bytes, 0.0, 1.0, 1e-3)
         recon: np.ndarray = self.tool.decompress_block(
             self.tool.compress_block(img_block, resulting_quality),
             None,

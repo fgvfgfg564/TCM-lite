@@ -769,6 +769,7 @@ class SAEngine1(EngineBase):
             complexity_scores.append(score)
         complexity_scores = np.asarray(complexity_scores)
         complexity_order = np.argsort(complexity_scores)
+        print(f"Complexity order: {complexity_order}")
 
         def _est_speed(method_idx):
             speeds = []
@@ -825,7 +826,7 @@ class SAEngine1(EngineBase):
         hashw = hash_numpy_array(w)
         visited[hashw] = loss
 
-        T = 10.0
+        T = 1.0
 
         for step in tqdm.tqdm(range(num_steps), "Calculate method ratio"):
             print(f"Weights={w}; Loss={loss}")
