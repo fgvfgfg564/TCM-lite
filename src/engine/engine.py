@@ -38,7 +38,7 @@ Image.MAX_IMAGE_PIXELS = None  # Don't detect decompression bombs
 
 SAFETY_BYTE_PER_CTU = 0
 
-np.seterr(all="raise")
+np.seterr(all="raise", under="warn")
 
 
 @dataclass
