@@ -6,4 +6,4 @@ DATASET_DIR=~/dataset/kodak/*.png
 
 export PYTHONPATH=.:..:coding_tools/MLIC/MLICPP
 
-python -u tools/test_accelerator.py "$BASEDIR" -i "$DATASET_DIR" --tools QARV EVC TCM MLICPP WebP JPEG --tool_filter QARV EVC_LL TCM_VBR2_ALL MLICPP_ALL WebP JPEG --save_image --qscale 0.0 0.25 0.5 0.75 1.0 --ctu_size 256 --speedup 0.01 0.25 0.50 0.75 1.00 1.25 1.50 2.0 3.0 --loss PSNR --num_steps 100 -o results.json | tee ${BASEDIR}/main.log
+python -u tools/test_accelerator.py "$BASEDIR" -i "$DATASET_DIR" --tools QARV EVC TCM MLICPP WebP JPEG --tool_filter QARV EVC_LL TCM_VBR2_ALL MLICPP_ALL WebP JPEG --save_image --qscale 0.3 0.4 0.5 0.6 0.7 --ctu_size 256 --speedup 0.01 0.25 0.50 0.75 1.00 1.25 1.50 2.0 3.0 --loss PSNR --num_steps 100 -o results.json | tee ${BASEDIR}/main.log
