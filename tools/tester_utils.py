@@ -123,7 +123,7 @@ def test_glob(
     return results
 
 
-def _config_mapper(config_list, f):
+def config_mapper(config_list, f):
     if len(config_list) == 0:
         return f()
 
@@ -143,36 +143,9 @@ def _config_mapper(config_list, f):
             kwargs[config_name] = config
             return f(**kwargs)
 
-        result_single = _config_mapper(config_list, fnew)
+        result_single = config_mapper(config_list, fnew)
         if len(configs) == 1:
             result = result_single
         else:
             result[f"{config_name}={config}"] = result_single
     return result
-
-
-def test_multiple_configs(
-    engine,
-    entrance,
-    input_pattern,
-    output_dir,
-    save_image,
-    **kwargs,
-):
-    output_dir = os.path.join(output_dir, "results")
-
-    def _test_glob(
-        **kwargs,
-    ):
-        return test_glob(
-            engine,
-            entrance,
-            input_pattern,
-            output_dir,
-            save_image=save_image,
-            **kwargs,
-        )
-
-    configs = [(k, v) for k, v in kwargs.items()]
-    results = _config_mapper(configs, _test_glob)
-    return results

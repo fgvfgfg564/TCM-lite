@@ -7,6 +7,7 @@ import random
 import time
 import copy
 import abc
+import itertools
 
 from dataclasses import dataclass
 from unittest import result
@@ -23,6 +24,7 @@ import coding_tools.utils.timer as timer
 from coding_tools.traditional_tools import WebPTool
 from coding_tools.baseline import CodecBase
 from coding_tools import TOOL_GROUPS
+from ..SA_scheduler import BaseScheduler, NStepsScheduler
 from ..loss import LOSSES, LossBase
 
 from ..type import *
@@ -30,6 +32,7 @@ from ..utils import *
 from ..fileio import FileIO
 from ..math_utils import *
 from ..async_ops import async_map
+from ..SA_scheduler import BaseScheduler
 from .sa_solver import SolverBase, LagrangeMultiplierSolver
 from .toucher import Toucher
 
@@ -274,7 +277,6 @@ class EngineBase(CodecBase):
                     min_max = np.load(min_max_file)
                     min_t = min_max["min_t"]
                     max_t = min_max["max_t"]
-                    print("Loaded cache from:", cache_dir, flush=True)
 
                     for qscale in self.qscale_samples:
                         pbar_iter.__next__()
@@ -508,7 +510,7 @@ class EngineBase(CodecBase):
                 : lower - upper, : right - left, :
             ]
         return recon_img
- 
+
     @torch.inference_mode()
     def _decode(self, input_pth, output_pth):
         """
@@ -607,7 +609,7 @@ class SAEngine1(EngineBase):
     W2 = 25
     Wa = 10.0
 
-    def _select_distinctive_block(
+    def _select_target_block(
         self,
         file_io: FileIO,
         last_ans,
@@ -617,7 +619,7 @@ class SAEngine1(EngineBase):
         n_ctu = file_io.n_ctu
         # Initialize change matrix
         P = np.ones([n_ctu, self.n_method], dtype=np.float32)
-        if last_valid_step is not None:
+        if self.config.inertia and last_valid_step is not None:
             (last_changed_block, last_old_method, last_new_method) = last_valid_step
             # 1. If adjacent block of last move is in the same color, it's likely to be an improvement.
             for blk_id in file_io.adjacencyTable[last_changed_block]:
@@ -631,15 +633,16 @@ class SAEngine1(EngineBase):
                     )
 
         # 3. Blocks are likely to change into the method of its adjacent ones.
-        for blk_id in range(n_ctu):
-            count_adjacent = np.zeros([self.n_method], dtype=np.float32)
-            for adj_blk_id in file_io.adjacencyTable[blk_id]:
-                count_adjacent[last_ans[adj_blk_id]] += 1
-            count_adjacent /= count_adjacent.sum()
-            for i in range(self.n_method):
-                P[blk_id, i] = np.maximum(
-                    P[blk_id, i], self.Wa * count_adjacent[i] ** 2
-                )
+        if self.config.distinct:
+            for blk_id in range(n_ctu):
+                count_adjacent = np.zeros([self.n_method], dtype=np.float32)
+                for adj_blk_id in file_io.adjacencyTable[blk_id]:
+                    count_adjacent[last_ans[adj_blk_id]] += 1
+                count_adjacent /= count_adjacent.sum()
+                for i in range(self.n_method):
+                    P[blk_id, i] = np.maximum(
+                        P[blk_id, i], self.Wa * count_adjacent[i] ** 2
+                    )
 
         # Normalize and select
         P /= P.sum()
@@ -660,34 +663,24 @@ class SAEngine1(EngineBase):
         selected = random.choices(select_list, weights=P_list, k=1)[0]
         return selected
 
-    def _try_move(
-        self, file_io: FileIO, last_ans: np.ndarray, n_method, adaptive_search
-    ):
+    def _try_move(self, file_io: FileIO, last_ans: np.ndarray, n_method):
         # Generate a group of new method_ids that move from current state
         # 90% swap, 10% replace
         n_ctu = len(last_ans)
         # Try to update one block
-        if adaptive_search:
-            selected = self._select_distinctive_block(
-                file_io,
-                last_ans=last_ans,
-                last_valid_step=self.last_valid_step,
-            )
-            print(
-                f"Selected block: {selected[0]}; Old: {last_ans[selected[0]]}; New: {selected[1]}"
-            )
-            return selected
-        else:
-            # Pure random
-            selected = np.random.random_integers(0, n_ctu - 1)
-            new_method = np.random.random_integers(0, n_method - 1)
+        selected = self._select_target_block(
+            file_io,
+            last_ans=last_ans,
+            last_valid_step=self.last_valid_step,
+        )
+        return selected
         return selected, new_method
 
     def _try_swap(self, file_io: FileIO, last_ans: np.ndarray):
         unique = np.unique(last_ans)
         m1, m2 = np.random.choice(unique, 2, replace=False)
-        blk1, _ = self._select_distinctive_block(file_io, last_ans, method=m1)
-        blk2, _ = self._select_distinctive_block(file_io, last_ans, method=m2)
+        blk1, _ = self._select_target_block(file_io, last_ans, method=m1)
+        blk2, _ = self._select_target_block(file_io, last_ans, method=m2)
         return blk1, blk2
 
     def _show_solution(self, method_ids, target_byteses, b_t, score, psnr, time):
@@ -723,7 +716,6 @@ class SAEngine1(EngineBase):
         r_limit,
         t_limit,
         losstype,
-        num_steps=1000,
     ):
         """
         根据图像块的复杂度，自适应地初始化编码方法的选择。
@@ -743,6 +735,7 @@ class SAEngine1(EngineBase):
 
         """
         GRAN = min(100, len(img_blocks))
+        num_steps = GRAN * 10
         # Assign blocks to methods according to their complexity
         print("Starting initialization ...")
         print("Estimating scores for method")
@@ -813,10 +806,16 @@ class SAEngine1(EngineBase):
         hashw = hash_numpy_array(w)
         visited[hashw] = loss
 
-        T = 1.0
+        T_end = 1e-3
+
+        if self.config.sa_init:
+            T = 1.0
+            alpha = (T_end / T) ** (1.0 / num_steps)
+        else:
+            T = 0.0
 
         for step in tqdm.tqdm(range(num_steps), "Calculate method ratio"):
-            print(f"Weights={w}; Loss={loss}")
+            # print(f"Weights={w}; Loss={loss}")
 
             in_idx = random.randrange(n_method)
             out_idx = random.randrange(n_method)
@@ -844,7 +843,10 @@ class SAEngine1(EngineBase):
                 p = safe_SA_prob(delta, T)
                 accept = np.random.rand() < p
 
-            print(f"T={T:.6f}; w_new={w_new}; loss={loss_new}; accept={accept}")
+            if step % 10 == 0:
+                print(
+                    f"Step {step}: T={T:.6f}; w_new={w_new}; loss={loss_new}; accept={accept}"
+                )
 
             if accept:
                 loss = loss_new
@@ -855,7 +857,7 @@ class SAEngine1(EngineBase):
                 best_loss = copy.deepcopy(loss)
                 best_results = results.copy()
 
-            T *= 0.99
+            T *= alpha
 
         print(f"Initial method selection: {best_results}")
         return best_results
@@ -864,7 +866,6 @@ class SAEngine1(EngineBase):
         self,
         img_blocks,
         init_values,
-        adaptive_init,
         n_method,
         n_ctu,
         file_io,
@@ -878,7 +879,7 @@ class SAEngine1(EngineBase):
             if init_values is not None:
                 ans = init_values
             else:
-                if adaptive_init:
+                if self.config.ada_init:
                     ans = self._adaptive_init(
                         img_blocks, file_io, n_ctu, n_method, r_limit, t_limit, losstype
                     )
@@ -901,38 +902,34 @@ class SAEngine1(EngineBase):
         losstype,
         r_limit,
         t_limit,
-        num_steps,
-        adaptive_search,
-        T_start,
-        T_end,
     ):
-        alpha = np.power(T_end / T_start, 1.0 / num_steps)
         n_ctu = len(img_blocks)
         n_method = len(self.methods)
-        if adaptive_search:
-            self.last_valid_step = None
+        self.last_valid_step = None
 
         target_byteses, loss, psnr, t = self.solver.find_optimal_target_bytes(
             self._precomputed_curve, file_io, n_ctu, ans, r_limit, t_limit, losstype
         )
 
-        T = T_start
+        T = self.scheduler.start_T
         best_ans = ans
         best_loss = loss
 
         print("Initial ans: ", best_ans)
         print("Initial loss: ", best_loss)
-        print(f"Start SA with {num_steps} steps")
+        print(f"Start SA with scheduler: {self.scheduler}")
 
         t0 = time.time()
+        self.scheduler.start()
         statistics = []
 
         # Simulated Annealing
-        for step in range(num_steps):
+        for step in itertools.count():
             # 80%: swap blocks
             # 20% update a block
             p = np.random.rand()
-            update = p < 0.2
+            move_p = 0.2 if self.config.swap_op else 1.0
+            update = p < move_p
             if np.all(ans == ans[0]):
                 # All elements are equal
                 update = True
@@ -940,9 +937,7 @@ class SAEngine1(EngineBase):
                 # Failed to meet constraints
                 update = True
             if update:
-                changed_block, new_method = self._try_move(
-                    file_io, ans, n_method, adaptive_search
-                )
+                changed_block, new_method = self._try_move(file_io, ans, n_method)
                 next_state = ans.copy()
                 next_state[changed_block] = new_method
             else:
@@ -974,7 +969,7 @@ class SAEngine1(EngineBase):
                         new_method,
                     )
             else:
-                if next_loss[0] == 0 and next_loss[1] == 0:
+                if next_loss[0] == 0 and next_loss[1] == 0 and self.config.sa_body:
                     delta = next_loss[2] - loss[2]
                     p = safe_SA_prob(delta, T)
                     accept = np.random.rand() < p
@@ -983,7 +978,7 @@ class SAEngine1(EngineBase):
                 if update:
                     self.last_valid_step = None
 
-            print(f"Loss: {loss}; next_loss: {next_loss}; Accept: {accept}")
+            # print(f"Loss: {loss}; next_loss: {next_loss}; Accept: {accept}")
 
             statistics.append(
                 {
@@ -1003,11 +998,15 @@ class SAEngine1(EngineBase):
                     best_loss = loss
                     best_ans = ans
 
-            if step % (num_steps // 10) == 0:
+            self.scheduler.next()
+            if step % 100 == 0 or self.scheduler.should_stop():
                 print(f"Results for step: {step}; T={T:.6f}; best_loss={best_loss}")
                 self._show_solution(ans, target_byteses, r_limit, loss, psnr, t)
 
-            T *= alpha
+            if self.scheduler.should_stop():
+                break
+
+            T *= self.scheduler.step_size
         return best_ans, {"step_results": statistics}
 
     def _solve(
@@ -1018,14 +1017,25 @@ class SAEngine1(EngineBase):
         t_limit,
         file_io: FileIO,
         losstype,
-        num_steps=1000,
-        T_start=10,
-        T_end=1e-6,
+        scheduler: BaseScheduler,
         init_values: np.ndarray = None,
-        adaptive_init=True,
-        adaptive_search=True,
+        level=6,
         **kwargs,
     ):
+        """
+        Level:
+        0: Baseline hill climbing
+        1: + Adaptive init
+        2: + SA(Adaptive init)
+        3: + SA(body)
+        4: + Inertia
+        5: + SwapOp
+        6: + Distinctive Selector(full version)
+        """
+
+        self.config = SAConfig(level)
+        self.scheduler = scheduler
+
         # Technologies include:
         #
         n_ctu = len(img_blocks)
@@ -1033,7 +1043,6 @@ class SAEngine1(EngineBase):
         ans = self._init(
             img_blocks,
             init_values,
-            adaptive_init,
             n_method,
             n_ctu,
             file_io,
@@ -1050,10 +1059,6 @@ class SAEngine1(EngineBase):
                 losstype,
                 r_limit,
                 t_limit,
-                num_steps,
-                adaptive_search,
-                T_start,
-                T_end,
             )
         else:
             statistics = {}

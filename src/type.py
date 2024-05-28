@@ -32,3 +32,29 @@ class LossType(NamedTuple):
 
     def __sub__(self, other: Self):
         return tuple([(x - y) for x, y in zip(self, other)])
+
+
+class SAConfig:
+    def __init__(self, level: int) -> None:
+        self.ada_init = False
+        self.sa_init = False
+        self.sa_body = False
+        self.inertia = False
+        self.swap_op = False
+        self.distinct = False
+
+        if level >= 1:
+            self.ada_init = True
+        if level >= 2:
+            self.sa_init = True
+        if level >= 3:
+            self.sa_body = True
+        if level >= 4:
+            self.inertia = True
+        if level >= 5:
+            self.swap_op = True
+        if level >= 6:
+            self.distinct = True
+
+    def __repr__(self) -> str:
+        return f"<SAConfig {self.__dict__}>"

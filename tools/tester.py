@@ -8,7 +8,7 @@ import json
 from coding_tools.register import TOOL_GROUPS
 from src.engine import *
 from coding_tools.baseline import BPG, VTM, WebP, JPEG
-from tester_utils import test_multiple_configs
+from tester_utils import config_mapper, test_glob
 
 
 class AlgorithmType(enum.Enum):
@@ -89,32 +89,9 @@ if __name__ == "__main__":
         profiler = None
 
     algorithm: AlgorithmType = getattr(AlgorithmType, args.algorithm)
+    output_dir = os.path.join(args.output_dir, "results")
 
-    if algorithm == AlgorithmType.GA:
-        engine = GAEngine1(
-            ctu_size=args.ctu_size,
-            mosaic=args.mosaic,
-            tool_groups=args.tools,
-            tool_filter=args.tool_filter,
-            dtype=torch.float32,
-        )
-
-        results = test_multiple_configs(
-            engine,
-            "encode",
-            input_pattern=args.input,
-            output_dir=args.output_dir,
-            target_bpp=args.target_bpp,
-            target_time=args.target_time,
-            save_image=args.save_image,
-            N=args.N,
-            num_gen=args.num_gen,
-            no_allocation=args.no_allocation,
-            boltzmann_k=args.boltzmann_k,
-            method_sigma=args.method_sigma,
-            bytes_sigma=args.bytes_sigma,
-        )
-    elif algorithm == AlgorithmType.SAv1:
+    if algorithm == AlgorithmType.SAv1:
         engine = SAEngine1(
             ctu_size=args.ctu_size,
             mosaic=args.mosaic,
@@ -123,45 +100,26 @@ if __name__ == "__main__":
             dtype=torch.float32,
         )
 
-        results = test_multiple_configs(
-            engine,
-            "encode",
-            args.input,
-            args.output_dir,
-            args.save_image,
-            target_bpp=args.target_bpp,
-            target_time=args.target_time,
-            num_steps=args.num_steps,
-            losstype=args.loss,
-        )
-    elif algorithm == AlgorithmType.BPG:
-        engine = BPG()
-        results = test_multiple_configs(
-            engine,
-            "encode",
-            args.input,
-            args.output_dir,
-            args.save_image,
-            qp=args.qp,
-            level=args.level,
-        )
-    elif algorithm in [AlgorithmType.JPEG, AlgorithmType.WebP, AlgorithmType.VTM]:
-        if algorithm == AlgorithmType.JPEG:
-            engine = JPEG()
-        elif algorithm == AlgorithmType.WebP:
-            engine = WebP()
-        elif algorithm == AlgorithmType.VTM:
-            engine = VTM()
-        results = test_multiple_configs(
-            engine,
-            "encode",
-            args.input,
-            args.output_dir,
-            args.save_image,
-            quality=args.quality,
-        )
-    else:
-        raise ValueError(f"Invalid algorithm: {algorithm}")
+        def _test_glob(
+            **kwargs,
+        ):
+            return test_glob(
+                engine,
+                "encode",
+                args.input,
+                output_dir,
+                save_image=args.save_image,
+                **kwargs,
+            )
+
+        schedulers = [NStepsScheduler(1.0, 1e-3, nstep) for nstep in args.num_steps]
+        configs = [
+            ("target_bpp", args.target_bpp),
+            ("target_time", args.target_time),
+            ("scheduler", schedulers),
+            ("losstype", args.loss),
+        ]
+        results = config_mapper(configs, _test_glob)
 
     os.makedirs(args.output_dir, exist_ok=True)
     result_filename = os.path.join(args.output_dir, "results.json")

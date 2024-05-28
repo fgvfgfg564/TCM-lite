@@ -8,7 +8,7 @@ import json
 from coding_tools.register import TOOL_GROUPS
 from src.engine import *
 from coding_tools.baseline import BPG, VTM, WebP, JPEG
-from tester_utils import test_multiple_configs
+from tester_utils import test_glob, config_mapper
 
 
 def parse_args():
@@ -55,6 +55,8 @@ if __name__ == "__main__":
     else:
         profiler = None
 
+    output_dir = os.path.join(args.output_dir, "results")
+
     engine = SAEngine1(
         ctu_size=args.ctu_size,
         mosaic=args.mosaic,
@@ -63,17 +65,26 @@ if __name__ == "__main__":
         dtype=torch.float32,
     )
 
-    results = test_multiple_configs(
-        engine,
-        "accelerate",
-        args.input,
-        args.output_dir,
-        args.save_image,
-        qscale=args.qscale,
-        speedup=args.speedup,
-        num_steps=args.num_steps,
-        losstype=args.loss,
-    )
+    def _test_glob(
+        **kwargs,
+    ):
+        return test_glob(
+            engine,
+            "accelerate",
+            args.input,
+            output_dir,
+            save_image=args.save_image,
+            **kwargs,
+        )
+
+    schedulers = [NStepsScheduler(1.0, 1e-3, nstep) for nstep in args.num_steps]
+    configs = [
+        ("qscale", args.qscale),
+        ("speedup", args.speedup),
+        ("scheduler", schedulers),
+        ("losstype", args.loss),
+    ]
+    results = config_mapper(configs, _test_glob)
 
     os.makedirs(args.output_dir, exist_ok=True)
     result_filename = os.path.join(args.output_dir, args.o)
