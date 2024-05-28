@@ -508,7 +508,7 @@ class EngineBase(CodecBase):
                 : lower - upper, : right - left, :
             ]
         return recon_img
-
+ 
     @torch.inference_mode()
     def _decode(self, input_pth, output_pth):
         """
