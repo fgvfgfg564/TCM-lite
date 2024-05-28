@@ -124,12 +124,12 @@ class Fitter(abc.ABC):
             sum2 += (y - y_mean) ** 2
         return 1 - sum1 / sum2
 
-    def mse(self, curve):
-        sqe = 0
+    def maxerror(self, curve):
+        errs = []
         for x, y in zip(self.X, self.Y):
             y_pred = curve(x)
-            sqe += (y - y_pred) ** 2
-        return sqe / len(self.X)
+            errs.append(np.abs(y - y_pred))
+        return np.max(errs)
 
     def __call__(self, x):
         return self.interpolate(x)
@@ -167,12 +167,12 @@ class FitKExp(Fitter):
         super().__init__(X, Y)
 
         while True:
-            mse = self.mse(self.curve)
-            print("MSE=", mse)
+            maxerr = self.maxerror(self.curve)
+            print("MaxErr=", maxerr)
             r2 = self.R2(self.curve)
             print("R2=", r2)
 
-            if r2 < 0.99:
+            if maxerr > 10 and r2 < 0.99:
                 print("Bad fit, retrying... Ignore the first & last element")
             else:
                 break
