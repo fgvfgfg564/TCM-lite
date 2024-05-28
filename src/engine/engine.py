@@ -84,7 +84,7 @@ class EngineBase(CodecBase):
         self,
         ctu_size,
         mosaic,
-        num_qscale_samples=20,
+        num_qscale_samples=10,
         tool_groups=TOOL_GROUPS.keys(),
         tool_filter=None,
         dtype=torch.float32,
@@ -845,7 +845,7 @@ class SAEngine1(EngineBase):
 
             if step % 10 == 0:
                 print(
-                    f"Step {step}: T={T:.6f}; w_new={w_new}; loss={loss_new}; accept={accept}"
+                    f"Step {step}: T={T:.6f}; w={w}; loss={loss}; w_new={w_new}; loss_new={loss_new}; accept={accept}"
                 )
 
             if accept:
@@ -1000,7 +1000,9 @@ class SAEngine1(EngineBase):
 
             self.scheduler.next()
             if step % 100 == 0 or self.scheduler.should_stop():
-                print(f"Results for step: {step}; T={T:.6f}; best_loss={best_loss}")
+                print(
+                    f"Results for step: {step}; T={T:.6f}; best_loss={best_loss}; scheduler: {self.scheduler}; loss={loss}; ans:"
+                )
                 self._show_solution(ans, target_byteses, r_limit, loss, psnr, t)
 
             if self.scheduler.should_stop():

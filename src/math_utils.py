@@ -172,7 +172,7 @@ class FitKExp(Fitter):
             r2 = self.R2(self.curve)
             print("R2=", r2)
 
-            if maxerr > 10 and r2 < 0.99:
+            if maxerr > 5 and r2 < 0.99 and len(self.X) > 4:
                 print("Bad fit, retrying... Ignore the first & last element")
             else:
                 break

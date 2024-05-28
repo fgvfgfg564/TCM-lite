@@ -30,6 +30,12 @@ class BaseScheduler(abc.ABC):
         Whether to stop the SA algorithm
         """
 
+    @abc.abstractmethod
+    def percent(self) -> float:
+        """
+        Percentage of the algorithm finished
+        """
+
 
 class NStepsScheduler(BaseScheduler):
     def __init__(self, start_T, end_T, num_steps):
@@ -56,7 +62,10 @@ class NStepsScheduler(BaseScheduler):
         return self.step >= self.num_steps
 
     def __repr__(self) -> str:
-        return f"<NStepsScheduler {self.__dict__}>"
+        return f"<NStepsScheduler: {self.step}/{self.num_steps} ({100*self.step/self.num_steps:.2f}%)>"
+
+    def percent(self) -> float:
+        return self.step / self.num_steps
 
 
 class TimeLapseScheduler(BaseScheduler):
@@ -84,4 +93,9 @@ class TimeLapseScheduler(BaseScheduler):
         return time.perf_counter() - self.start_time > self.max_time
 
     def __repr__(self) -> str:
-        return f"<TimeLapseScheduler {self.__dict__}>"
+        t = time.perf_counter() - self.start_time
+        return f"<TimeLapseScheduler: {t}/{self.max_time} ({100*t/self.max_time:.2f}%)>"
+
+    def percent(self) -> float:
+        t = time.perf_counter() - self.start_time
+        return t / self.max_time

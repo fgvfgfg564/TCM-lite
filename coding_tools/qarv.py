@@ -28,8 +28,10 @@ class QARV(LICToolBase):
         # 0 -> self.lmb_max
         # 1 -> self.lmb_min
 
-        lg_lmb_min = np.log(self.lmb_min)
-        lg_lmb_max = np.log(self.lmb_max)
+        # Scale to a safer range
+
+        lg_lmb_min = np.log(self.lmb_min * 1.25)
+        lg_lmb_max = np.log(self.lmb_max * 0.75)
 
         lg_lmb = (1 - q_scale_0_1) * (lg_lmb_max - lg_lmb_min) + lg_lmb_min
 

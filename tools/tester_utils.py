@@ -91,6 +91,7 @@ def test_glob(
     **kwargs,
 ):
     input_glob = glob.glob(input_pattern)
+    random.shuffle(input_glob)
 
     avg_psnr = AverageMeter()
     avg_bpp = AverageMeter()
