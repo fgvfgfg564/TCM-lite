@@ -23,6 +23,7 @@ def parse_args():
         "--loss", nargs=1, type=str, choices=LOSSES.keys(), default=None
     )
     parser.add_argument("--save_image", action="store_true")
+    parser.add_argument("-o", type=str, default="results.json")
 
     # Profiler args
     parser.add_argument("--profile", action="store_true")
@@ -75,7 +76,7 @@ if __name__ == "__main__":
     )
 
     os.makedirs(args.output_dir, exist_ok=True)
-    result_filename = os.path.join(args.output_dir, "results.json")
+    result_filename = os.path.join(args.output_dir, args.o)
     with open(result_filename, "w") as f:
         json.dump(results, f, indent=4, sort_keys=True)
 

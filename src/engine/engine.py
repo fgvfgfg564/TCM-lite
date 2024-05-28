@@ -320,8 +320,8 @@ class EngineBase(CodecBase):
                     # b_t = interpolate.interp1d(num_bytes, times, kind='linear')
                     b_t = np.polyfit(num_bytes, times, 1)
 
-                    min_t = min(num_bytes)
-                    max_t = max(num_bytes)
+                    min_t = b_e.X_min
+                    max_t = b_e.X_max
 
                     # Save to cache
                     os.makedirs(cache_dir, exist_ok=True)
@@ -1008,7 +1008,7 @@ class SAEngine1(EngineBase):
                 self._show_solution(ans, target_byteses, r_limit, loss, psnr, t)
 
             T *= alpha
-        return best_ans, statistics
+        return best_ans, {"step_results": statistics}
 
     def _solve(
         self,
@@ -1056,7 +1056,7 @@ class SAEngine1(EngineBase):
                 T_end,
             )
         else:
-            statistics = None
+            statistics = {}
 
         target_byteses, score, psnr, time = self.solver.find_optimal_target_bytes(
             self._precomputed_curve, file_io, n_ctu, ans, r_limit, t_limit, losstype

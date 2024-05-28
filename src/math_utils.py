@@ -172,7 +172,7 @@ class FitKExp(Fitter):
             r2 = self.R2(self.curve)
             print("R2=", r2)
 
-            if mse > 2000 and r2 < 0.99:
+            if r2 < 0.99:
                 print("Bad fit, retrying... Ignore the first & last element")
             else:
                 break
