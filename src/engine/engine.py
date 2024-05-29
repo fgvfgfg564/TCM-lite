@@ -8,6 +8,7 @@ import time
 import copy
 import abc
 import itertools
+import zipfile
 
 from dataclasses import dataclass
 from unittest import result
@@ -280,7 +281,7 @@ class EngineBase(CodecBase):
 
                     for qscale in self.qscale_samples:
                         pbar_iter.__next__()
-                except FileNotFoundError:
+                except (FileNotFoundError, zipfile.BadZipFile):
                     # No cache or cache is broken
                     ctu_losses = []
                     num_bytes = []
@@ -813,6 +814,7 @@ class SAEngine1(EngineBase):
             alpha = (T_end / T) ** (1.0 / num_steps)
         else:
             T = 0.0
+            alpha = 0.0
 
         for step in tqdm.tqdm(range(num_steps), "Calculate method ratio"):
             # print(f"Weights={w}; Loss={loss}")

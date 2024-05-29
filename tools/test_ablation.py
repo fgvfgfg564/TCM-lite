@@ -60,26 +60,41 @@ if __name__ == "__main__":
     )
 
     def _test_glob(
+        losstype,
+        speedup,
+        qscale,
+        time_limit,
+        level,
         **kwargs,
     ):
+        output_dir_local = os.path.join(
+            args.output_dir,
+            losstype,
+            f"level-{level}",
+            f"time_limit-{time_limit}",
+            f"qscale-{qscale}",
+        )
+        scheduler = TimeLapseScheduler(1.0, 0.98, time_limit)
         return test_glob(
             engine,
             "accelerate",
             args.input,
-            output_dir,
+            output_dir_local,
             save_image=args.save_image,
+            losstype=losstype,
+            speedup=speedup,
+            qscale=qscale,
+            scheduler=scheduler,
+            level=level,
             **kwargs,
         )
 
-    schedulers = [
-        TimeLapseScheduler(1.0, 0.98, max_time) for max_time in args.time_limits
-    ]
     configs = [
-        ("scheduler", schedulers),
         ("level", args.levels),
         ("losstype", args.loss),
         ("qscale", args.qscale),
         ("speedup", args.speedup),
+        ("time_limit", args.time_limits),
     ]
     results = config_mapper(configs, _test_glob)
 

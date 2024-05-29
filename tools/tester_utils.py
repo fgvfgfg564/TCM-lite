@@ -21,10 +21,6 @@ def test_single_image(
     **kwargs,
 ):
     print(f"Testing: input={input_filename}; output_dir={output_dir}; kwargs={kwargs}")
-    output_dir = os.path.join(
-        output_dir,
-        *([str(k) + "=" + str(v) for k, v in kwargs.items()]),
-    )
     if save_image:
         os.makedirs(output_dir, exist_ok=True)
         realname = pathlib.Path(input_filename).stem

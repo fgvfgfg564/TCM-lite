@@ -66,22 +66,33 @@ if __name__ == "__main__":
     )
 
     def _test_glob(
+        losstype,
+        speedup,
+        qscale,
+        nstep,
         **kwargs,
     ):
+        output_dir_local = os.path.join(
+            args.output_dir, losstype, f"speedup-{speedup}", f"qscale-{qscale}"
+        )
+        scheduler = NStepsScheduler(1.0, 1e-4, nstep)
         return test_glob(
             engine,
             "accelerate",
             args.input,
-            output_dir,
+            output_dir_local,
             save_image=args.save_image,
+            losstype=losstype,
+            speedup=speedup,
+            qscale=qscale,
+            scheduler=scheduler,
             **kwargs,
         )
 
-    schedulers = [NStepsScheduler(1.0, 1e-3, nstep) for nstep in args.num_steps]
     configs = [
         ("qscale", args.qscale),
         ("speedup", args.speedup),
-        ("scheduler", schedulers),
+        ("nstep", args.num_steps),
         ("losstype", args.loss),
     ]
     results = config_mapper(configs, _test_glob)
