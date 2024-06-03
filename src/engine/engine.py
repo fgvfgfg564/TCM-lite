@@ -780,6 +780,8 @@ class SAEngine1(EngineBase):
             T = 0.0
             alpha = 0.0
 
+        statistics = []
+
         for step in tqdm.tqdm(range(num_steps), "Calculate method ratio"):
             # print(f"Weights={w}; Loss={loss}")
 
@@ -823,10 +825,22 @@ class SAEngine1(EngineBase):
                 best_loss = copy.deepcopy(loss)
                 best_results = results.copy()
 
+            statistics.append(
+                {
+                    "stage": "init",
+                    "step": step,
+                    "time": time.perf_counter() - self.t0,
+                    "loss": loss.d,
+                    "legal": bool(loss.r <= 0 and loss.t <= 0),
+                    "best_loss": best_loss.d,
+                    "best_legal": bool(best_loss.r <= 0 and best_loss.t <= 0),
+                }
+            )
+
             T *= alpha
 
         print(f"Initial method selection: {best_results}")
-        return best_results
+        return best_results, statistics
 
     def _init(
         self,
@@ -841,12 +855,14 @@ class SAEngine1(EngineBase):
     ):
         if n_method == 1:
             ans = np.zeros([n_ctu], dtype=np.int32)
+            step_results = []
         else:
             if init_values is not None:
                 ans = init_values
+                step_results = []
             else:
                 if self.config.ada_init:
-                    ans = self._adaptive_init(
+                    ans, step_results = self._adaptive_init(
                         img_blocks, file_io, n_ctu, n_method, r_limit, t_limit, losstype
                     )
                 else:
@@ -857,7 +873,8 @@ class SAEngine1(EngineBase):
                             n_ctu,
                         ],
                     )
-        return ans
+                    step_results = []
+        return ans, step_results
 
     def _sa_body(
         self,
@@ -885,7 +902,6 @@ class SAEngine1(EngineBase):
         print("Initial loss: ", best_loss)
         print(f"Start SA with scheduler: {self.scheduler}")
 
-        t0 = time.time()
         statistics = []
 
         # Simulated Annealing
@@ -947,8 +963,9 @@ class SAEngine1(EngineBase):
 
             statistics.append(
                 {
+                    "stage": "finetune",
                     "step": step,
-                    "time": time.time() - t0,
+                    "time": time.perf_counter() - self.t0,
                     "loss": loss.d,
                     "legal": bool(loss.r <= 0 and loss.t <= 0),
                     "best_loss": best_loss.d,
@@ -1006,12 +1023,13 @@ class SAEngine1(EngineBase):
         self.config = SAConfig(level)
         self.scheduler = scheduler
         self.scheduler.start()
+        self.t0 = time.perf_counter()
 
         # Technologies include:
         #
         n_ctu = len(img_blocks)
         n_method = len(self.methods)
-        ans = self._init(
+        ans, step_results_init = self._init(
             img_blocks,
             init_values,
             n_method,
@@ -1022,7 +1040,7 @@ class SAEngine1(EngineBase):
             losstype,
         )
         if n_method > 1:
-            ans, statistics = self._sa_body(
+            ans, step_results_finetune = self._sa_body(
                 ans,
                 img_blocks,
                 img_size,
@@ -1034,9 +1052,9 @@ class SAEngine1(EngineBase):
         else:
             statistics = {}
 
-        target_byteses, score, psnr, time = self.solver.find_optimal_target_bytes(
+        target_byteses = self.solver.find_optimal_target_bytes(
             self._precomputed_curve, file_io, n_ctu, ans, r_limit, t_limit, losstype
-        )
+        )[0]
         solution = Solution(ans, target_byteses)
 
         method_ids, q_scales, bitstreams = self._compress_blocks(img_blocks, solution)
@@ -1045,6 +1063,10 @@ class SAEngine1(EngineBase):
         file_io.method_id = method_ids
         file_io.bitstreams = bitstreams
         file_io.q_scales = q_scales
+
+        statistics = {
+            "step_results": step_results_init + step_results_finetune,
+        }
 
         return file_io, statistics
 
