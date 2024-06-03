@@ -7,20 +7,8 @@ import json
 
 from coding_tools.register import TOOL_GROUPS
 from src.engine import *
-from coding_tools.baseline import BPG, VTM, WebP, JPEG
+from coding_tools.baseline import ANCHORS
 from tester_utils import config_mapper, test_glob
-
-
-class AlgorithmType(enum.Enum):
-    GA = enum.auto()
-    SAv1 = enum.auto()
-    BPG = enum.auto()
-    WebP = enum.auto()
-    JPEG = enum.auto()
-    VTM = enum.auto()
-
-
-ALGORITHMS = AlgorithmType.__members__.keys()
 
 
 def parse_args():
@@ -40,7 +28,6 @@ def parse_args():
         "-a",
         "--algorithm",
         type=str,
-        choices=ALGORITHMS,
         required=True,
     )
 
@@ -66,8 +53,7 @@ def parse_args():
 
     # Encoder config args (BPG)
     parser.add_argument("--qp", nargs="+", type=int, default=None)
-    parser.add_argument("--level", nargs="+", type=int, default=None)
-    # Encoder config args (WebP, JPEG)
+    # Encoder config args (WebP, JPEG, VTM and all quality-based codec)
     parser.add_argument("--quality", nargs="+", type=float, default=None)
 
     args = parser.parse_args()
@@ -88,10 +74,9 @@ if __name__ == "__main__":
     else:
         profiler = None
 
-    algorithm: AlgorithmType = getattr(AlgorithmType, args.algorithm)
     output_dir = os.path.join(args.output_dir, "results")
 
-    if algorithm == AlgorithmType.SAv1:
+    if args.algorithm == "SAv1":
         engine = SAEngine1(
             ctu_size=args.ctu_size,
             mosaic=args.mosaic,
@@ -119,6 +104,26 @@ if __name__ == "__main__":
             ("scheduler", schedulers),
             ("losstype", args.loss),
         ]
+        results = config_mapper(configs, _test_glob)
+    elif args.algorithm in ANCHORS.keys():
+        engine = ANCHORS[args.algorithm]()
+
+        def _test_glob(
+            **kwargs,
+        ):
+            return test_glob(
+                engine,
+                "encode",
+                args.input,
+                output_dir,
+                save_image=args.save_image,
+                **kwargs,
+            )
+
+        if args.algorithm == "BPG":
+            configs = [("qp", args.qp)]
+        else:
+            configs = [("quality", args.quality)]
         results = config_mapper(configs, _test_glob)
 
     os.makedirs(args.output_dir, exist_ok=True)

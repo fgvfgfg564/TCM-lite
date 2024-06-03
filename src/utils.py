@@ -1,3 +1,5 @@
+from typing_extensions import List
+
 import os
 import tempfile
 from PIL import Image
@@ -8,6 +10,8 @@ from torchvision.transforms import ToTensor
 import math
 import pytorch_msssim
 import hashlib
+from dataclasses import dataclass
+from .fileio import FileIO
 
 
 def stable_softmax(x: np.ndarray):
@@ -250,3 +254,53 @@ def torch_pseudo_quantize_to_uint8(x):
     x = torch_to_uint8(x)
     x = x.to(dtype) / 255.0
     return x
+
+
+@dataclass
+class ImageBlock:
+    np: np.ndarray  # 0 - 255
+    cuda: torch.Tensor  # 0 - 1
+
+
+def divide_blocks(fileio: FileIO, h, w, img: np.ndarray, dtype) -> List[ImageBlock]:
+    """
+    将图片按照CTU大小划分为多个图像块，并返回包含每个图像块信息的列表。
+
+    Args:
+        fileio (FileIO): 包含CTU大小和索引信息的文件IO对象。
+        h (int): 图片的高度。
+        w (int): 图片的宽度。
+        img (np.ndarray): 待划分的图像数据。形状为[h, w, c]
+        dtype (torch.dtype): 图像块数据的数据类型。
+
+    Returns:
+        List[ImageBlock]: 包含每个图像块信息的列表，每个元素为ImageBlock类型。
+
+    """
+    blocks = []
+    for i in range(fileio.n_ctu):
+        upper, left, lower, right = fileio.block_indexes[i]
+        print(f"Block #{i}: ({upper}, {left}) ~ ({lower}, {right})")
+
+        # Move to CUDA
+        img_patch_np = img[upper:lower, left:right, :]
+        img_patch_cuda = (
+            torch.from_numpy(img_patch_np).permute(2, 0, 1).type(dtype) / 255.0
+        )
+        img_patch_cuda = img_patch_cuda.unsqueeze(0)
+        img_patch_cuda = img_patch_cuda.cuda()
+
+        blocks.append(ImageBlock(img_patch_np, img_patch_cuda))
+
+    return blocks
+
+
+def join_blocks(decoded_ctus: List[np.ndarray], file_io: FileIO):
+    h = file_io.h
+    w = file_io.w
+    recon_img = np.zeros((h, w, 3), dtype=np.uint8)
+    for i, ctu in enumerate(decoded_ctus):
+        upper, left, lower, right = file_io.block_indexes[i]
+
+        recon_img[upper:lower, left:right, :] = ctu[: lower - upper, : right - left, :]
+    return recon_img

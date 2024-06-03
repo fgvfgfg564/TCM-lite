@@ -74,7 +74,7 @@ if __name__ == "__main__":
             f"time_limit-{time_limit}",
             f"qscale-{qscale}",
         )
-        scheduler = TimeLapseScheduler(1.0, 0.98, time_limit)
+        scheduler = TimeLapseScheduler(0.1, 0.99, time_limit)
         return test_glob(
             engine,
             "accelerate",

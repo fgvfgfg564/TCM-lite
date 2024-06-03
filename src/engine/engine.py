@@ -45,12 +45,6 @@ SAFETY_BYTE_PER_CTU = 0
 np.seterr(all="raise", under="warn")
 
 
-@dataclass
-class ImageBlock:
-    np: np.ndarray  # 0 - 255
-    cuda: torch.Tensor  # 0 - 1
-
-
 class Solution:
     def __init__(self, method_ids: np.ndarray, target_byteses: np.ndarray) -> None:
         self.method_ids = method_ids
@@ -381,24 +375,6 @@ class EngineBase(CodecBase):
         img_hash = hash_numpy_array(rgb_np)
         return rgb_np, img_hash
 
-    def divide_blocks(self, fileio: FileIO, h, w, img) -> List[ImageBlock]:
-        blocks = []
-        for i in range(fileio.n_ctu):
-            upper, left, lower, right = fileio.block_indexes[i]
-            print(f"Block #{i}: ({upper}, {left}) ~ ({lower}, {right})")
-
-            # Move to CUDA
-            img_patch_np = img[upper:lower, left:right, :]
-            img_patch_cuda = (
-                torch.from_numpy(img_patch_np).permute(2, 0, 1).type(self.dtype) / 255.0
-            )
-            img_patch_cuda = img_patch_cuda.unsqueeze(0)
-            img_patch_cuda = img_patch_cuda.cuda()
-
-            blocks.append(ImageBlock(img_patch_np, img_patch_cuda))
-
-        return blocks
-
     def decode_ctu(self, file_io, i, bounds) -> np.ndarray:
         (upper, left, lower, right) = bounds
         method_id = file_io.method_id[i]
@@ -465,7 +441,7 @@ class EngineBase(CodecBase):
             f"Header bytes={header_bytes}; Safety_bytes={safety_bytes}; CTU bytes={r_limit}"
         )
 
-        img_blocks = self.divide_blocks(file_io, h, w, input_img)
+        img_blocks = divide_blocks(file_io, h, w, input_img, self.dtype)
 
         print("Precompute all scorees", flush=True)
         self._precompute_score(img_blocks, img_size, img_hash, losstype)
@@ -500,18 +476,6 @@ class EngineBase(CodecBase):
         file_io.dump(output_pth)
         return data
 
-    def join_blocks(self, decoded_ctus, file_io: FileIO):
-        h = file_io.h
-        w = file_io.w
-        recon_img = np.zeros((h, w, 3), dtype=np.uint8)
-        for i, ctu in enumerate(decoded_ctus):
-            upper, left, lower, right = file_io.block_indexes[i]
-
-            recon_img[upper:lower, left:right, :] = ctu[
-                : lower - upper, : right - left, :
-            ]
-        return recon_img
-
     @torch.inference_mode()
     def _decode(self, input_pth, output_pth):
         """
@@ -531,7 +495,7 @@ class EngineBase(CodecBase):
                 print(f"Decoding CTU #{i}")
                 ctu = self.decode_ctu(file_io, i, bounds)
                 decoded_ctus.append(ctu)
-            recon_img = self.join_blocks(decoded_ctus, file_io)
+            recon_img = join_blocks(decoded_ctus, file_io)
             out_img = dump_image(recon_img)
             Image.fromarray(out_img).save(output_pth)
 
@@ -551,7 +515,7 @@ class EngineBase(CodecBase):
         h, w, c = input_img.shape
         img_size = (h, w)
         fullspeed_file_io = FileIO(h, w, self.ctu_size, self.mosaic)
-        img_blocks = self.divide_blocks(fullspeed_file_io, h, w, input_img)
+        img_blocks = divide_blocks(fullspeed_file_io, h, w, input_img, self.dtype)
 
         print("Precompute score of method #0", flush=True)
         method_backup = self.methods
@@ -807,7 +771,7 @@ class SAEngine1(EngineBase):
         hashw = hash_numpy_array(w)
         visited[hashw] = loss
 
-        T_end = 1e-3
+        T_end = 1e-5
 
         if self.config.sa_init:
             T = 1.0
@@ -922,7 +886,6 @@ class SAEngine1(EngineBase):
         print(f"Start SA with scheduler: {self.scheduler}")
 
         t0 = time.time()
-        self.scheduler.start()
         statistics = []
 
         # Simulated Annealing
@@ -984,9 +947,12 @@ class SAEngine1(EngineBase):
 
             statistics.append(
                 {
+                    "step": step,
                     "time": time.time() - t0,
                     "loss": loss.d,
                     "legal": bool(loss.r <= 0 and loss.t <= 0),
+                    "best_loss": best_loss.d,
+                    "best_legal": bool(best_loss.r <= 0 and best_loss.t <= 0),
                 }
             )
 
@@ -1039,6 +1005,7 @@ class SAEngine1(EngineBase):
 
         self.config = SAConfig(level)
         self.scheduler = scheduler
+        self.scheduler.start()
 
         # Technologies include:
         #
