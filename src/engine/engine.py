@@ -994,7 +994,7 @@ class SAEngine1(EngineBase):
                 break
 
             T *= self.scheduler.step_size
-        return best_ans, {"step_results": statistics}
+        return best_ans, statistics
 
     def _solve(
         self,

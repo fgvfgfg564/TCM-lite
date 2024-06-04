@@ -18,7 +18,7 @@ def parse_args():
     # tester args
     parser.add_argument("output_dir", type=str)
     parser.add_argument("-i", "--input", type=str, required=True, help="input glob")
-    parser.add_argument("--speedup", nargs="+", type=float, default=[0.3])
+    parser.add_argument("--speedup", nargs="+", type=float, default=[1.25])
     parser.add_argument(
         "--qscale", nargs="+", type=float, default=[0.3, 0.4, 0.5, 0.6, 0.7]
     )

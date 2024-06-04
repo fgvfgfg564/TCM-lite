@@ -44,17 +44,17 @@ class SAConfig:
         self.distinct = False
 
         if level >= 1:
-            self.ada_init = True
-        if level >= 2:
-            self.sa_init = True
-        if level >= 3:
             self.sa_body = True
-        if level >= 4:
+        if level >= 2:
             self.inertia = True
-        if level >= 5:
+        if level >= 3:
             self.swap_op = True
-        if level >= 6:
+        if level >= 4:
             self.distinct = True
+        if level >= 5:
+            self.ada_init = True
+        if level >= 6:
+            self.sa_init = True
 
     def __repr__(self) -> str:
         return f"<SAConfig {self.__dict__}>"
