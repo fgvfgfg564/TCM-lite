@@ -4,11 +4,9 @@ import numpy as np
 from numpy.typing import NDArray
 import dataclasses
 
-from .math_utils import Fitter
-
 
 class CTUCurves(TypedDict):
-    b_e: Fitter
+    b_e: Any
     b_t: np.ndarray
 
 

@@ -65,7 +65,6 @@ class VTMTool(TraditionalCodingToolBase):
             "1",
             "--InputChromaFormat=444",
             "--InputBitDepth=8",
-            "--ConformanceWindowMode=1",
         ]
         run_command(cmd)
         with open(out_filepath, "rb") as f:

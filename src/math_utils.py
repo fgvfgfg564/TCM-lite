@@ -162,17 +162,15 @@ class Fitter(abc.ABC):
 
 class FitKExp(Fitter):
 
-    def __init__(self, X: np.ndarray, Y: np.ndarray, K=5) -> None:
+    def __init__(self, X: np.ndarray, Y: np.ndarray, K=5, retry=True) -> None:
         self.K = K
         super().__init__(X, Y)
 
         while True:
             maxerr = self.maxerror(self.curve)
-            print("MaxErr=", maxerr)
             r2 = self.R2(self.curve)
-            print("R2=", r2)
 
-            if maxerr > 5 and r2 < 0.99 and len(self.X) > 4:
+            if retry and maxerr > 5 and r2 < 0.99 and len(self.X) > 4:
                 print("Bad fit, retrying... Ignore the first & last element")
             else:
                 break
@@ -414,3 +412,16 @@ def normalize_to_target(X: np.ndarray, X_min, X_max, target):
         X += fill
 
     return X + X_min
+
+
+def generate_random_integer_array(n, K):
+    # Generate n-1 random points between 0 and K
+    random_points = np.sort(np.random.randint(0, K, n - 1))
+
+    # Add the end points (0 and K) to the list of points
+    random_points = np.concatenate(([0], random_points, [K]))
+
+    # The differences between consecutive points are the random segments
+    random_segments = np.diff(random_points)
+
+    return random_segments

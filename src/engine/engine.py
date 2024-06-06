@@ -733,9 +733,9 @@ class SAEngine1(EngineBase):
 
         # Hill-climbing on method ratios
         # ratio = softmax(w/20.0)
-        # Initialize with #0 method
+        # Initialize with the medium method
         w = np.zeros((n_method,), dtype=np.int32)
-        w[speeds_rank[0]] = GRAN
+        w[n_method // 2] = GRAN
 
         def generate_results(_w: np.ndarray):
             ratio = _w / GRAN
@@ -831,8 +831,10 @@ class SAEngine1(EngineBase):
                     "step": step,
                     "time": time.perf_counter() - self.t0,
                     "loss": loss.d,
+                    "results": results.tolist(),
                     "legal": bool(loss.r <= 0 and loss.t <= 0),
                     "best_loss": best_loss.d,
+                    "best_results": best_results.tolist(),
                     "best_legal": bool(best_loss.r <= 0 and best_loss.t <= 0),
                 }
             )
@@ -856,24 +858,22 @@ class SAEngine1(EngineBase):
         if n_method == 1:
             ans = np.zeros([n_ctu], dtype=np.int32)
             step_results = []
+        elif init_values is not None:
+            ans = init_values
+            step_results = []
+        elif self.config.ada_init:
+            ans, step_results = self._adaptive_init(
+                img_blocks, file_io, n_ctu, n_method, r_limit, t_limit, losstype
+            )
         else:
-            if init_values is not None:
-                ans = init_values
-                step_results = []
-            else:
-                if self.config.ada_init:
-                    ans, step_results = self._adaptive_init(
-                        img_blocks, file_io, n_ctu, n_method, r_limit, t_limit, losstype
-                    )
-                else:
-                    ans = np.random.random_integers(
-                        0,
-                        n_method - 1,
-                        [
-                            n_ctu,
-                        ],
-                    )
-                    step_results = []
+            ans = np.random.random_integers(
+                0,
+                n_method - 1,
+                [
+                    n_ctu,
+                ],
+            )
+            step_results = []
         return ans, step_results
 
     def _sa_body(
@@ -967,8 +967,10 @@ class SAEngine1(EngineBase):
                     "step": step,
                     "time": time.perf_counter() - self.t0,
                     "loss": loss.d,
+                    "results": ans.tolist(),
                     "legal": bool(loss.r <= 0 and loss.t <= 0),
                     "best_loss": best_loss.d,
+                    "best_results": best_ans.tolist(),
                     "best_legal": bool(best_loss.r <= 0 and best_loss.t <= 0),
                 }
             )
