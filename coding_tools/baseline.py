@@ -169,7 +169,9 @@ class PatchedToolBasedCodec(CodecBase, abc.ABC):
         fileio = FileIO.load(input_pth, mosaic=False, ctu_size=self.ctu_size)
         img_blocks = []
         for i in range(len(fileio.bitstreams)):
-            blk = self.tool.decompress_block(fileio.bitstreams[i], fileio.h, fileio.w)
+            blk = self.tool.decompress_block(
+                fileio.bitstreams[i], self.ctu_size, self.ctu_size
+            )
             blk = torch_float_to_np_uint8(blk)
             img_blocks.append(blk)
 
@@ -184,8 +186,9 @@ class TCM(PatchedToolBasedCodec):
         super().__init__(ctu_size, *args, **kwargs)
         self._tool = TOOL_GROUPS["TCM"]("TCM_VBR2_ALL", torch.float32, self.ctu_size)
 
+    @property
     def tool(self):
-        return self.tool
+        return self._tool
 
 
 @register_anchor("EVC")
@@ -194,8 +197,9 @@ class EVC(PatchedToolBasedCodec):
         super().__init__(ctu_size, *args, **kwargs)
         self._tool = TOOL_GROUPS["EVC"]("EVC_LL", torch.float32, self.ctu_size)
 
+    @property
     def tool(self):
-        return self.tool
+        return self._tool
 
 
 @register_anchor("MLICPP")
@@ -204,15 +208,17 @@ class MLICPP(PatchedToolBasedCodec):
         super().__init__(ctu_size, *args, **kwargs)
         self._tool = TOOL_GROUPS["MLICPP"]("MLICPP_ALL", torch.float32, self.ctu_size)
 
+    @property
     def tool(self):
-        return self.tool
+        return self._tool
 
 
 @register_anchor("QARV")
 class QARV(PatchedToolBasedCodec):
     def __init__(self, ctu_size=512, *args, **kwargs):
         super().__init__(ctu_size, *args, **kwargs)
-        self._tool = TOOL_GROUPS["QARV"]("QARV", torch.float32, self.ctu_size)
+        self._tool = TOOL_GROUPS["QARV"]("QARV", torch.float32, self.ctu_size).cuda()
 
+    @property
     def tool(self):
-        return self.tool
+        return self._tool

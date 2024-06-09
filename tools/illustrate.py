@@ -47,7 +47,7 @@ def parse_args():
     return args
 
 
-METHOD_COLORS = ["#418DED", "#D8A31A", "#002875", "E6F4F1"]
+METHOD_COLORS = ["#D6D9D9", "#ADA091", "#6D1E0D", "#A83411", "#39150D", "#C4C78D"]
 
 
 def hex_to_bgr(hex_color):

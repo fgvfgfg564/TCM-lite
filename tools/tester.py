@@ -109,13 +109,16 @@ if __name__ == "__main__":
         engine = ANCHORS[args.algorithm]()
 
         def _test_glob(
+            quality,
             **kwargs,
         ):
+            output_dir_local = os.path.join(output_dir, f"quality-{quality}")
             return test_glob(
                 engine,
                 "encode",
                 args.input,
-                output_dir,
+                output_dir_local,
+                quality=quality,
                 save_image=args.save_image,
                 **kwargs,
             )
