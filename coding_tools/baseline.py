@@ -38,6 +38,10 @@ class CodecBase(abc.ABC):
         t_end = time.time()
         img = Image.open(tmpbmp)
         img.save(output_pth)
+        try:
+            os.remove(tmpbmp)
+        except Exception:
+            pass
         return t_end - t_start
 
     @abc.abstractmethod
@@ -168,9 +172,11 @@ class PatchedToolBasedCodec(CodecBase, abc.ABC):
         print("Decoding image:", input_pth)
         fileio = FileIO.load(input_pth, mosaic=False, ctu_size=self.ctu_size)
         img_blocks = []
-        for i in range(len(fileio.bitstreams)):
+        for i, bounds in enumerate(fileio.block_indexes):
+            (upper, left, lower, right) = bounds
+            torch.cuda.synchronize()
             blk = self.tool.decompress_block(
-                fileio.bitstreams[i], self.ctu_size, self.ctu_size
+                fileio.bitstreams[i], lower - upper, right - left
             )
             blk = torch_float_to_np_uint8(blk)
             img_blocks.append(blk)

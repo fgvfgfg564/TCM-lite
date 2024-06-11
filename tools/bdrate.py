@@ -3,7 +3,7 @@ import scipy.interpolate
 import json
 
 
-def BD_PSNR(R1, PSNR1, R2, PSNR2, piecewise=0):
+def BD_PSNR(R1, PSNR1, R2, PSNR2, piecewise=1):
     lR1 = np.log(R1)
     lR2 = np.log(R2)
 
@@ -45,7 +45,7 @@ def BD_PSNR(R1, PSNR1, R2, PSNR2, piecewise=0):
     return avg_diff
 
 
-def BD_RATE(R1, PSNR1, R2, PSNR2, piecewise=0):
+def BD_RATE(R1, PSNR1, R2, PSNR2, piecewise=1):
     lR1 = np.log(R1)
     lR2 = np.log(R2)
 
