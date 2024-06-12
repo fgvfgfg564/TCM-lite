@@ -11,6 +11,18 @@ import time
 from src.engine import *
 from src.utils import *
 
+import random
+import numpy as np
+
+
+def reset_random_seeds(seed=42):
+    random.seed(seed)  # Reset random seed for Python's random module
+    np.random.seed(seed)  # Reset random seed for NumPy
+    torch.manual_seed(seed)  # Reset random seed for PyTorch
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)  # Reset random seed for CUDA operations in PyTorch
+        torch.cuda.manual_seed_all(seed)  # Reset random seed for all GPUs in PyTorch
+
 
 def test_single_image(
     engine: EngineBase,
@@ -26,6 +38,8 @@ def test_single_image(
     obin = os.path.join(output_dir, realname + ".bin")
     orec = os.path.join(output_dir, realname + "_rec.bmp")
     osta = os.path.join(output_dir, realname + "_statistics.json")
+
+    reset_random_seeds()
 
     ## Encode
     if not os.path.isfile(obin):
