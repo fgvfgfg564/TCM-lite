@@ -106,7 +106,7 @@ if __name__ == "__main__":
         ]
         results = config_mapper(configs, _test_glob)
     elif args.algorithm in ANCHORS.keys():
-        engine = ANCHORS[args.algorithm]()
+        engine = ANCHORS[args.algorithm](ctu_size=args.ctu_size)
 
         def _test_glob(
             quality,
