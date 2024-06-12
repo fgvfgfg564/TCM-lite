@@ -21,15 +21,11 @@ def test_single_image(
     **kwargs,
 ):
     print(f"Testing: input={input_filename}; output_dir={output_dir}; kwargs={kwargs}")
-    if save_image:
-        os.makedirs(output_dir, exist_ok=True)
-        realname = pathlib.Path(input_filename).stem
-        obin = os.path.join(output_dir, realname + ".bin")
-        orec = os.path.join(output_dir, realname + "_rec.bmp")
-        osta = os.path.join(output_dir, realname + "_statistics.json")
-    else:
-        _, obin = tempfile.mkstemp()
-        _, orec = tempfile.mkstemp(suffix=".png")
+    os.makedirs(output_dir, exist_ok=True)
+    realname = pathlib.Path(input_filename).stem
+    obin = os.path.join(output_dir, realname + ".bin")
+    orec = os.path.join(output_dir, realname + "_rec.bmp")
+    osta = os.path.join(output_dir, realname + "_statistics.json")
 
     ## Encode
     if not os.path.isfile(obin):
@@ -72,7 +68,6 @@ def test_single_image(
     print(results)
 
     if not save_image:
-        os.remove(obin)
         os.remove(orec)
 
     return results

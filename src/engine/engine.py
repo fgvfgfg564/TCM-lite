@@ -731,12 +731,6 @@ class SAEngine1(EngineBase):
         speeds_rank = np.empty_like(speeds_order)
         speeds_rank[speeds_order] = np.arange(n_method)
 
-        # Hill-climbing on method ratios
-        # ratio = softmax(w/20.0)
-        # Initialize with the medium method
-        w = np.zeros((n_method,), dtype=np.int32)
-        w[n_method // 2] = GRAN
-
         def generate_results(_w: np.ndarray):
             ratio = _w / GRAN
             ratio = np.cumsum(ratio)
@@ -762,6 +756,26 @@ class SAEngine1(EngineBase):
                 losstype,
             )[1]
 
+        # SA on method ratios
+        # ratio = softmax(w/20.0)
+        # Initialize with the fittest method
+
+        l = 0
+        r = n_method
+        while l < r - 1:
+            mid = (l + r) // 2
+            w = np.zeros((n_method,), dtype=np.int32)
+            w[mid] = GRAN
+
+            results = generate_results(w)
+            loss = calc_loss(results)
+            if loss.t <= 0:
+                l = mid
+            else:
+                r = mid
+
+        w = np.zeros((n_method,), dtype=np.int32)
+        w[l] = GRAN
         results = generate_results(w)
         loss = calc_loss(results)
         best_results = results.copy()
