@@ -70,15 +70,15 @@ class BPG(CodecBase):
         self,
         input_pth,
         output_pth,
-        qp,
-        level,
+        quality,
+        level=8,
     ):
         input_pth = osp.abspath(input_pth)
         output_pth = osp.abspath(output_pth)
         cmd = f"bpgenc \
             {input_pth} \
             -o {output_pth} \
-            -q {qp} \
+            -q {quality} \
             -m {level}"
         print("Encoding ...", cmd)
         os.system(cmd)

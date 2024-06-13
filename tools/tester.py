@@ -51,8 +51,6 @@ def parse_args():
     # Encoder config args (SA)
     parser.add_argument("--num_steps", nargs="+", type=int, default=[1000])
 
-    # Encoder config args (BPG)
-    parser.add_argument("--qp", nargs="+", type=int, default=None)
     # Encoder config args (WebP, JPEG, VTM and all quality-based codec)
     parser.add_argument("--quality", nargs="+", type=float, default=None)
 
@@ -123,10 +121,7 @@ if __name__ == "__main__":
                 **kwargs,
             )
 
-        if args.algorithm == "BPG":
-            configs = [("qp", args.qp)]
-        else:
-            configs = [("quality", args.quality)]
+        configs = [("quality", args.quality)]
         results = config_mapper(configs, _test_glob)
 
     os.makedirs(args.output_dir, exist_ok=True)
