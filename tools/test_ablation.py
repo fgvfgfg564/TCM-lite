@@ -73,6 +73,7 @@ if __name__ == "__main__":
             f"level-{level}",
             f"time_limit-{time_limit}",
             f"qscale-{qscale}",
+            f"speedup-{speedup}",
         )
         scheduler = TimeLapseScheduler(0.1, 0.99, time_limit)
         return test_glob(

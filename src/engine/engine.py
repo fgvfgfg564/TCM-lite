@@ -327,7 +327,9 @@ class EngineBase(CodecBase):
                     np.savez(min_max_file, min_t=min_t, max_t=max_t)
                     print("Cache saved to:", cache_dir, flush=True)
 
-                print(f"b_e[{i}] = {b_e.curve}")
+                print(
+                    f"Block #{i}; Method #{method_idx}; R2={b_e.R2(b_e.curve)}; MaxErr={b_e.maxerror(b_e.curve)}"
+                )
 
                 results: CTUCurves = {"b_e": b_e, "b_t": b_t}
                 self._precomputed_curve[method_idx][i] = results
@@ -555,7 +557,7 @@ class SAEngine1(EngineBase):
         self,
         ctu_size,
         mosaic,
-        num_qscale_samples=20,
+        num_qscale_samples=10,
         tool_groups=TOOL_GROUPS.keys(),
         tool_filter=None,
         dtype=torch.float32,
@@ -700,7 +702,7 @@ class SAEngine1(EngineBase):
 
         """
         GRAN = min(100, len(img_blocks))
-        num_steps = GRAN * 10
+        num_steps = max(GRAN * 10, 1000)
         # Assign blocks to methods according to their complexity
         print("Starting initialization ...")
         print("Estimating scores for method")

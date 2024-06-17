@@ -6,4 +6,4 @@ DATASET_DIR=images/6720x4480/IMG_6726.png
 
 export PYTHONPATH=.:..:coding_tools/MLIC/MLICPP
 
-python -u tools/test_ablation.py "$BASEDIR" -i "$DATASET_DIR" --tools QARV EVC TCM MLICPP WebP JPEG --tool_filter QARV EVC_LL TCM_VBR2_ALL MLICPP_ALL WebP JPEG --ctu_size 512 --time_limits 600 -o results_ablation.json | tee ${BASEDIR}/main1.log
+python -u tools/test_ablation.py "$BASEDIR" -i "$DATASET_DIR" --tools QARV EVC TCM MLICPP WebP JPEG --tool_filter QARV EVC_LL TCM_VBR2_ALL MLICPP_ALL WebP JPEG --ctu_size 512 --time_limits 900 -o results_ablation.json --speedup 1.25 | tee ${BASEDIR}/main1.log

@@ -30,7 +30,7 @@ def parse_args():
     parser.add_argument(
         "-i", "--input", type=str, required=True, help="input bytestream"
     )
-    parser.add_argument("--image", type=str, help="reconstructed image")
+    parser.add_argument("--image", type=str, help="reconstructed image", default=None)
 
     # illustrator args
     parser.add_argument("--border", action="store_true")
@@ -47,7 +47,7 @@ def parse_args():
     return args
 
 
-METHOD_COLORS = ["#D6D9D9", "#ADA091", "#6D1E0D", "#A83411", "#39150D", "#C4C78D"]
+METHOD_COLORS = ["#A83411", "#ADA091", "#6D1E0D", "#39150D", "#D6D9D9", "#C4C78D"]
 
 
 def hex_to_bgr(hex_color):
@@ -75,11 +75,12 @@ if __name__ == "__main__":
 
     print(args.image, flush=True)
     fileio = FileIO.load(args.input, args.mosaic, args.ctu_size)
-    recon_img = cv2.imread(args.image)
-    print("Image shape:", recon_img.shape)
+    if args.image is not None:
+        recon_img = cv2.imread(args.image)
 
     # Draw mask
-    mask = np.zeros_like(recon_img, dtype=np.uint8)
+    mask = np.zeros([fileio.h, fileio.w, 3], dtype=np.uint8)
+    print(fileio.h, fileio.w)
     ctu_size = args.ctu_size
 
     if args.type == "method":
@@ -121,8 +122,10 @@ if __name__ == "__main__":
             mask = cv2.rectangle(mask, topleft, bottomright, color, -1)
 
     alpha = args.alpha
-    output_img = cv2.addWeighted(recon_img, 1 - alpha, mask, alpha, 0)
-    # output_img = np.pad(output_img, ((0, 1), (0, 1), (0, 0)), mode='constant')
+    if args.image is not None:
+        output_img = cv2.addWeighted(recon_img, 1 - alpha, mask, alpha, 0)
+    else:
+        output_img = mask
 
     # Draw grid
     for i in range(fileio.n_ctu):
@@ -132,6 +135,8 @@ if __name__ == "__main__":
         bbox = fileio.block_indexes[i]
         topleft = (bbox[1], bbox[0])
         bottomright = (bbox[3], bbox[2])
-        output_img = cv2.rectangle(output_img, topleft, bottomright, color, 4)
+        output_img = cv2.rectangle(output_img, topleft, bottomright, color, 16)
+
+    output_img = cv2.resize(output_img, (fileio.w // 4, fileio.h // 4))
 
     cv2.imwrite(args.o, output_img)

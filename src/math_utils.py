@@ -170,7 +170,10 @@ class FitKExp(Fitter):
             maxerr = self.maxerror(self.curve)
             r2 = self.R2(self.curve)
 
-            if retry and maxerr > 5 and r2 < 0.99 and len(self.X) > 4:
+            if retry and maxerr > 1 and r2 < 0.999 and len(self.X) > 4:
+                print(
+                    f"Warning: bad fit. R2={r2:.6f}; Maxerr={maxerr:.6f}; curve={self.curve}"
+                )
                 print("Bad fit, retrying... Ignore the first & last element")
             else:
                 break
@@ -182,15 +185,14 @@ class FitKExp(Fitter):
             self.d = self.curve.derivative()
 
     def fit(self):
-        random_sum_1 = np.random.rand(self.K)
-        random_sum_1 /= np.sum(random_sum_1)
         midi = len(self.Y) // 2
-        a_init = (
-            random_sum_1
-            * self.Y[midi]
-            / ((1 + np.exp(-4.0)) ** (self.X[midi] / ExpKModel.SCALE))
-        )
-        b_init = np.zeros([self.K]) + 4.0
+        a_init = np.random.rand(self.K)
+        b_init = np.arange(self.K, dtype=np.float32)
+
+        curve = ExpKModel(a=a_init.copy(), b=b_init.copy())
+        y = curve(self.X[midi])
+        a_init *= self.Y[midi] / y
+
         init_value = np.concatenate([a_init, b_init], axis=0)
 
         y_std2 = ((self.Y - self.Y.mean()) ** 2).sum()
@@ -234,13 +236,13 @@ class FitKExp(Fitter):
             objective_func,
             init_value,
             jac=objective_gradient,
-            method="SLSQP",
-            bounds=bounds,
-            options={
-                "ftol": 1e-12,
-                "maxiter": 10000,
-            },
-            tol=1e-12,
+            method="CG",
+            # bounds=bounds,
+            # options={
+            #     "ftol": 1e-18,
+            #     "maxiter": 1000000,
+            # },
+            # tol=1e-18,
         )
 
         ans = result.x
