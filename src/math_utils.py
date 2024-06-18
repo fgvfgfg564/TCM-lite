@@ -132,6 +132,10 @@ class Fitter(abc.ABC):
             errs.append(np.abs(y - y_pred))
         return np.max(errs)
 
+    def ms_rel_err(self, curve):
+        y_pred = curve(self.X)
+        return np.mean((y_pred / self.Y - 1.0) ** 2)
+
     def __call__(self, x):
         return self.interpolate(x)
 
@@ -163,17 +167,16 @@ class Fitter(abc.ABC):
 
 class FitKExp(Fitter):
 
-    def __init__(self, X: np.ndarray, Y: np.ndarray, K=5, retry=True) -> None:
+    def __init__(self, X: np.ndarray, Y: np.ndarray, K=3, retry=True) -> None:
         self.K = K
         super().__init__(X, Y)
 
         while True:
-            maxerr = self.maxerror(self.curve)
-            r2 = self.R2(self.curve)
+            ms_rel_err = self.ms_rel_err(self.curve)
 
-            if retry and maxerr > 2 and r2 < 0.999 and len(self.X) > 6:
+            if retry and ms_rel_err > 1e-4 and len(self.X) > 6:
                 print(
-                    f"Warning: bad fit. R2={r2:.6f}; Maxerr={maxerr:.6f}; curve={self.curve}"
+                    f"Warning: bad fit. ms_rel_err={ms_rel_err:.6f}; curve={self.curve}"
                 )
                 print("Bad fit, retrying... Ignore the first & last element")
             else:
@@ -207,27 +210,31 @@ class FitKExp(Fitter):
             a = ab[: self.K]
             b = ab[self.K :]
             curve = ExpKModel(a=a.copy(), b=b.copy(order="A"))
-            objective = 1.0 - self.R2(curve)
-            return objective
+            Y_pred = curve(self.X)
+            loss = (Y_pred / self.Y - 1.0) ** 2
+            loss = np.mean(loss)
+            return loss
 
         def objective_gradient(ab: np.ndarray):
             a = ab[: self.K]
             b = ab[self.K :]
             curve = ExpKModel(a=a.copy(), b=b.copy(order="A"))
             y_pred = curve(self.X)
-            d_r2_y_pred = 2.0 / y_std2 * (y_pred - self.Y)
+            d_loss_y_pred = 2.0 * (y_pred / self.Y - 1) / self.Y
             da = [
-                (d_r2_y_pred * np.power(1 + np.exp(-b[i]), -self.X / curve.SCALE)).sum()
+                (
+                    d_loss_y_pred * np.power(1 + np.exp(-b[i]), -self.X / curve.SCALE)
+                ).mean()
                 for i in range(self.K)
             ]
             db = [
                 (
-                    d_r2_y_pred
+                    d_loss_y_pred
                     * a[i]
                     * (-self.X / curve.SCALE)
                     * np.power(1 + np.exp(-b[i]), -(self.X / curve.SCALE + 1))
                     * (-np.exp(-b[i]))
-                ).sum()
+                ).mean()
                 for i in range(self.K)
             ]
             da = np.asarray(da)

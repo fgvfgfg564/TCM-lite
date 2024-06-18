@@ -321,7 +321,7 @@ class EngineBase(CodecBase):
                     print("Cache saved to:", cache_dir, flush=True)
 
                 print(
-                    f"Block #{i}; Method #{method_idx}; R2={b_e.R2(b_e.curve)}; MaxErr={b_e.maxerror(b_e.curve)}"
+                    f"Block #{i}; Method #{method_idx}; R2={b_e.R2(b_e.curve)}; MaxErr={b_e.maxerror(b_e.curve)}; MS_REL_ERR={b_e.ms_rel_err(b_e.curve)}"
                 )
 
                 results: CTUCurves = {"b_e": b_e, "b_t": b_t}
@@ -722,9 +722,9 @@ class SAEngine1(EngineBase):
         for i in tqdm.tqdm(range(n_method), "Estimate speed for methods"):
             speeds.append(_est_speed(i))
         speeds = np.asarray(speeds)
-        speeds_order = np.argsort(speeds)
+        speeds_order = np.argsort(speeds)  # 第i快的方法编号是几
         speeds_rank = np.empty_like(speeds_order)
-        speeds_rank[speeds_order] = np.arange(n_method)
+        speeds_rank[speeds_order] = np.arange(n_method)  # 编号i的方法是第几快
 
         def generate_results(_w: np.ndarray):
             ratio = _w / GRAN
@@ -764,6 +764,9 @@ class SAEngine1(EngineBase):
 
             results = generate_results(w)
             loss = calc_loss(results)
+            print(
+                f"Loss of method #{speeds_order[i]} ({self.methods[speeds_order[i]][1]}): {loss}"
+            )
             if best_loss is None or loss < best_loss:
                 best_loss = loss
                 best_w = w.copy()
