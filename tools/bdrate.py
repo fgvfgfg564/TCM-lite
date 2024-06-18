@@ -45,7 +45,9 @@ def BD_PSNR(R1, PSNR1, R2, PSNR2, piecewise=1):
     return avg_diff
 
 
-def BD_RATE(R1, PSNR1, R2, PSNR2, piecewise=1):
+def BD_RATE(
+    R1, PSNR1, R2, PSNR2, piecewise=1, min_int=-float("inf"), max_int=float("inf")
+):
     lR1 = np.log(R1)
     lR2 = np.log(R2)
 
@@ -54,8 +56,8 @@ def BD_RATE(R1, PSNR1, R2, PSNR2, piecewise=1):
     p2 = np.polyfit(PSNR2, lR2, 3)
 
     # integration interval
-    min_int = max(min(PSNR1), min(PSNR2))
-    max_int = min(max(PSNR1), max(PSNR2))
+    min_int = max(min(PSNR1), min(PSNR2), min_int)
+    max_int = min(max(PSNR1), max(PSNR2), max_int)
 
     # find integral
     if piecewise == 0:

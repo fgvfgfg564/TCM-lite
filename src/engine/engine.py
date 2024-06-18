@@ -304,13 +304,6 @@ class EngineBase(CodecBase):
                         qscales.append(qscale)
                         pbar_iter.__next__()
 
-                    make_strictly_increasing(num_bytes)
-
-                    if len(num_bytes) <= 3 or not is_strictly_increasing(num_bytes):
-                        raise ValueError(
-                            f"num_bytes are too few or not strictly increasing: \nnum_bytes={num_bytes}\nsqes={ctu_losses}\nqscales={qscales}"
-                        )
-
                     print(f"bytes={num_bytes}\ndistortion={ctu_losses}")
 
                     b_e = self.fitterclass(num_bytes, ctu_losses)
@@ -762,26 +755,23 @@ class SAEngine1(EngineBase):
         # ratio = softmax(w/20.0)
         # Initialize with the fittest method
 
-        l = 0
-        r = n_method
-        while l < r - 1:
-            mid = (l + r) // 2
+        best_loss = None
+        best_w = None
+
+        for i in range(n_method):
             w = np.zeros((n_method,), dtype=np.int32)
-            w[mid] = GRAN
+            w[i] = GRAN
 
             results = generate_results(w)
             loss = calc_loss(results)
-            if loss.t <= 0:
-                l = mid
-            else:
-                r = mid
+            if best_loss is None or loss < best_loss:
+                best_loss = loss
+                best_w = w.copy()
+                best_results = results.copy()
 
-        w = np.zeros((n_method,), dtype=np.int32)
-        w[l] = GRAN
-        results = generate_results(w)
-        loss = calc_loss(results)
-        best_results = results.copy()
-        best_loss = copy.deepcopy(loss)
+        w = best_w.copy()
+        loss = copy.copy(best_loss)
+        results = best_results.copy()
         visited = dict()
 
         hashw = hash_numpy_array(w)

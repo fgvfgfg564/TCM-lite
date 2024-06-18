@@ -2,6 +2,7 @@ from __future__ import annotations
 import random
 from typing import cast
 
+from torch import NoneType
 from typing_extensions import (
     Dict,
     TypeVar,
@@ -170,7 +171,7 @@ class FitKExp(Fitter):
             maxerr = self.maxerror(self.curve)
             r2 = self.R2(self.curve)
 
-            if retry and maxerr > 1 and r2 < 0.999 and len(self.X) > 4:
+            if retry and maxerr > 2 and r2 < 0.999 and len(self.X) > 6:
                 print(
                     f"Warning: bad fit. R2={r2:.6f}; Maxerr={maxerr:.6f}; curve={self.curve}"
                 )
@@ -186,12 +187,16 @@ class FitKExp(Fitter):
 
     def fit(self):
         midi = len(self.Y) // 2
-        a_init = np.random.rand(self.K)
-        b_init = np.arange(self.K, dtype=np.float32)
 
-        curve = ExpKModel(a=a_init.copy(), b=b_init.copy())
-        y = curve(self.X[midi])
-        a_init *= self.Y[midi] / y
+        lgy = np.log(self.Y)
+        lg_fit = np.polyfit(self.X, lgy, 1)
+
+        a_init = np.random.rand(self.K)
+        a_init /= a_init.sum()
+        a_init *= np.exp(lg_fit[1])
+
+        t = lg_fit[0]
+        b_init = np.zeros([self.K]) - np.log(np.exp(-t * ExpKModel.SCALE) - 1)
 
         init_value = np.concatenate([a_init, b_init], axis=0)
 
@@ -230,19 +235,19 @@ class FitKExp(Fitter):
             # print(a, b, da, db, flush=True)
             return np.concatenate([da, db], axis=0)
 
-        bounds = [(1e-9, None)] * self.K + [(-2, 10)] * self.K
+        bounds = [(1e-9, None)] * self.K + [(-10, None)] * self.K
 
         result = minimize(
             objective_func,
             init_value,
             jac=objective_gradient,
-            method="CG",
-            # bounds=bounds,
-            # options={
-            #     "ftol": 1e-18,
-            #     "maxiter": 1000000,
-            # },
-            # tol=1e-18,
+            method="SLSQP",
+            bounds=bounds,
+            options={
+                "ftol": 1e-12,
+                "maxiter": 1000000,
+            },
+            tol=1e-12,
         )
 
         ans = result.x
