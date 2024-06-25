@@ -199,11 +199,12 @@ class FitKExp(Fitter):
         a_init *= np.exp(lg_fit[1])
 
         t = lg_fit[0]
-        b_init = np.zeros([self.K]) - np.log(np.exp(-t * ExpKModel.SCALE) - 1)
+        if t >= -np.log(np.exp(-10) + 1) / ExpKModel.SCALE:
+            b_init = np.zeros([self.K]) - 10
+        else:
+            b_init = np.zeros([self.K]) - np.log(np.exp(-t * ExpKModel.SCALE) - 1)
 
         init_value = np.concatenate([a_init, b_init], axis=0)
-
-        y_std2 = ((self.Y - self.Y.mean()) ** 2).sum()
 
         def objective_func(ab: np.ndarray):
             # R2 loss
@@ -242,7 +243,7 @@ class FitKExp(Fitter):
             # print(a, b, da, db, flush=True)
             return np.concatenate([da, db], axis=0)
 
-        bounds = [(1e-9, None)] * self.K + [(-10, None)] * self.K
+        bounds = [(1e-3, 2**16)] * self.K + [(-5, None)] * self.K
 
         result = minimize(
             objective_func,
@@ -259,10 +260,10 @@ class FitKExp(Fitter):
 
         ans = result.x
         ans = cast(NDArray, ans)
-        check = np.all(ans[: self.K] > 0)
+        check = np.all(ans[: self.K] >= 0)
         if not check:
             print(self.X, self.Y, ans)
-            raise ValueError("Fit failed! Some A <= 0")
+            raise ValueError("Fit failed! Some A < 0")
         return ExpKModel(a=ans[: self.K].copy(), b=ans[self.K :].copy(order="A"))
         # when x=0, f(x)=sum(a) <= 1.
 

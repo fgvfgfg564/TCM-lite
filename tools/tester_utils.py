@@ -61,8 +61,9 @@ def test_single_image(
         print(f"{obin} already exists. Skip encoding {input_filename}.")
 
     # Decoding process; generate recon image
+    engine.decode(obin, orec)  # Preheat
     time_dec_meter = AverageMeter()
-    for i in range(1):
+    for i in range(3):
         time_dec = engine.decode(obin, orec)  # Decoded image; shape=[3, H, W]
         print(f"Decode time={time_dec:.5f}s")
         time_dec_meter.update(time_dec)

@@ -6,4 +6,4 @@ DATASET_DIR=~/dataset/NIC_Dataset/test/ClassC_2K/*.png
 
 export PYTHONPATH=.:..:coding_tools/MLIC/MLICPP
 
-python -u tools/test_accelerator.py "$BASEDIR" -i "$DATASET_DIR" --tools QARV EVC TCM MLICPP WebP JPEG --tool_filter QARV EVC_LL TCM_VBR2_ALL MLICPP_ALL WebP JPEG --qscale 0.1 0.3 0.5 0.7 0.9 --speedup 1.00 1.25 1.50 --loss PSNR --num_steps 1000 -o results.json | tee ${BASEDIR}/main2.log
+python -u tools/test_accelerator.py "$BASEDIR" -i "$DATASET_DIR" --tools QARV EVC TCM MLICPP WebP JPEG --tool_filter QARV EVC_LL TCM_VBR2_ALL MLICPP_ALL WebP JPEG --qscale 0.1 0.3 0.5 0.7 0.9 --speedup 1.00 1.25 1.50 --loss PSNR --num_steps 1000 -o results2.json | tee ${BASEDIR}/main2.log

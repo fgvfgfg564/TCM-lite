@@ -233,6 +233,7 @@ class EngineBase(CodecBase):
     def _precompute_score(self, img_blocks, img_size, img_hash, loss: str):
         assert loss in LOSSES
         print(f"Self.methods: {list([x[1] for x in self.methods])}")
+        print(f"Image HASH: {img_hash}")
         h, w = img_size
         n_ctu = len(img_blocks)
         n_methods = len(self.methods)
@@ -764,6 +765,8 @@ class SAEngine1(EngineBase):
 
             results = generate_results(w)
             loss = calc_loss(results)
+            # Use a soft limit: 1.05x decode time loss
+            loss = LossType(loss.r, max(0, loss.t - 0.05 * t_limit), loss.d)
             print(
                 f"Loss of method #{speeds_order[i]} ({self.methods[speeds_order[i]][1]}): {loss}"
             )
@@ -773,8 +776,9 @@ class SAEngine1(EngineBase):
                 best_results = results.copy()
 
         w = best_w.copy()
-        loss = copy.copy(best_loss)
         results = best_results.copy()
+        loss = calc_loss(results)
+        best_loss = loss
         visited = dict()
 
         hashw = hash_numpy_array(w)
