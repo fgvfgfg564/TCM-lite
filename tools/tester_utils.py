@@ -44,21 +44,22 @@ def test_single_image(
     ## Encode
     if not os.path.isfile(obin):
         entrance_func = engine.__getattribute__(entrance)
-        time0 = time.time()
-        encoder_returns = entrance_func(
-            input_filename,
-            obin,
-            **kwargs,
-        )
-        torch.cuda.synchronize()
-
-        if encoder_returns is not None:
-            with open(osta, "w") as f:
-                json.dump(encoder_returns, f, indent=4, sort_keys=True)
-
-        time_enc = time.time() - time0
     else:
-        print(f"{obin} already exists. Skip encoding {input_filename}.")
+        print(f"{obin} already exists. Using fix mode.")
+        entrance_func = engine.accelerate_fix
+    time0 = time.time()
+    encoder_returns = entrance_func(
+        input_filename,
+        obin,
+        **kwargs,
+    )
+    torch.cuda.synchronize()
+
+    if encoder_returns is not None:
+        with open(osta, "w") as f:
+            json.dump(encoder_returns, f, indent=4, sort_keys=True)
+
+    time_enc = time.time() - time0
 
     # Decoding process; generate recon image
     engine.decode(obin, orec)  # Preheat

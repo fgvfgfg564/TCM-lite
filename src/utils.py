@@ -280,7 +280,6 @@ def divide_blocks(fileio: FileIO, h, w, img: np.ndarray, dtype) -> List[ImageBlo
     blocks = []
     for i in range(fileio.n_ctu):
         upper, left, lower, right = fileio.block_indexes[i]
-        print(f"Block #{i}: ({upper}, {left}) ~ ({lower}, {right})")
 
         # Move to CUDA
         img_patch_np = img[upper:lower, left:right, :]

@@ -321,9 +321,9 @@ class EngineBase(CodecBase):
                     np.savez(min_max_file, min_t=min_t, max_t=max_t)
                     print("Cache saved to:", cache_dir, flush=True)
 
-                print(
-                    f"Block #{i}; Method #{method_idx}; R2={b_e.R2(b_e.curve)}; MaxErr={b_e.maxerror(b_e.curve)}; MS_REL_ERR={b_e.ms_rel_err(b_e.curve)}"
-                )
+                # print(
+                #     f"Block #{i}; Method #{method_idx}; R2={b_e.R2(b_e.curve)}; MaxErr={b_e.maxerror(b_e.curve)}; MS_REL_ERR={b_e.ms_rel_err(b_e.curve)}"
+                # )
 
                 results: CTUCurves = {"b_e": b_e, "b_t": b_t}
                 self._precomputed_curve[method_idx][i] = results
@@ -392,7 +392,7 @@ class EngineBase(CodecBase):
             total_time += dec_est
         return total_time
 
-    def _self_check(self, img_blocks: List[ImageBlock], file_io: FileIO, losstype: str):
+    def _self_check(self, img_blocks: List[ImageBlock], file_io: FileIO, losstype: str, ifprint=True):
         losscls = LOSSES[losstype]
         ctu_losses = []
         # Check the difference between estimated and actual D loss
@@ -401,14 +401,16 @@ class EngineBase(CodecBase):
             ctu_loss = losscls.ctu_level_loss(img_blocks[i], ctu)
             num_bytes = len(file_io.bitstreams[i])
             sqe_est = self._precomputed_curve[file_io.method_id[i]][i]["b_e"](num_bytes)
-            print(
-                f"Self check CTU #{i}: Method={file_io.method_id[i]}; Estimated CTU loss: {sqe_est:.6f}; actual CTU loss: {ctu_loss:.6f}"
-            )
+            if ifprint:
+                print(
+                    f"Self check CTU #{i}: Method={file_io.method_id[i]}; Estimated CTU loss: {sqe_est:.6f}; actual CTU loss: {ctu_loss:.6f}"
+                )
             ctu_losses.append(ctu_loss)
         estimated_loss = losscls.global_level_loss(file_io, ctu_losses)
-        print(
-            f"Full self check: global loss={estimated_loss:.6f}. This should be precise."
-        )
+        if ifprint:
+            print(
+                f"Full self check: global loss={estimated_loss:.6f}. This should be precise."
+            )
         return estimated_loss
 
     def _encode(
@@ -494,6 +496,55 @@ class EngineBase(CodecBase):
             recon_img = join_blocks(decoded_ctus, file_io)
             out_img = dump_image(recon_img)
             Image.fromarray(out_img).save(output_pth)
+    
+
+    def estimate_loss(self, image_blocks, fileio: FileIO, r_limit, t_limit, losstype):
+        dec_time = self._estimate_decode_time(fileio)
+        t = max(0, dec_time - t_limit)
+        num_bytes = len(fileio.dumps())
+        r = max(0, num_bytes - r_limit)
+        distortion = self._self_check(image_blocks, fileio, losstype, ifprint=False)
+        return LossType(r, t, distortion)
+    
+    def _single_method_encode(self, input_pth, losstype, qscale, method_index, r_limit, t_limit):
+        input_img, img_hash = self.read_img(input_pth)
+        h, w, c = input_img.shape
+        img_size = (h, w)
+        fileio = FileIO(h, w, self.ctu_size, self.mosaic)
+        img_blocks = divide_blocks(fileio, h, w, input_img, self.dtype)
+
+        method_backup = self.methods
+        method = method_backup[method_index]
+        method = (method[0], method[1], 0)
+        self.methods = [method]
+        curve_backup = copy.deepcopy(self._precomputed_curve)
+        mini_backup = copy.deepcopy(self._minimal_bytes)
+        maxi_backup = copy.deepcopy(self._maximal_bytes)
+        self._precomputed_curve = {0: curve_backup[method_index]}
+        self._minimal_bytes = {0: curve_backup[method_index]}
+        self._maximal_bytes = {0: curve_backup[method_index]}
+
+        method, _, __ = self.methods[0]
+        bitstreams = []
+        method_ids = np.zeros([len(img_blocks)], dtype=np.int32)
+        for i, block in enumerate(img_blocks):
+            bitstream = self._feed_block(method, block, qscale)
+            bitstreams.append(bitstream)
+        fileio.method_id = method_ids
+        fileio.bitstreams = bitstreams
+
+        # Check the anchor bitstream
+        loss_est = self.estimate_loss(img_blocks, fileio, r_limit, t_limit, losstype)
+
+        # restore methods, calculate time budget and target bpp
+        self.methods = method_backup        
+        self._precomputed_curve = curve_backup
+        self._minimal_bytes = mini_backup
+        self._maximal_bytes = maxi_backup
+
+        fileio.method_id += method_index
+
+        return fileio, loss_est
 
     @torch.inference_mode()
     def accelerate(
@@ -505,33 +556,17 @@ class EngineBase(CodecBase):
         losstype: str,
         **kwargs,
     ):
-        # Test acceleration with particular percent time
-        # First, only enable the 0-th method
         input_img, img_hash = self.read_img(input_pth)
         h, w, c = input_img.shape
         img_size = (h, w)
-        fullspeed_file_io = FileIO(h, w, self.ctu_size, self.mosaic)
-        img_blocks = divide_blocks(fullspeed_file_io, h, w, input_img, self.dtype)
-
-        print("Precompute score of method #0", flush=True)
-        method_backup = self.methods
-        self.methods = [method_backup[0]]
+        fileio_ref = FileIO(h, w, self.ctu_size, self.mosaic)
+        img_blocks = divide_blocks(fileio_ref, h, w, input_img, self.dtype)
         self._precompute_score(img_blocks, img_size, img_hash, losstype)
 
-        method, _, __ = self.methods[0]
-        bitstreams = []
-        method_ids = np.zeros([len(img_blocks)], dtype=np.int32)
-        for i, block in enumerate(img_blocks):
-            bitstream = self._feed_block(method, block, qscale)
-            bitstreams.append(bitstream)
-        fullspeed_file_io.method_id = method_ids
-        fullspeed_file_io.bitstreams = bitstreams
+        # Test acceleration with particular percent time
+        fullspeed_file_io, _ = self._single_method_encode(input_pth, losstype, qscale, 0, 0, 0)
 
-        # Check the anchor bitstream
-        self._self_check(img_blocks, fullspeed_file_io, losstype)
-
-        # restore methods, calculate time budget and target bpp
-        self.methods = method_backup
+        print("Precompute score of method #0", flush=True)
         fulltime = self._estimate_decode_time(fullspeed_file_io)
         num_bytes = len(fullspeed_file_io.dumps())
         target_bpp = num_bytes * 8 / h / w
@@ -545,6 +580,67 @@ class EngineBase(CodecBase):
         file_io.dump(output_pth)
         return data
 
+    def accelerate_fix(
+        self,
+        input_pth,
+        output_pth,
+        qscale,
+        speedup,
+        losstype: str,
+        **kwargs,
+    ):
+        if not os.path.isfile(output_pth):
+            return self.accelerate(input_pth, output_pth, qscale, speedup, losstype, **kwargs)
+        
+        input_img, img_hash = self.read_img(input_pth)
+        h, w, c = input_img.shape
+        img_size = (h, w)
+        fileio_ref = FileIO(h, w, self.ctu_size, self.mosaic)
+        img_blocks = divide_blocks(fileio_ref, h, w, input_img, self.dtype)
+        self._precompute_score(img_blocks, img_size, img_hash, losstype)
+
+        # Test acceleration with particular percent time
+        fullspeed_file_io, _ = self._single_method_encode(input_pth, losstype, qscale, 0, 0, 0)
+
+        print("Precompute score of method #0", flush=True)
+        fulltime = self._estimate_decode_time(fullspeed_file_io)
+        r_limit = len(fullspeed_file_io.dumps())
+        target_time = fulltime / speedup
+        
+        print(f"Fixing binary file: {output_pth}; input file: {input_pth}")
+        
+        with open(output_pth, "rb") as fd:
+            fileio_old = FileIO.load(fd.read(), self.mosaic, self.ctu_size)
+        
+        loss_old = self.estimate_loss(img_blocks, fileio_old, r_limit, target_time, losstype)
+        fileio_best = copy.deepcopy(fileio_old)
+        loss_best = copy.deepcopy(loss_old)
+
+        print(f"Original methods: {fileio_best.method_id}; Original loss: {loss_best}")
+        
+        for method_idx in range(len(self.methods)):
+            qscale_l = 0
+            qscale_r = 1
+            while qscale_l < qscale_r - 1e-5:
+                mid = (qscale_r + qscale_l) / 2
+                _, loss = self._single_method_encode(input_pth, losstype, mid, method_idx, r_limit, target_time)
+                if loss.t > 0 or loss.r > 0:
+                    qscale_l = mid
+                else:
+                    qscale_r = mid
+        
+            fileio_new, loss = self._single_method_encode(input_pth, losstype, qscale_r, method_idx, r_limit, target_time)
+            
+            print(f"Old methods: {fileio_best.method_id}; New methods: {fileio_new.method_id}", flush=True)
+            print(f"Old loss: {loss_best}; New loss: {loss}")
+
+            if loss < loss_best:
+                print(f"Update the best method: #{method_idx}", flush=True)
+                loss_best = copy.deepcopy(loss)
+                fileio_best = copy.deepcopy(fileio_new)
+        
+        fileio_best.dump(output_pth)
+        return dict()
 
 class SAEngine1(EngineBase):
     def __init__(
