@@ -1,5 +1,5 @@
 BASEDIR=$(dirname "$0")
-DATASET_DIR=~/dataset/NIC_Dataset/test/ClassB_4K/*.png
+DATASET_DIR=~/dataset/NIC_Dataset/test/ClassA_6K/*.png
 
 # sudo --preserve-env=PATH,PYTHONPATH,CUDA_VISIBLE_DEVICES sh -c "which python"
 # 以QARV为baseline，时间相应缩放

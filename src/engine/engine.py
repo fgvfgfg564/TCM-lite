@@ -613,6 +613,7 @@ class EngineBase(CodecBase):
             fileio_old = FileIO.load(fd.read(), self.mosaic, self.ctu_size)
         
         loss_old = self.estimate_loss(img_blocks, fileio_old, r_limit, target_time, losstype)
+        loss_old = LossType(0, 0, loss_old.d)
         fileio_best = copy.deepcopy(fileio_old)
         loss_best = copy.deepcopy(loss_old)
 
@@ -621,7 +622,7 @@ class EngineBase(CodecBase):
         for method_idx in range(len(self.methods)):
             qscale_l = 0
             qscale_r = 1
-            while qscale_l < qscale_r - 1e-5:
+            while qscale_l < qscale_r - 1e-2:
                 mid = (qscale_r + qscale_l) / 2
                 _, loss = self._single_method_encode(input_pth, losstype, mid, method_idx, r_limit, target_time)
                 if loss.t > 0 or loss.r > 0:
