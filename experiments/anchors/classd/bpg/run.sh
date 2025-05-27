@@ -1,5 +1,6 @@
 BASEDIR=$(dirname "$0")
 DATASET_DIR=~/dataset/NIC_Dataset/test/ClassD_Kodak/*.png
+export PYTHONPATH=.:..:coding_tools/MLIC/MLICPP
 
 # sudo --preserve-env=PATH,PYTHONPATH,CUDA_VISIBLE_DEVICES sh -c "which python"
 

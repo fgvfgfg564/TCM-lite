@@ -5,4 +5,4 @@ DATASET_DIR=~/dataset/8K_test_single_image/*.jpg
 
 export PYTHONPATH=.:..:coding_tools/MLIC/MLICPP
 
-python -u tools/tester.py "$BASEDIR" -i "$DATASET_DIR" -a JPEG --quality 0. 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 | tee ${BASEDIR}/main.log
+python -u tools/tester.py "$BASEDIR" -i "$DATASET_DIR" -a VTM --quality 0. 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 | tee ${BASEDIR}/main.log

@@ -123,6 +123,8 @@ if __name__ == "__main__":
 
         configs = [("quality", args.quality)]
         results = config_mapper(configs, _test_glob)
+    else:
+        raise ValueError(f"Unknown algorithm: {args.algorithm}")
 
     os.makedirs(args.output_dir, exist_ok=True)
     result_filename = os.path.join(args.output_dir, "results.json")
