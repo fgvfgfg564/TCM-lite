@@ -22,9 +22,9 @@ import abc
 @register_tool("VTM")
 class VTMTool(TraditionalCodingToolBase):
     def __init__(self):
-        self.encoder_path = "../VVCSoftware_VTM/bin/EncoderAppStatic"
-        self.decoder_path = "../VVCSoftware_VTM/bin/DecoderAppStatic"
-        self.config_path = "../VVCSoftware_VTM/cfg/encoder_intra_vtm.cfg"
+        self.encoder_path = "../VVCSoftware_VTM/22.0/bin/EncoderAppStatic"
+        self.decoder_path = "../VVCSoftware_VTM/22.0/bin/DecoderAppStatic"
+        self.config_path = "../VVCSoftware_VTM/22.0/cfg/encoder_intra_vtm.cfg"
 
     def compress_block(self, img_block: np.ndarray, q_scale: float) -> bytes:
         q_scale = math.ceil(q_scale * 63)
@@ -38,7 +38,7 @@ class VTMTool(TraditionalCodingToolBase):
         c, h, w = arr.shape
         rgb = arr.astype(np.float32) / (2**bitdepth - 1)
         arr = np.clip(rgb2yuv(rgb), 0, 1)
-        arr = (arr * (2**bitdepth - 1)).astype(np.uint8)
+        arr = np.round(arr * (2**bitdepth - 1)).astype(np.uint8)
         with open(yuv_path, "wb") as f:
             f.write(arr.tobytes())
         # Encode
@@ -98,9 +98,7 @@ class VTMTool(TraditionalCodingToolBase):
         os.close(fd)
         os.unlink(yuv_path)
         os.unlink(out_filepath)
-        rec = Image.fromarray(
-            (rec_arr.clip(0, 1).transpose(1, 2, 0) * 255.0).astype(np.uint8)
-        )
+        rec = np.round(rec_arr.clip(0, 1).transpose(1, 2, 0) * 255.0).astype(np.uint8)
 
         return rec
 
